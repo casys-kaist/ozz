@@ -1,0 +1,102 @@
+# Copyright 2020 syzkaller project authors. All rights reserved.
+# Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
+
+# GitHub workflow reference:
+# https://help.github.com/en/actions/reference/workflow-syntax-for-github-actions
+
+name: ci
+on: [push, pull_request]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      # Checks out syzkaller repo at the path.
+      - name: checkout
+        uses: actions/checkout@v2
+        with:
+          path: gopath/src/github.com/google/syzkaller
+          # This is needed for tools/check-commits.sh
+          fetch-depth: 100
+      # Caches everything in .cache dir, in partiuclar we want to cache go-build and golangci-lint stuff.
+      # For reference see:
+      # https://help.github.com/en/actions/configuring-and-managing-workflows/caching-dependencies-to-speed-up-workflows#using-the-cache-action
+      - name: cache
+        uses: actions/cache@v1
+        with:
+          path: .cache
+          key: cache
+      # Run make presubmit_smoke.
+      - name: run
+        env:
+          GITHUB_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_PR_COMMITS: ${{ github.event.pull_request.commits }}
+        run: gopath/src/github.com/google/syzkaller/.github/workflows/run.sh syz-env make presubmit_smoke
+      # Upload coverage report to codecov.io. For reference see:
+      # https://github.com/codecov/codecov-action/blob/master/README.md
+      - name: codecov
+        uses: codecov/codecov-action@v1
+        with:
+          file: gopath/src/github.com/google/syzkaller/.coverage.txt
+          flags: unittests
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+        with:
+          path: gopath/src/github.com/google/syzkaller
+      - name: cache
+        uses: actions/cache@v1
+        with:
+          path: .cache
+          key: cache
+      - name: run
+        run: gopath/src/github.com/google/syzkaller/.github/workflows/run.sh syz-big-env make presubmit_big
+      - name: codecov
+        uses: codecov/codecov-action@v1
+        with:
+          file: gopath/src/github.com/google/syzkaller/.coverage.txt
+          flags: dashboard
+  arch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+        with:
+          path: gopath/src/github.com/google/syzkaller
+      - name: cache
+        uses: actions/cache@v1
+        with:
+          path: .cache
+          key: cache
+      - name: run
+        run: gopath/src/github.com/google/syzkaller/.github/workflows/run.sh syz-big-env make presubmit_arch
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+        with:
+          path: gopath/src/github.com/google/syzkaller
+      - name: cache
+        uses: actions/cache@v1
+        with:
+          path: .cache
+          key: cache
+      - name: run
+        run: gopath/src/github.com/google/syzkaller/.github/workflows/run.sh syz-env make presubmit_race
+  old:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+        with:
+          path: gopath/src/github.com/google/syzkaller
+      - name: cache
+        uses: actions/cache@v1
+        with:
+          path: .cache
+          key: cache
+      - name: run
+        run: gopath/src/github.com/google/syzkaller/.github/workflows/run.sh syz-old-env make presubmit_old
