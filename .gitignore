@@ -1,3 +1,6 @@
+*.ll
+*.o
+*.bc
 .installed/
 toolchains/
 tmp/
