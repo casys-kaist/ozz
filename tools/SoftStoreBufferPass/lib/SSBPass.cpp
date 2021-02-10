@@ -5,6 +5,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "llvm/CodeGen/RegAllocRegistry.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 
@@ -15,7 +16,20 @@ namespace {
 /*
  *Pass Implementation
  */
-static void visitor(Function &F) { errs() << F.getName() << "\n"; }
+static bool visitor(Function &F) {
+  errs() << F.getName() << "\n";
+  IRBuilder<> Builder(&*F.getEntryBlock().getFirstInsertionPt());
+  Builder.CreateAlloca(Builder.getInt32Ty(), nullptr, "testtt");
+  // for (auto &BB : F) {
+  //   IRBuilder<> Builder(&*BB.getFirstNonPHI());
+  //   // const auto& ctx = LLVMGetGlobalContext(); // just your LLVMContext
+  //   // auto* L = ConstantInt::get(Type::getInt32Ty(ctx), 41);
+  //   // auto* R = ConstantInt::get(Type::getInt32Ty(ctx), 42);
+  //   // Builder.CreateAdd(L, R, "addtmp");
+  //   Builder.CreateAlloca(Builder.getInt32Ty(), nullptr, "a");
+  // }
+  return true;
+}
 
 /*
  * Legacy PassManager stuffs
@@ -24,11 +38,7 @@ struct LegacySoftStoreBuffer : public FunctionPass {
   static char ID;
   LegacySoftStoreBuffer() : FunctionPass(ID) {}
   // Main entry point - the name conveys what unit of IR this is to be run on.
-  bool runOnFunction(Function &F) override {
-    visitor(F);
-    // Doesn't modify the input unit of IR, hence 'false'
-    return false;
-  }
+  bool runOnFunction(Function &F) override { return visitor(F); }
 };
 
 char LegacySoftStoreBuffer::ID = 0;
