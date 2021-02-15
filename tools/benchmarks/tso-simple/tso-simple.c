@@ -10,6 +10,7 @@ struct shared_t {
 	int b;
 };
 
+__attribute__((storebuffer))
 void *thr1(void *_arg)
 {
 	struct shared_t *arg = _arg;
@@ -18,6 +19,7 @@ void *thr1(void *_arg)
 	return (void *)(intptr_t)la;
 }
 
+__attribute__((storebuffer))
 void *thr2(void *_arg)
 {
 	struct shared_t *arg = _arg;
