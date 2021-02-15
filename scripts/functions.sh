@@ -12,7 +12,8 @@ __git_clone() {
 		REV=$3
 		_OPT="--branch $REV"
 	fi
-	"$GIT" clone "$SRC" "$DST" $_OPT
+	# git clone fails if we already cloned it. Suppress the error
+	"$GIT" clone "$SRC" "$DST" $_OPT || echo "[WARN] Failed to clone $SRC"
 }
 
 ## Usage: __export_envvar NAME BASE
