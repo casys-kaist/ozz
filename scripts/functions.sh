@@ -16,6 +16,20 @@ __git_clone() {
 	"$GIT" clone "$SRC" "$DST" $_OPT || echo "[WARN] Failed to clone $SRC"
 }
 
+## Usage: __git_am LOCAL_REPO PATCH_DIR
+__git_am() {
+	if [ "$#" -lt 2 ]; then
+		return 1
+	fi
+	GIT="${GIT:-git}"
+	_LOCAL=$(realpath $1)
+	_PATCH_DIR=$(realpath $2)
+	for _PATCH in `find $_PATCH_DIR -name "*.patch"`;
+	do
+		(cd $_LOCAL; git am $_PATCH)
+	done
+}
+
 ## Usage: __export_envvar NAME BASE
 __export_envvar() {
 	if [ "$#" -ne 2 ]; then
