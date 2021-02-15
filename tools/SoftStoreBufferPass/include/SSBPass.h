@@ -5,7 +5,7 @@
 
 namespace llvm {
 
-class SoftStoreBuffer : public PassInfoMixin<SoftStoreBuffer> {
+class SoftStoreBufferPass : public PassInfoMixin<SoftStoreBufferPass> {
 public:
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
 };
