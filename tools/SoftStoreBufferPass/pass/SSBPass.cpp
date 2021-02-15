@@ -46,8 +46,8 @@ private:
   SmallVector<Instruction *, 8> AtomicAccesses;
   SmallVector<Instruction *, 8> MemIntrinCalls;
   // Callbacks
-  FunctionCallee SSBRead;
-  FunctionCallee SSBWrite;
+  FunctionCallee SSBLoad;
+  FunctionCallee SSBStore;
 };
 
 // Do not instrument known races/"benign races" that come from compiler
@@ -229,7 +229,7 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
   //     OnAccessFunc = IsWrite ? TsanUnalignedWrite[Idx] :
   //     TsanUnalignedRead[Idx];
   // }
-  OnAccessFunc = IsWrite ? SSBWrite : SSBRead;
+  OnAccessFunc = IsWrite ? SSBStore : SSBLoad;
   IRB.CreateCall(OnAccessFunc, IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()));
   if (IsWrite)
     NumInstrumentedWrites++;
@@ -248,9 +248,9 @@ void SoftStoreBuffer::initialize(Module &M) {
   AttributeList Attr;
   Attr = Attr.addAttribute(M.getContext(), AttributeList::FunctionIndex,
                            Attribute::NoUnwind);
-  SSBWrite = M.getOrInsertFunction("__ssb_write", Attr, IRB.getVoidTy(),
+  SSBStore = M.getOrInsertFunction("__ssb_store", Attr, IRB.getVoidTy(),
                                    IRB.getInt8PtrTy());
-  SSBRead = M.getOrInsertFunction("__ssb_read", Attr, IRB.getVoidTy(),
+  SSBLoad = M.getOrInsertFunction("__ssb_load", Attr, IRB.getVoidTy(),
                                   IRB.getInt8PtrTy());
 }
 

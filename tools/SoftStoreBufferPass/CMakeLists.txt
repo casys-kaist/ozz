@@ -56,5 +56,5 @@ if(NOT LLVM_ENABLE_RTTI)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
 endif()
 
-add_subdirectory(lib)
+add_subdirectory(pass)
 add_subdirectory(runtime)
