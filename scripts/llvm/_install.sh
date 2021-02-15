@@ -10,9 +10,10 @@ _download() {
 }
 
 _build() {
-	_ENABLE="-DLLVM_ENABLE_PROJECTS=clang;compiler-rt"
+	_ENABLE="-DLLVM_ENABLE_PROJECTS=clang\;compiler-rt"
+	_OPTIONS="-DCMAKE_INSTALL_PREFIX=$LLVM_INSTALL -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLLVM_ENABLE_ASSERTIONS=ON"
 	__make_dir_and_exec_cmd "$LLVM_BUILD" \
-							"cmake -G 'Ninja' $_ENABLE -DCMAKE_INSTALL_PREFIX=$LLVM_INSTALL $LLVM_PATH/llvm" \
+							"cmake -G 'Ninja' $_ENABLE $_OPTIONS $LLVM_PATH/llvm" \
 							"ninja"
 }
 
