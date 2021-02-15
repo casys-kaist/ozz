@@ -57,3 +57,4 @@ if(NOT LLVM_ENABLE_RTTI)
 endif()
 
 add_subdirectory(lib)
+add_subdirectory(runtime)
