@@ -16,3 +16,4 @@ target_include_directories(SSBPass
   PRIVATE "${PROJECT_SOURCE_DIR}/include"
   )
 
+install(TARGETS SSBPass DESTINATION lib)
