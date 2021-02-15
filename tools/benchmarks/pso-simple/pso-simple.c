@@ -9,6 +9,7 @@ struct shared_t {
 	bool ready;
 };
 
+__attribute__((storebuffer))
 void *writer(void *_arg)
 {
 	struct shared_t *arg = _arg;
@@ -17,6 +18,7 @@ void *writer(void *_arg)
 	return NULL;
 }
 
+__attribute__((storebuffer))
 void *reader(void *_arg)
 {
 	struct shared_t *arg = _arg;
