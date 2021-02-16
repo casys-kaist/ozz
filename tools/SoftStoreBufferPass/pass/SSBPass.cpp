@@ -1,5 +1,6 @@
 #include "SSBPass.h"
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/CaptureTracking.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -9,6 +10,7 @@
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/ProfileData/InstrProf.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/Local.h"
@@ -18,11 +20,16 @@ using namespace llvm;
 #define DEBUG_TYPE "ssb"
 
 static cl::opt<bool> ClBuileKernel("ssb-kernel",
-                                   cl::desc("Build a Linux kernel"), cl::Hidden,
+                                   cl::desc("Build a Linux kernel"),
                                    cl::init(false));
+
+static cl::opt<std::string>
+    ClMemoryModel("memorymodel", cl::desc("Emulate the TSO memory model"),
+                  cl::init(""));
 
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
+STATISTIC(NumAccessesWithBadSize, "Number of accesses with bad size");
 
 namespace {
 
@@ -40,14 +47,19 @@ private:
   void chooseInstructionsToInstrument(SmallVectorImpl<Instruction *> &Local,
                                       SmallVectorImpl<Instruction *> &All,
                                       const DataLayout &DL);
-  // Collected instructions
+  int getMemoryAccessFuncIndex(Value *Addr, const DataLayout &DL);
+  /* Collected instructions */
   SmallVector<Instruction *, 8> AllLoadsAndStores;
   SmallVector<Instruction *, 8> LocalLoadsAndStores;
   SmallVector<Instruction *, 8> AtomicAccesses;
   SmallVector<Instruction *, 8> MemIntrinCalls;
-  // Callbacks
-  FunctionCallee SSBLoad;
-  FunctionCallee SSBStore;
+  /* Callbacks */
+  // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
+  static const size_t kNumberOfAccessSizes = 5;
+  enum MemoryModel { TSO, PSO, kNumberOfMemoryModels };
+  MemoryModel TargetMemoryModel;
+  FunctionCallee SSBLoad[kNumberOfMemoryModels][kNumberOfAccessSizes];
+  FunctionCallee SSBStore[kNumberOfMemoryModels][kNumberOfAccessSizes];
 };
 
 // Do not instrument known races/"benign races" that come from compiler
@@ -151,7 +163,8 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
                                          const TargetLibraryInfo &TLI) {
   initialize(*F.getParent());
 
-  LLVM_DEBUG(dbgs() << "Instrumenting a function " << F.getName() << "\n");
+  LLVM_DEBUG(dbgs() << "=== Instrumenting a function " << F.getName()
+                    << " ===\n");
   bool Res = false;
   bool HasCalls = false;
   bool SanitizeFunction = F.hasFnAttribute(Attribute::SoftStoreBuffer);
@@ -201,36 +214,32 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
   if (Addr->isSwiftError())
     return false;
 
+  int Idx = getMemoryAccessFuncIndex(Addr, DL);
+  if (Idx < 0)
+    return false;
+
   LLVM_DEBUG(dbgs() << "Instrumenting a callback at " << *I << "\n");
 
-  // int Idx = getMemoryAccessFuncIndex(Addr, DL);
-  // if (Idx < 0)
-  //   return false;
-  // const unsigned Alignment = IsWrite
-  //     ? cast<StoreInst>(I)->getAlignment()
-  //     : cast<LoadInst>(I)->getAlignment();
-  // const bool IsVolatile =
-  //     ClDistinguishVolatile && (IsWrite ? cast<StoreInst>(I)->isVolatile()
-  //                                       : cast<LoadInst>(I)->isVolatile());
-  // Type *OrigTy = cast<PointerType>(Addr->getType())->getElementType();
-  // const uint32_t TypeSize = DL.getTypeStoreSizeInBits(OrigTy);
-  // if (Alignment == 0 || Alignment >= 8 || (Alignment % (TypeSize / 8)) == 0)
-  // {
-  //   if (IsVolatile)
-  //     OnAccessFunc = IsWrite ? TsanVolatileWrite[Idx] :
-  //     TsanVolatileRead[Idx];
-  //   else
-  //     OnAccessFunc = IsWrite ? TsanWrite[Idx] : TsanRead[Idx];
-  // } else {
-  //   if (IsVolatile)
-  //     OnAccessFunc = IsWrite ? TsanUnalignedVolatileWrite[Idx]
-  //                            : TsanUnalignedVolatileRead[Idx];
-  //   else
-  //     OnAccessFunc = IsWrite ? TsanUnalignedWrite[Idx] :
-  //     TsanUnalignedRead[Idx];
-  // }
-  OnAccessFunc = IsWrite ? SSBStore : SSBLoad;
-  IRB.CreateCall(OnAccessFunc, IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()));
+  // TODO: Alignment / Volatile
+  // Ref:toolchains/llvm/llvm/lib/Transforms/Instrumentation/ThreadSanitizer.cpp#597
+  OnAccessFunc = IsWrite ? SSBStore[TargetMemoryModel][Idx]
+                         : SSBLoad[TargetMemoryModel][Idx];
+  auto Args = SmallVector<Value *, 8>();
+  Args.push_back(IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()));
+  if (IsWrite) {
+    // Store requires one more argument
+    Args.push_back(
+        IRB.CreatePointerCast(I->getOperand(0) /* == SI->getValueOperand() */,
+                              IRB.getIntNTy((1U << Idx) * 8)));
+  }
+  auto *CI = IRB.CreateCall(OnAccessFunc, Args);
+  // A call to a callback function is instrumented
+  if (!IsWrite) {
+    // Now we may need to replace Uses of LoadInst with CI.
+    I->replaceAllUsesWith(IRB.CreateIntToPtr(CI, I->getType()));
+  }
+  // We replaced all I's Uses so we can remove it.
+  I->eraseFromParent();
   if (IsWrite)
     NumInstrumentedWrites++;
   else
@@ -244,14 +253,44 @@ static bool visitor(Function &F, const TargetLibraryInfo &TLI) {
 }
 
 void SoftStoreBuffer::initialize(Module &M) {
+  TargetMemoryModel = ClMemoryModel == "TSO" ? TSO : PSO;
   IRBuilder<> IRB(M.getContext());
   AttributeList Attr;
   Attr = Attr.addAttribute(M.getContext(), AttributeList::FunctionIndex,
                            Attribute::NoUnwind);
-  SSBStore = M.getOrInsertFunction("__ssb_store", Attr, IRB.getVoidTy(),
-                                   IRB.getInt8PtrTy());
-  SSBLoad = M.getOrInsertFunction("__ssb_load", Attr, IRB.getVoidTy(),
-                                  IRB.getInt8PtrTy());
+  std::string TargetMemoryModelStr = (TargetMemoryModel == TSO) ? "tso" : "pso";
+  for (size_t i = 0; i < kNumberOfAccessSizes; i++) {
+    const unsigned ByteSize = 1U << i;
+    const unsigned BitSize = ByteSize * 8;
+    std::string ByteSizeStr = utostr(ByteSize);
+    std::string BitSizeStr = utostr(BitSize);
+    Type *IntNTy = IRB.getIntNTy(BitSize);
+    SmallString<32> StoreName("__ssb_" + TargetMemoryModelStr + "_store" +
+                              ByteSizeStr);
+    SSBStore[TargetMemoryModel][i] = M.getOrInsertFunction(
+        StoreName, Attr, IRB.getVoidTy(), IRB.getInt8PtrTy(), IntNTy);
+    SmallString<32> LoadName("__ssb_" + TargetMemoryModelStr + "_load" +
+                             ByteSizeStr);
+    SSBLoad[TargetMemoryModel][i] =
+        M.getOrInsertFunction(LoadName, Attr, IntNTy, IRB.getInt8PtrTy());
+  }
+}
+
+int SoftStoreBuffer::getMemoryAccessFuncIndex(Value *Addr,
+                                              const DataLayout &DL) {
+  Type *OrigPtrTy = Addr->getType();
+  Type *OrigTy = cast<PointerType>(OrigPtrTy)->getElementType();
+  assert(OrigTy->isSized());
+  uint32_t TypeSize = DL.getTypeStoreSizeInBits(OrigTy);
+  if (TypeSize != 8 && TypeSize != 16 && TypeSize != 32 && TypeSize != 64 &&
+      TypeSize != 128) {
+    NumAccessesWithBadSize++;
+    // Ignore all unusual sizes.
+    return -1;
+  }
+  size_t Idx = countTrailingZeros(TypeSize / 8);
+  assert(Idx < kNumberOfAccessSizes);
+  return Idx;
 }
 
 /*
