@@ -14,8 +14,13 @@
 // Since this header file defines callback functions, we should not
 // include this multiple times
 #error "callback_decl.h is included multiple times"
-#endif
+#endif // __CALLBACK_DECL_H
+
 #define __CALLBACK_DECL_H
+
+#ifdef __DEBUG_SERIALIZE
+#include "runtime/_decl_callback_debug.h"
+#endif // __DEBUG_SERIALIZE
 
 #include <cstdint>
 
