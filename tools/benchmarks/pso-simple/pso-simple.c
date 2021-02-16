@@ -1,4 +1,6 @@
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 
 #include <stdlib.h>
 #include <pthread.h>
@@ -9,24 +11,25 @@ struct shared_t {
 	bool ready;
 };
 
-__attribute__((storebuffer))
+__attribute__((softstorebuffer))
 void *writer(void *_arg)
 {
-	struct shared_t *arg = _arg;
+	struct shared_t *arg = (struct shared_t *)_arg;
 	arg->ptr = (int *)malloc(sizeof(*arg->ptr));
 	arg->ready = true;
 	return NULL;
 }
 
-__attribute__((storebuffer))
+__attribute__((softstorebuffer))
 void *reader(void *_arg)
 {
-	struct shared_t *arg = _arg;
+	struct shared_t *arg = (struct shared_t *)_arg;
 	if (arg->ready)
 		(void)*arg->ptr;
 	return NULL;
 }
 
+__attribute__((no_softstorebuffer))
 int main(int argc, char *argv[])
 {
 	pthread_t pth1, pth2;
