@@ -1,6 +1,17 @@
-extern "C" {
+#include <cstdint>
+#include <cstdlib>
 
-void __ssb_store_tso() {}
+namespace {
 
-void __ssb_load_tso() {}
+std::uint64_t __load_callback_tso(std::uint64_t *addr, const std::size_t size) {
+  return *addr;
 }
+
+void __store_callback_tso(std::uint64_t *addr, const std::uint64_t val,
+                          const std::size_t size) {
+  *addr = val;
+}
+
+} // namespace
+
+#include "runtime/decl_tso.h"

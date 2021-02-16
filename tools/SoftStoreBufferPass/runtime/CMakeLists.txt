@@ -24,6 +24,8 @@ add_custom_command(TARGET TSOCallbacks
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   )
 
+include_directories("${PROJECT_SOURCE_DIR}/include")
+
 install(TARGETS TSOCallbacks PSOCallbacks
   DESTINATION lib
   )
