@@ -1,4 +1,4 @@
-#include "SSBPass.h"
+#include "pass/SSBPass.h"
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Statistic.h"
