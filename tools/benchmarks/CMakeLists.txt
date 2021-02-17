@@ -8,3 +8,5 @@ set(CMAKE_C_COMPILER clang)
 
 add_subdirectory(pso-simple)
 add_subdirectory(tso-simple)
+add_subdirectory(arm-barrier-simple)
+add_subdirectory(x86-barrier-simple)
