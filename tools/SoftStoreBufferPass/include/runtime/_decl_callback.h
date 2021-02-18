@@ -10,6 +10,10 @@
 #error "Load callback is not defined"
 #endif
 
+#ifndef FLUSH_CALLBACK_IMPL
+#error "Flush callback is not defined"
+#endif
+
 #ifdef __CALLBACK_DECL_H
 // Since this header file defines callback functions, we should not
 // include this multiple times
@@ -59,21 +63,28 @@ extern "C" {
     return _val;                                                               \
   }
 
-#define __DECLARE_CALLBACK(_MEMORYMODEL, _BYTES, _BITS)                        \
+#define __DEFINE_FLUSH_CALLBACK(_MEMORYMODEL)                                  \
+  void __ssb_##_MEMORYMODEL##_flush(char *addr)
+
+#define DECLARE_FLUSH_CALLBACK(_MEMORYMODEL)                                   \
+  __DEFINE_FLUSH_CALLBACK(_MEMORYMODEL) { FLUSH_CALLBACK_IMPL(addr); }
+
+#define __DECLARE_STORE_LOAD_CALLBACK(_MEMORYMODEL, _BYTES, _BITS)             \
   __DECLARE_STORE_CALLBACK(_MEMORYMODEL, _BYTES, _BITS)                        \
   __DECLARE_LOAD_CALLBACK(_MEMORYMODEL, _BYTES, _BITS)
 
-#define DECLARE_CALLBACK(_BYTES)                                               \
-  __DECLARE_CALLBACK(MEMORYMODEL, _BYTES, _BYTE_##_BYTES##_TO_BITS)
+#define DECLARE_STORE_LOAD_CALLBACK(_BYTES)                                    \
+  __DECLARE_STORE_LOAD_CALLBACK(MEMORYMODEL, _BYTES, _BYTE_##_BYTES##_TO_BITS)
 
-DECLARE_CALLBACK(1)
-DECLARE_CALLBACK(2)
-DECLARE_CALLBACK(4)
+DECLARE_STORE_LOAD_CALLBACK(1)
+DECLARE_STORE_LOAD_CALLBACK(2)
+DECLARE_STORE_LOAD_CALLBACK(4)
 #ifdef UINT64_MAX
-DECLARE_CALLBACK(8)
+DECLARE_STORE_LOAD_CALLBACK(8)
 #endif
 #ifdef UINT128_MAX
-DECLARE_CALLBACK(16)
+DECLARE_STORE_LOAD_CALLBACK(16)
 #endif
+DECLARE_FLUSH_CALLBACK(MEMORYMODEL)
 
 } // extern "C"
