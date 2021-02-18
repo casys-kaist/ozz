@@ -6,6 +6,7 @@
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/RegAllocRegistry.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
@@ -24,11 +25,17 @@ static cl::opt<bool> ClBuileKernel("ssb-kernel",
                                    cl::init(false));
 
 static cl::opt<std::string>
-    ClMemoryModel("memorymodel", cl::desc("Emulate the TSO memory model"),
+    ClMemoryModel("memorymodel", cl::desc("Memory model being emulated"),
                   cl::init(""));
+
+static cl::opt<std::string>
+    ClArchitecture("arch",
+                   cl::desc("Architecture on which the target program runs"),
+                   cl::init(""));
 
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
+STATISTIC(NumInstrumentedMemBarriers, "Number of instrumented barriers");
 STATISTIC(NumAccessesWithBadSize, "Number of accesses with bad size");
 
 namespace {
@@ -42,24 +49,30 @@ struct SoftStoreBuffer {
 private:
   void initialize(Module &M);
   bool instrumentLoadOrStore(Instruction *I, const DataLayout &DL);
+  bool instrumentMemBarrier(Instruction *I);
   FunctionCallee findCallbackFunction();
   bool addrPointsToConstantData(Value *Addr);
   void chooseInstructionsToInstrument(SmallVectorImpl<Instruction *> &Local,
                                       SmallVectorImpl<Instruction *> &All,
                                       const DataLayout &DL);
   int getMemoryAccessFuncIndex(Value *Addr, const DataLayout &DL);
+  bool isMemBarrierOfTargetArch(Instruction *I);
   /* Collected instructions */
   SmallVector<Instruction *, 8> AllLoadsAndStores;
   SmallVector<Instruction *, 8> LocalLoadsAndStores;
   SmallVector<Instruction *, 8> AtomicAccesses;
   SmallVector<Instruction *, 8> MemIntrinCalls;
+  SmallVector<Instruction *, 8> MemBarrier;
   /* Callbacks */
   // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
   static const size_t kNumberOfAccessSizes = 5;
   enum MemoryModel { TSO, PSO, kNumberOfMemoryModels };
   MemoryModel TargetMemoryModel;
-  FunctionCallee SSBLoad[kNumberOfMemoryModels][kNumberOfAccessSizes];
-  FunctionCallee SSBStore[kNumberOfMemoryModels][kNumberOfAccessSizes];
+  FunctionCallee SSBLoad[kNumberOfAccessSizes];
+  FunctionCallee SSBStore[kNumberOfAccessSizes];
+  FunctionCallee SSBFlush;
+  enum Architecture { X86_64, Aarch64, kNumberOfArchitectures };
+  Architecture TargetArchitecture;
 };
 
 // Do not instrument known races/"benign races" that come from compiler
@@ -159,15 +172,47 @@ static bool isAtomic(Instruction *I) {
   return false;
 }
 
+static bool isMemBarrier(InlineAsm *Asm,
+                         SmallVector<std::string, 8> BarrierStrs) {
+  for (auto BarrierStr : BarrierStrs) {
+    if (Asm->getAsmString() == BarrierStr)
+      return true;
+  }
+  return false;
+}
+
+bool SoftStoreBuffer::isMemBarrierOfTargetArch(Instruction *I) {
+#define _barrier(elems...) SmallVector<std::string, 8>(elems)
+  SmallVector<std::string, 8> BarrierStrs[] = {
+      _barrier({"lfence", "mfence", "sfence"}),        // x86_64
+      _barrier({"dmb ish", "dmb ishst", "dmb ishld"}), // aarch64
+  };
+#undef _barrier
+  if (CallInst *CI = dyn_cast<CallInst>(I)) {
+    // Inline asm is expressed as an operand of CallInst
+    if (CI->isInlineAsm()) {
+      auto *Asm = cast<InlineAsm>(CI->getCalledOperand());
+      // NOTE: Checking getContraintString() has ~{memory} is not
+      // enough since compiler barriers has the constraint but it does
+      // not emit a real memory barrier.
+      return Asm->hasSideEffects() &&
+             isMemBarrier(Asm, BarrierStrs[TargetArchitecture]);
+    }
+  }
+  return false;
+}
+
 bool SoftStoreBuffer::instrumentFunction(Function &F,
                                          const TargetLibraryInfo &TLI) {
   initialize(*F.getParent());
+
+  if (!F.hasFnAttribute(Attribute::SoftStoreBuffer))
+    return false;
 
   LLVM_DEBUG(dbgs() << "=== Instrumenting a function " << F.getName()
                     << " ===\n");
   bool Res = false;
   bool HasCalls = false;
-  bool SanitizeFunction = F.hasFnAttribute(Attribute::SoftStoreBuffer);
   const DataLayout &DL = F.getParent()->getDataLayout();
 
   // Visiting and cheking all instructions
@@ -182,6 +227,8 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
           maybeMarkSanitizerLibraryCallNoBuiltin(CI, &TLI);
         if (isa<MemIntrinsic>(Inst))
           MemIntrinCalls.push_back(&Inst);
+        if (isMemBarrierOfTargetArch(&Inst))
+          MemBarrier.push_back(&Inst);
         HasCalls = true;
         chooseInstructionsToInstrument(LocalLoadsAndStores, AllLoadsAndStores,
                                        DL);
@@ -191,10 +238,11 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
   }
 
   // We have collected all loads and stores.
-  if (SanitizeFunction)
-    for (auto Inst : AllLoadsAndStores) {
-      Res |= instrumentLoadOrStore(Inst, DL);
-    }
+  for (auto Inst : AllLoadsAndStores)
+    Res |= instrumentLoadOrStore(Inst, DL);
+
+  for (auto Inst : MemBarrier)
+    Res |= instrumentMemBarrier(Inst);
 
   Res |= HasCalls;
   return Res;
@@ -218,12 +266,12 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
   if (Idx < 0)
     return false;
 
-  LLVM_DEBUG(dbgs() << "Instrumenting a callback at " << *I << "\n");
+  LLVM_DEBUG(dbgs() << "Instrumenting a " << (IsWrite ? "store" : "load")
+                    << " callback at " << *I << "\n");
 
   // TODO: Alignment / Volatile
   // Ref:toolchains/llvm/llvm/lib/Transforms/Instrumentation/ThreadSanitizer.cpp#597
-  OnAccessFunc = IsWrite ? SSBStore[TargetMemoryModel][Idx]
-                         : SSBLoad[TargetMemoryModel][Idx];
+  OnAccessFunc = IsWrite ? SSBStore[Idx] : SSBLoad[Idx];
   auto Args = SmallVector<Value *, 8>();
   Args.push_back(IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()));
   if (IsWrite) {
@@ -234,16 +282,23 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
   }
   auto *CI = IRB.CreateCall(OnAccessFunc, Args);
   // A call to a callback function is instrumented
-  if (!IsWrite) {
+  if (!IsWrite)
     // Now we may need to replace Uses of LoadInst with CI.
     I->replaceAllUsesWith(IRB.CreateIntToPtr(CI, I->getType()));
-  }
   // We replaced all I's Uses so we can remove it.
   I->eraseFromParent();
   if (IsWrite)
     NumInstrumentedWrites++;
   else
     NumInstrumentedReads++;
+  return true;
+}
+
+bool SoftStoreBuffer::instrumentMemBarrier(Instruction *I) {
+  IRBuilder<> IRB(I);
+  LLVM_DEBUG(dbgs() << "Instrumenting a membarrier callback at " << *I << "\n");
+  IRB.CreateCall(SSBFlush, ConstantPointerNull::get(IRB.getInt8PtrTy()));
+  NumInstrumentedMemBarriers++;
   return true;
 }
 
@@ -254,6 +309,7 @@ static bool visitor(Function &F, const TargetLibraryInfo &TLI) {
 
 void SoftStoreBuffer::initialize(Module &M) {
   TargetMemoryModel = ClMemoryModel == "TSO" ? TSO : PSO;
+  TargetArchitecture = ClArchitecture == "x86_64" ? X86_64 : Aarch64;
   IRBuilder<> IRB(M.getContext());
   AttributeList Attr;
   Attr = Attr.addAttribute(M.getContext(), AttributeList::FunctionIndex,
@@ -267,12 +323,15 @@ void SoftStoreBuffer::initialize(Module &M) {
     Type *IntNTy = IRB.getIntNTy(BitSize);
     SmallString<32> StoreName("__ssb_" + TargetMemoryModelStr + "_store" +
                               ByteSizeStr);
-    SSBStore[TargetMemoryModel][i] = M.getOrInsertFunction(
-        StoreName, Attr, IRB.getVoidTy(), IRB.getInt8PtrTy(), IntNTy);
+    SSBStore[i] = M.getOrInsertFunction(StoreName, Attr, IRB.getVoidTy(),
+                                        IRB.getInt8PtrTy(), IntNTy);
     SmallString<32> LoadName("__ssb_" + TargetMemoryModelStr + "_load" +
                              ByteSizeStr);
-    SSBLoad[TargetMemoryModel][i] =
+    SSBLoad[i] =
         M.getOrInsertFunction(LoadName, Attr, IntNTy, IRB.getInt8PtrTy());
+    SmallString<32> FlushName("__ssb_" + TargetMemoryModelStr + "_flush");
+    SSBFlush = M.getOrInsertFunction(FlushName, Attr, IRB.getVoidTy(),
+                                     IRB.getInt8PtrTy());
   }
 }
 
