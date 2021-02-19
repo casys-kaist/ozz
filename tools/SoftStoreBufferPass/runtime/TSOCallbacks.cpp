@@ -14,20 +14,27 @@
   } while (0)
 #endif
 
+#include "runtime/input_vector.h"
+inputVector input;
+
 class storebuffer {
 public:
   storebuffer() = default;
-  ~storebuffer() { flush(); }
+  ~storebuffer() { flushAll(); }
   void store(uint64_t *addr, uint64_t val);
   uint64_t retrieve(uint64_t *addr);
-  void flush();
+  void flush(const int n);
+  void flushAll();
+  void flushAfterInsn();
 
 private:
   // We maintain two store buffer copies, one for the load callback of
   // the calling thread itself, the other for the flush callback.
   // TODO: Seems we have redundant operations there.
+#define kMaxBufferSize 16
   std::map<std::uint64_t *, uint64_t> _storebuffer_last_entry;
   std::list<std::pair<uint64_t *, uint64_t>> _storebuffer_indexed;
+  int bufferSize;
 };
 
 uint64_t storebuffer::retrieve(uint64_t *addr) {
@@ -45,6 +52,7 @@ uint64_t storebuffer::retrieve(uint64_t *addr) {
   DEBUG_PRINT(std::cout << "Retreiving a value " << std::hex << val
                         << " from a " << from << " at " << std::hex << addr
                         << std::endl);
+  flushAfterInsn();
   return val;
 }
 
@@ -54,15 +62,46 @@ void storebuffer::store(std::uint64_t *addr, const std::uint64_t val) {
                         << std::endl);
   _storebuffer_last_entry[addr] = val;
   _storebuffer_indexed.push_back(std::make_pair(addr, val));
+  bufferSize++;
+  flushAfterInsn();
 }
 
-void storebuffer::flush() {
-  DEBUG_PRINT(std::cout << "flush all" << std::endl);
+void storebuffer::flushAfterInsn() {
+  if (bufferSize >= kMaxBufferSize) {
+    flushAll();
+  } else if (input.size() > 0) {
+    flush(input.next());
+  }
+}
+
+void storebuffer::flush(const int n) {
+  // int i = 0;
+  DEBUG_PRINT(std::cout << "Flush " << n << std::endl);
+  for (int i = 0; i < n && _storebuffer_indexed.size(); i++) {
+    // for (std::list<std::pair<uint64_t *, uint64_t>>::iterator it =
+    //          _storebuffer_indexed.begin();
+    //      it != _storebuffer_indexed.end() && i < n; ++i) {
+    auto entry = _storebuffer_indexed.front();
+    uint64_t *addr = entry.first;
+    uint64_t val = entry.second;
+    DEBUG_PRINT(std::cout << " flushing " << val << std::hex << " into " << addr
+                          << std::endl);
+    *(addr) = val;
+    // Remove
+    _storebuffer_indexed.pop_front();
+    _storebuffer_last_entry.erase(addr);
+  }
+}
+
+void storebuffer::flushAll() {
+  DEBUG_PRINT(std::cout << "Flush all" << std::endl);
   for (auto const &entry : _storebuffer_indexed) {
     DEBUG_PRINT(std::cout << " flushing " << entry.second << std::hex
                           << " into " << (entry.first) << std::endl);
     *(entry.first) = entry.second;
   }
+  _storebuffer_last_entry.clear();
+  bufferSize = 0;
 }
 
 namespace {
@@ -78,7 +117,11 @@ void __store_callback_tso(std::uint64_t *addr, const std::uint64_t val,
   buffer.store(addr, val);
 }
 
-void __flush_callback_tso(const char *) { buffer.flush(); }
+void __flush_callback_tso(const char *) { buffer.flushAll(); }
+
+void __feedinput_callback_tso(std::uint32_t _input[], const std::size_t size) {
+  input.feedInput(_input, size);
+}
 
 } // namespace
 

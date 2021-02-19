@@ -69,6 +69,15 @@ extern "C" {
 #define DECLARE_FLUSH_CALLBACK(_MEMORYMODEL)                                   \
   __DEFINE_FLUSH_CALLBACK(_MEMORYMODEL) { FLUSH_CALLBACK_IMPL(addr); }
 
+#define __DEFINE_FEEDINPUT_CALLBACK(_MEMORYMODEL)                              \
+  void __ssb_##_MEMORYMODEL##_feedinput(std::uint32_t input[],                 \
+                                        const std::size_t size)
+
+#define DECLARE_FEEDINPUT_CALLBACK(_MEMORYMODEL)                               \
+  __DEFINE_FEEDINPUT_CALLBACK(_MEMORYMODEL) {                                  \
+    FEEDINPUT_CALLBACK_IMPL(input, size);                                      \
+  }
+
 #define __DECLARE_STORE_LOAD_CALLBACK(_MEMORYMODEL, _BYTES, _BITS)             \
   __DECLARE_STORE_CALLBACK(_MEMORYMODEL, _BYTES, _BITS)                        \
   __DECLARE_LOAD_CALLBACK(_MEMORYMODEL, _BYTES, _BITS)
@@ -86,5 +95,6 @@ DECLARE_STORE_LOAD_CALLBACK(8)
 DECLARE_STORE_LOAD_CALLBACK(16)
 #endif
 DECLARE_FLUSH_CALLBACK(MEMORYMODEL)
+DECLARE_FEEDINPUT_CALLBACK(MEMORYMODEL)
 
 } // extern "C"

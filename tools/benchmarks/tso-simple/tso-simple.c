@@ -40,13 +40,12 @@ extern void __ssb_tso_feedinput(uint32_t vector[], size_t size);
 
 int main(int argc, char *argv[])
 {
+#ifdef _FLUSH
 	// Suppose a fuzzer provides an input that flush all storebuffer
 	// entries immediately after a store.
-#ifdef _FLUSH
 	uint32_t input[1] = { 1 };
 	__ssb_tso_feedinput(input, 1);
 #endif
-
 	pthread_t pth1, pth2;
 	struct shared_t shared = { 0, 0 };
 	int ret1, ret2;
