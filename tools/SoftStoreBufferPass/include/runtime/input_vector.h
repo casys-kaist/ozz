@@ -29,5 +29,4 @@ uint32_t inputVector::next() {
   return _vector[pos];
 }
 
-
 #endif // __INPUT_VECTOR_H
