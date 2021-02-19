@@ -1,12 +1,11 @@
-From 068af83a5844c3484c458253d4856e8e6be024f5 Mon Sep 17 00:00:00 2001
+From c349bff36549cd8e3f699ae6d7bd0ded10b7a7a8 Mon Sep 17 00:00:00 2001
 From: "Dae R. Jeong" <threeearcat@gmail.com>
 Date: Mon, 15 Feb 2021 06:41:29 +0000
 Subject: [PATCH] Add softstorebuffer/no_softstorebuffer attributes
 
 Ref: http://www.cs.cmu.edu/~seth/llvm/llvmannotation.html
-
 ---
- clang/include/clang/Basic/Attr.td         | 13 ++++++++++++
+ clang/include/clang/Basic/Attr.td         | 15 +++++++++++++-
  clang/include/clang/Basic/AttrDocs.td     |  7 +++++++
  clang/lib/CodeGen/CodeGenModule.cpp       | 13 ++++++++++++
  clang/lib/Sema/SemaDeclAttr.cpp           | 25 +++++++++++++++++++++++
@@ -19,12 +18,21 @@ Ref: http://www.cs.cmu.edu/~seth/llvm/llvmannotation.html
  llvm/lib/Bitcode/Writer/BitcodeWriter.cpp |  4 ++++
  llvm/lib/IR/Attributes.cpp                |  4 ++++
  llvm/lib/IR/Verifier.cpp                  |  2 ++
- 13 files changed, 84 insertions(+)
+ 13 files changed, 85 insertions(+), 1 deletion(-)
 
 diff --git a/clang/include/clang/Basic/Attr.td b/clang/include/clang/Basic/Attr.td
-index 60eaee7839e2..f6a09405633e 100644
+index 60eaee7839e2..e80c27439151 100644
 --- a/clang/include/clang/Basic/Attr.td
 +++ b/clang/include/clang/Basic/Attr.td
+@@ -1538,7 +1538,7 @@ def ArmMveStrictPolymorphism : TypeAttr, TargetSpecificAttr<TargetARM> {
+ }
+ 
+ def NoUniqueAddress : InheritableAttr, TargetSpecificAttr<TargetItaniumCXXABI> {
+-  let Spellings = [CXX11<"", "no_unique_address", 201803>];
++  let Spellings = [CXX11<"", "nounique_address", 201803>];
+   let Subjects = SubjectList<[NonBitField], ErrorDiag>;
+   let Documentation = [NoUniqueAddressDocs];
+   let SimpleHandler = 1;
 @@ -3452,3 +3452,16 @@ def Builtin : InheritableAttr {
    let SemaHandler = 0;
    let Documentation = [Undocumented];
@@ -82,7 +90,7 @@ index 4ae8ce7e5ccf..6235bc2e0eeb 100644
  
    unsigned alignment = D->getMaxAlignment() / Context.getCharWidth();
 diff --git a/clang/lib/Sema/SemaDeclAttr.cpp b/clang/lib/Sema/SemaDeclAttr.cpp
-index a9a2a19b4797..8aa52869dc96 100644
+index a9a2a19b4797..70b6f1d78bce 100644
 --- a/clang/lib/Sema/SemaDeclAttr.cpp
 +++ b/clang/lib/Sema/SemaDeclAttr.cpp
 @@ -6792,6 +6792,23 @@ static void handleCFGuardAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
@@ -101,7 +109,7 @@ index a9a2a19b4797..8aa52869dc96 100644
 +static void handleNoSoftStoreBufferAttr(Sema &S, Decl *D, const ParsedAttr &Attr) {
 +  if (!isFunctionOrMethod(D)) {
 +    S.Diag(D->getLocation(), diag::warn_attribute_wrong_decl_type)
-+      << "'no_softstorebuffer'" << ExpectedFunctionOrMethod;
++      << "'nosoftstorebuffer'" << ExpectedFunctionOrMethod;
 +    return;
 +  }
 +  handleSimpleAttribute<NoSoftStoreBufferAttr>(S, D, Attr);
@@ -138,7 +146,7 @@ index de4fe6630324..4eb451418af6 100644
  
  enum ComdatSelectionKindCodes {
 diff --git a/llvm/include/llvm/IR/Attributes.td b/llvm/include/llvm/IR/Attributes.td
-index 395f9dbfb176..f614fa9e46ad 100644
+index 395f9dbfb176..0823054e8315 100644
 --- a/llvm/include/llvm/IR/Attributes.td
 +++ b/llvm/include/llvm/IR/Attributes.td
 @@ -285,3 +285,7 @@ def : MergeRule<"adjustCallerStackProbes">;
@@ -148,7 +156,7 @@ index 395f9dbfb176..f614fa9e46ad 100644
 +
 +// Custom attribute for the store buffer emulation
 +def SoftStoreBuffer : EnumAttr<"softstorebuffer">;
-+def NoSoftStoreBuffer : EnumAttr<"no_softstorebuffer">;
++def NoSoftStoreBuffer : EnumAttr<"nosoftstorebuffer">;
 \ No newline at end of file
 diff --git a/llvm/lib/AsmParser/LLLexer.cpp b/llvm/lib/AsmParser/LLLexer.cpp
 index 777ce3abdddd..05187a70f2cb 100644
@@ -220,7 +228,7 @@ index 9c15a5f9f193..8a6129954890 100644
  
    llvm_unreachable("Trying to encode unknown attribute");
 diff --git a/llvm/lib/IR/Attributes.cpp b/llvm/lib/IR/Attributes.cpp
-index f67d96a854f4..eafb2e527717 100644
+index f67d96a854f4..e44f5a6af327 100644
 --- a/llvm/lib/IR/Attributes.cpp
 +++ b/llvm/lib/IR/Attributes.cpp
 @@ -445,6 +445,10 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
@@ -230,7 +238,7 @@ index f67d96a854f4..eafb2e527717 100644
 +  if (hasAttribute(Attribute::SoftStoreBuffer))
 +    return "softstorebuffer";
 +  if (hasAttribute(Attribute::NoSoftStoreBuffer))
-+    return "no_softstorebuffer";
++    return "nosoftstorebuffer";
  
    if (hasAttribute(Attribute::ByVal)) {
      std::string Result;
