@@ -26,7 +26,9 @@ export TMP_DIR=$(mkdir_env "$PROJECT_HOME/tmp")
 for _PROJ in `find $SCRIPTS_DIR -mindepth 1 -maxdepth 1 -type d`;
 do
 	PROJ=$(realpath $_PROJ)
-	. "$PROJ/_envsetup.sh"
+	if [ -f "$PROJ/_envsetup.sh" ]; then
+		. "$PROJ/_envsetup.sh"
+	fi
 done
 
 ## Now we are ready

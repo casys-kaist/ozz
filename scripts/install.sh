@@ -15,6 +15,9 @@ __install_tool() {
 		echo "No such directory: $1"
 		return 1
 	fi
+	if [ ! -f "$1/_install.sh" ]; then
+		return 0
+	fi
 	unset -f  _install _build _download
 	unset _target
 	_SCRIPTDIR=$(realpath $1)
