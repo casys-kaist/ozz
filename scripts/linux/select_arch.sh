@@ -1,5 +1,7 @@
 #!/bin/sh -e
 
+export LLVM=1
+
 if [ "$1" = "aarch64" -o "$1" = "arm64" ]; then
 	export ARCH="arm64"
 	export CROSS_COMPILE="aarch64-linux-gnu-"
