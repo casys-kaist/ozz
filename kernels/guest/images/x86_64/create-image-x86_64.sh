@@ -1,0 +1,1 @@
+../../../../scripts/linux/create-image-x86_64.sh
