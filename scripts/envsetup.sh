@@ -8,12 +8,14 @@ mkdir_env() {
 ## Variables for the project's directory layout
 ## HOME
 ## |-scripts
+## |-kernels
 ## |-gotools(=$GOPATH)
 ## |-tools
 ## |-toolchains
 ## |-(tmp)
 export SCRIPTS_DIR=$(mkdir_env "$(cd "$(dirname "$0")"; pwd)")
 export PROJECT_HOME=$(mkdir_env "$(dirname $SCRIPTS_DIR)")
+export KERNELS_DIR=$(mkdir_env "$PROJECT_HOME/kernels")
 export GOTOOLS_DIR=$(mkdir_env "$PROJECT_HOME/gotools")
 export TOOLS_DIR=$(mkdir_env "$PROJECT_HOME/tools")
 export TOOLCHAINS_DIR=$(mkdir_env "$PROJECT_HOME/toolchains")
