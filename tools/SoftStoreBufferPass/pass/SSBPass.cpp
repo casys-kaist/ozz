@@ -248,6 +248,7 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
                                          const TargetLibraryInfo &TLI) {
   initialize(*F.getParent());
 
+  bool Res = false;
   bool IRQEntry = isIRQEntryOfTargetArch(F);
   bool SyscallEntry = isSyscallEntryOfTargetArch(F);
 
@@ -255,15 +256,11 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
       !SyscallEntry)
     return false;
 
-  if (F.getSection() == ".noinstr.text") {
-    assert(!IRQEntry && !SyscallEntry);
-    return false;
-  }
-
   LLVM_DEBUG(dbgs() << "=== Instrumenting a function " << F.getName()
                     << " ===\n");
 
   if (IRQEntry || SyscallEntry) {
+    Res = true;
     instrumentFlush(F.getEntryBlock().getTerminator());
     for (auto &BB : F) {
       for (auto &I : BB)
@@ -272,10 +269,12 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
     }
     // We do not instrument other instructions in IRQ entry functions.
     if (IRQEntry)
-      return true;
+      return Res;
   }
 
-  bool Res = false;
+  if (F.getSection() == ".noinstr.text")
+    return Res;
+
   bool HasCalls = false;
   const DataLayout &DL = F.getParent()->getDataLayout();
 
