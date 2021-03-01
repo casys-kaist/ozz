@@ -1,5 +1,3 @@
-#include "pass/SSBPass.h"
-
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/CaptureTracking.h"
@@ -15,6 +13,9 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/Local.h"
+
+#include "pass/SSBPass.h"
+#include "pass/entries.h"
 
 using namespace llvm;
 
@@ -35,7 +36,7 @@ static cl::opt<std::string>
 
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
-STATISTIC(NumInstrumentedMemBarriers, "Number of instrumented barriers");
+STATISTIC(NumInstrumentedFlushes, "Number of instrumented flushed");
 STATISTIC(NumAccessesWithBadSize, "Number of accesses with bad size");
 
 namespace {
@@ -49,7 +50,7 @@ struct SoftStoreBuffer {
 private:
   void initialize(Module &M);
   bool instrumentLoadOrStore(Instruction *I, const DataLayout &DL);
-  bool instrumentMemBarrier(Instruction *I);
+  bool instrumentFlush(Instruction *I);
   FunctionCallee findCallbackFunction();
   bool addrPointsToConstantData(Value *Addr);
   void chooseInstructionsToInstrument(SmallVectorImpl<Instruction *> &Local,
@@ -57,6 +58,10 @@ private:
                                       const DataLayout &DL);
   int getMemoryAccessFuncIndex(Value *Addr, const DataLayout &DL);
   bool isMemBarrierOfTargetArch(Instruction *I);
+  bool isHardIRQEntryOfTargetArch(Function &F);
+  bool isSoftIRQEntryOfTargetArch(Function &F);
+  bool isIRQEntryOfTargetArch(Function &F);
+  bool isSyscallEntryOfTargetArch(Function &F);
   /* Collected instructions */
   SmallVector<Instruction *, 8> AllLoadsAndStores;
   SmallVector<Instruction *, 8> LocalLoadsAndStores;
@@ -202,15 +207,69 @@ bool SoftStoreBuffer::isMemBarrierOfTargetArch(Instruction *I) {
   return false;
 }
 
+static bool isEntry(Function &F, std::string Entries[], int size) {
+  for (int i = 0; i < size; i++) {
+    if (F.getName() == Entries[i])
+      return true;
+  }
+  return false;
+}
+
+bool SoftStoreBuffer::isHardIRQEntryOfTargetArch(Function &F) {
+#define _LEN(array) (sizeof(array) / sizeof(array[0]))
+  if (TargetArchitecture == X86_64)
+    return isEntry(F, IRQEntriesX86_64, _LEN(IRQEntriesX86_64));
+  else
+    return isEntry(F, IRQEntriesArm64, _LEN(IRQEntriesArm64));
+#undef _LEN
+}
+
+bool SoftStoreBuffer::isSoftIRQEntryOfTargetArch(Function &F) {
+  // As far as I know, the softIRQ entry function resides in the
+  // .softirqentry.text section.
+  return F.getSection() == ".softirqentry.text";
+}
+
+bool SoftStoreBuffer::isIRQEntryOfTargetArch(Function &F) {
+  return isHardIRQEntryOfTargetArch(F) || isSoftIRQEntryOfTargetArch(F);
+}
+
+bool SoftStoreBuffer::isSyscallEntryOfTargetArch(Function &F) {
+  // Even though actual syscall entries are defined by SYSCALL_DEFINEx
+  // macros, it is enough to check the common path of syscalls for our
+  // purpose.
+  if (TargetArchitecture == X86_64)
+    return isEntry(F, &SyscallEntryX86_64, 1);
+  else
+    return isEntry(F, &SyscallEntryArm64, 1);
+}
+
 bool SoftStoreBuffer::instrumentFunction(Function &F,
                                          const TargetLibraryInfo &TLI) {
   initialize(*F.getParent());
 
-  if (!F.hasFnAttribute(Attribute::SoftStoreBuffer))
+  bool IRQEntry = isIRQEntryOfTargetArch(F);
+  bool SyscallEntry = isSyscallEntryOfTargetArch(F);
+
+  if (!F.hasFnAttribute(Attribute::SoftStoreBuffer) && !IRQEntry &&
+      !SyscallEntry)
     return false;
 
   LLVM_DEBUG(dbgs() << "=== Instrumenting a function " << F.getName()
                     << " ===\n");
+
+  if (IRQEntry || SyscallEntry) {
+    instrumentFlush(F.getEntryBlock().getTerminator());
+    for (auto &BB : F) {
+      for (auto &I : BB)
+        if (isa<ReturnInst>(I))
+          instrumentFlush(BB.getFirstNonPHI());
+    }
+    // We do not instrument other instructions in IRQ entry functions.
+    if (IRQEntry)
+      return true;
+  }
+
   bool Res = false;
   bool HasCalls = false;
   const DataLayout &DL = F.getParent()->getDataLayout();
@@ -242,7 +301,7 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
     Res |= instrumentLoadOrStore(Inst, DL);
 
   for (auto Inst : MemBarrier)
-    Res |= instrumentMemBarrier(Inst);
+    Res |= instrumentFlush(Inst);
 
   Res |= HasCalls;
   return Res;
@@ -294,11 +353,11 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
   return true;
 }
 
-bool SoftStoreBuffer::instrumentMemBarrier(Instruction *I) {
+bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
   IRBuilder<> IRB(I);
   LLVM_DEBUG(dbgs() << "Instrumenting a membarrier callback at " << *I << "\n");
   IRB.CreateCall(SSBFlush, ConstantPointerNull::get(IRB.getInt8PtrTy()));
-  NumInstrumentedMemBarriers++;
+  NumInstrumentedFlushes++;
   return true;
 }
 
