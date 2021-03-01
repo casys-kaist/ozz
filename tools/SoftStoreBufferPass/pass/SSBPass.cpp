@@ -255,6 +255,11 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
       !SyscallEntry)
     return false;
 
+  if (F.getSection() == ".noinstr.text") {
+    assert(!IRQEntry && !SyscallEntry);
+    return false;
+  }
+
   LLVM_DEBUG(dbgs() << "=== Instrumenting a function " << F.getName()
                     << " ===\n");
 
