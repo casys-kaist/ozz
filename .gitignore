@@ -4,3 +4,4 @@
 .installed/
 toolchains/
 tmp/
+.gdb-cmds.batch
