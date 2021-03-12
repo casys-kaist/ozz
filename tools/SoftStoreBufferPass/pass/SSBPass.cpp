@@ -177,6 +177,22 @@ static bool isAtomic(Instruction *I) {
   return false;
 }
 
+static bool isRMWBitOps(Instruction *I) {
+  std::string RMWBitOpsFunc[] = {"test_and_set_bit", "test_and_clear_bit",
+                                 "test_and_change_bit",
+                                 "test_and_set_bit_lock"};
+  if (CallInst *CI = dyn_cast<CallInst>(I)) {
+    auto *F = CI->getCalledFunction();
+    if (!F)
+      return false;
+    for (auto f : RMWBitOpsFunc) {
+      if (F->getName().startswith(f))
+        return true;
+    }
+  }
+  return false;
+}
+
 static bool isMemBarrier(InlineAsm *Asm,
                          SmallVector<std::string, 8> BarrierStrs) {
   for (auto BarrierStr : BarrierStrs) {
@@ -281,7 +297,7 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
   // Visiting and cheking all instructions
   for (auto &BB : F) {
     for (auto &Inst : BB) {
-      if (isAtomic(&Inst))
+      if (isAtomic(&Inst) || isRMWBitOps(&Inst))
         AtomicAccesses.push_back(&Inst);
       else if (isa<LoadInst>(Inst) || isa<StoreInst>(Inst))
         LocalLoadsAndStores.push_back(&Inst);
@@ -307,8 +323,11 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
   for (auto Inst : MemBarrier)
     Res |= instrumentFlush(Inst);
 
-  Res |= HasCalls;
-  return Res;
+  for (auto Inst : AtomicAccesses)
+    Res |= instrumentFlush(Inst);
+
+  return Res | HasCalls;
+  ;
 }
 
 bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
