@@ -12,4 +12,4 @@ mkdir -p "$OUTDIR"
 if [ -n "$CONFIG" ]; then
 	cp "$CONFIG" "$OUTDIR/.config"
 fi
-(cd $LINUXDIR; make O=$OUTDIR oldconfig; make O=$OUTDIR -j`nproc`)
+(cd $LINUXDIR; make O=$OUTDIR oldconfig; make O=$OUTDIR -j`nproc` "$@")
