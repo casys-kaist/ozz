@@ -9,15 +9,16 @@ if [ -z "$ARCH" ]; then
 fi
 
 if [ "$ARCH" = "x86_64" ]; then
-	cat <<EOF > $BATCHCMD
-set architecture i386:x86-64:intel
+	TARGET_ARCH="i386:x86-64:intel"
+else
+	TARGET_ARCH="aarch64"
+fi
+
+cat <<EOF > $BATCHCMD
+set architecture $TARGET_ARCH
 target remote :1234
 set disassemble-next-line on
 EOF
-else
-	# TODO: AArch64
-	:
-fi
 
 if [ "$#" -lt "1" ]; then
 	echo "[WARN] Missing a vmlinux path"
@@ -29,4 +30,4 @@ else
 fi
 
 set -x
-gdb -x $BATCHCMD $VMLINUX
+gdb-multiarch -x $BATCHCMD $VMLINUX
