@@ -50,7 +50,7 @@ ioctl$FIONREAD(fd fd_tty, cmd const[FIONREAD], arg ptr[out, int32])
 ioctl$TIOCOUTQ(fd fd_tty, cmd const[TIOCOUTQ], arg ptr[out, int32])
 ioctl$TCFLSH(fd fd_tty, cmd const[TCFLSH], arg intptr[TCIFLUSH:TCIOFLUSH])
 ioctl$TIOCGPTPEER(fd fd_tty, cmd const[TIOCGPTPEER], arg intptr) fd_tty
-ioctl$TIOCSTI(fd fd_tty, cmd const[TIOCSTI], arg intptr)
+ioctl$TIOCSTI(fd fd_tty, cmd const[TIOCSTI], arg ptr[in, int8])
 ioctl$TIOCCONS(fd fd_tty, cmd const[TIOCCONS])
 ioctl$TIOCSCTTY(fd fd_tty, cmd const[TIOCSCTTY], arg intptr)
 ioctl$TIOCNOTTY(fd fd_tty, cmd const[TIOCNOTTY])
@@ -162,10 +162,6 @@ ioctl$TIOCGPKT(fd fd_tty, cmd const[TIOCGPKT], arg ptr[out, int32])
 ioctl$TIOCSIG(fd fd_tty, cmd const[TIOCSIG], arg signalnoptr)
 ioctl$TIOCVHANGUP(fd fd_tty, cmd const[TIOCVHANGUP], arg const[0])
 ioctl$TIOCGDEV(fd fd_tty, cmd const[TIOCGDEV], arg ptr[out, int32])
-ioctl$TCGETX(fd fd_tty, cmd const[TCGETX], arg ptr[out, termiox])
-ioctl$TCSETX(fd fd_tty, cmd const[TCSETX], arg ptr[in, termiox])
-ioctl$TCSETXF(fd fd_tty, cmd const[TCSETXF], arg ptr[in, termiox])
-ioctl$TCSETXW(fd fd_tty, cmd const[TCSETXW], arg ptr[in, termiox])
 ioctl$TIOCMIWAIT(fd fd_tty, cmd const[TIOCMIWAIT], arg const[0])
 ioctl$TIOCGICOUNT(fd fd_tty, cmd const[TIOCGICOUNT], arg const[0])
 
@@ -186,13 +182,6 @@ sgttyb {
 }
 
 tcxonc_arg = TCOOFF, TCOON, TCIOFF, TCION
-
-termiox {
-	x_hflag	int16
-	x_cflag	int16
-	x_rflag	array[int16, NFF]
-	x_sflag	int16
-}
 
 termios {
 	c_iflag	int32
