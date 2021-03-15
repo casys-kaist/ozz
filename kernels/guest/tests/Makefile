@@ -1,8 +1,10 @@
 OBJ=pso_test
 all: pso_test.c
-	@gcc $^ -o $(OBJ) -lpthread
+	@gcc $^ -o $(OBJ)-x86_64 -lpthread
+	@aarch64-linux-gnu-gcc $^ -o $(OBJ)-aarch64 -lpthread
 
 clean:
-	@rm $(OBJ)
+	@rm $(OBJ)-x86_64
+	@rm $(OBJ)-aarch64
 
 .PHONY: all clean
