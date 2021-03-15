@@ -5,13 +5,12 @@ IMAGE="$KERNELS_DIR/guest/images/arm64/rootfs.ext3"
 MEMORY=2048
 KERNEL="$KERNELS_DIR/guest/builds/arm64/arch/arm64/boot/Image"
 PORT=5555
-NETWORK="-netdev user,id=vnet0,hostfwd=tcp::$PORT-:22 \
-        -device virtio-net-pci,netdev=vnet0"
+NETWORK="-net user,hostfwd=tcp:127.0.0.1:$PORT-:22 -net nic"
 HMP="-monitor unix:/tmp/monitor.sock,server,nowait -serial mon:stdio"
 QMP="-qmp unix:/tmp/qmp.sock,server,nowait"
 SNAPSHOT="-snapshot"
 
-$QEMU -smp 1 \
+$QEMU -smp 2 \
       -machine virt \
       -cpu cortex-a57 \
       -nographic \
