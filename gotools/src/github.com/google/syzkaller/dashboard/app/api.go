@@ -664,7 +664,10 @@ func apiReportBuildError(c context.Context, ns string, r *http.Request, payload 
 	return nil, nil
 }
 
-const corruptedReportTitle = "corrupted report"
+const (
+	corruptedReportTitle  = "corrupted report"
+	suppressedReportTitle = "suppressed report"
+)
 
 func apiReportCrash(c context.Context, ns string, r *http.Request, payload []byte) (interface{}, error) {
 	req := new(dashapi.Crash)
@@ -689,12 +692,12 @@ func apiReportCrash(c context.Context, ns string, r *http.Request, payload []byt
 }
 
 func reportCrash(c context.Context, build *Build, req *dashapi.Crash) (*Bug, error) {
-	req.Title = canonicalizeCrashTitle(req.Title, req.Corrupted)
-	if req.Corrupted {
-		req.AltTitles = []string{corruptedReportTitle}
+	req.Title = canonicalizeCrashTitle(req.Title, req.Corrupted, req.Suppressed)
+	if req.Corrupted || req.Suppressed {
+		req.AltTitles = []string{req.Title}
 	} else {
 		for i, t := range req.AltTitles {
-			req.AltTitles[i] = limitLength(t, maxTextLen)
+			req.AltTitles[i] = normalizeCrashTitle(t)
 		}
 		req.AltTitles = mergeStringList([]string{req.Title}, req.AltTitles) // dedup
 	}
@@ -903,7 +906,7 @@ func apiReportFailedRepro(c context.Context, ns string, r *http.Request, payload
 	if err := json.Unmarshal(payload, req); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal request: %v", err)
 	}
-	req.Title = canonicalizeCrashTitle(req.Title, req.Corrupted)
+	req.Title = canonicalizeCrashTitle(req.Title, req.Corrupted, req.Suppressed)
 
 	bug, err := findExistingBugForCrash(c, ns, []string{req.Title})
 	if err != nil {
@@ -944,13 +947,20 @@ func apiNeedRepro(c context.Context, ns string, r *http.Request, payload []byte)
 		}
 		return resp, nil
 	}
-	req.Title = canonicalizeCrashTitle(req.Title, req.Corrupted)
+	req.Title = canonicalizeCrashTitle(req.Title, req.Corrupted, req.Suppressed)
 
 	bug, err := findExistingBugForCrash(c, ns, []string{req.Title})
 	if err != nil {
 		return nil, err
 	}
 	if bug == nil {
+		if req.MayBeMissing {
+			// Manager does not send leak reports w/o repro to dashboard, we want to reproduce them.
+			resp := &dashapi.NeedReproResp{
+				NeedRepro: true,
+			}
+			return resp, nil
+		}
 		return nil, fmt.Errorf("%v: can't find bug for crash %q", ns, req.Title)
 	}
 	resp := &dashapi.NeedReproResp{
@@ -959,14 +969,23 @@ func apiNeedRepro(c context.Context, ns string, r *http.Request, payload []byte)
 	return resp, nil
 }
 
-func canonicalizeCrashTitle(title string, corrupted bool) string {
+func canonicalizeCrashTitle(title string, corrupted, suppressed bool) string {
 	if corrupted {
 		// The report is corrupted and the title is most likely invalid.
 		// Such reports are usually unactionable and are discarded.
 		// Collect them into a single bin.
 		return corruptedReportTitle
 	}
-	return limitLength(title, maxTextLen)
+	if suppressed {
+		// Collect all of them into a single bucket so that it's possible to control and assess them,
+		// e.g. if there are some spikes in suppressed reports.
+		return suppressedReportTitle
+	}
+	return normalizeCrashTitle(title)
+}
+
+func normalizeCrashTitle(title string) string {
+	return strings.TrimSpace(limitLength(title, maxTextLen))
 }
 
 func apiManagerStats(c context.Context, ns string, r *http.Request, payload []byte) (interface{}, error) {
@@ -1244,6 +1263,7 @@ func needReproForBug(c context.Context, bug *Bug) bool {
 	return bug.ReproLevel < ReproLevelC &&
 		len(bug.Commits) == 0 &&
 		bug.Title != corruptedReportTitle &&
+		bug.Title != suppressedReportTitle &&
 		config.Namespaces[bug.Namespace].NeedRepro(bug) &&
 		(bug.NumRepro < maxReproPerBug ||
 			bug.ReproLevel == ReproLevelNone &&

@@ -238,6 +238,7 @@ type Crash struct {
 	Title       string
 	AltTitles   []string // alternative titles, used for better deduplication
 	Corrupted   bool     // report is corrupted (corrupted title, no stacks, etc)
+	Suppressed  bool
 	Maintainers []string // deprecated in favor of Recipients
 	Recipients  Recipients
 	Log         []byte
@@ -261,9 +262,11 @@ func (dash *Dashboard) ReportCrash(crash *Crash) (*ReportCrashResp, error) {
 
 // CrashID is a short summary of a crash for repro queries.
 type CrashID struct {
-	BuildID   string
-	Title     string
-	Corrupted bool
+	BuildID      string
+	Title        string
+	Corrupted    bool
+	Suppressed   bool
+	MayBeMissing bool
 }
 
 type NeedReproResp struct {

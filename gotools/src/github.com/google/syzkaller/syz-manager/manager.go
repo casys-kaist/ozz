@@ -669,16 +669,21 @@ func (mgr *Manager) saveCrash(crash *Crash) bool {
 		mgr.dataRaceFrames[crash.Frame] = true
 		mgr.mu.Unlock()
 	}
-	if crash.Suppressed {
-		log.Logf(0, "vm-%v: suppressed crash %v", crash.vmIndex, crash.Title)
-		mgr.stats.crashSuppressed.inc()
-		return false
-	}
-	corrupted := ""
+	flags := ""
 	if crash.Corrupted {
-		corrupted = " [corrupted]"
+		flags += " [corrupted]"
 	}
-	log.Logf(0, "vm-%v: crash: %v%v", crash.vmIndex, crash.Title, corrupted)
+	if crash.Suppressed {
+		flags += " [suppressed]"
+	}
+	log.Logf(0, "vm-%v: crash: %v%v", crash.vmIndex, crash.Title, flags)
+
+	if crash.Suppressed {
+		// Collect all of them into a single bucket so that it's possible to control and assess them,
+		// e.g. if there are some spikes in suppressed reports.
+		crash.Title = "suppressed report"
+		mgr.stats.crashSuppressed.inc()
+	}
 	if err := mgr.reporter.Symbolize(crash.Report); err != nil {
 		log.Logf(0, "failed to symbolize report: %v", err)
 	}
@@ -700,6 +705,7 @@ func (mgr *Manager) saveCrash(crash *Crash) bool {
 			Title:       crash.Title,
 			AltTitles:   crash.AltTitles,
 			Corrupted:   crash.Corrupted,
+			Suppressed:  crash.Suppressed,
 			Recipients:  crash.Recipients.ToDash(),
 			Log:         crash.Output,
 			Report:      crash.Report.Report,
@@ -722,12 +728,13 @@ func (mgr *Manager) saveCrash(crash *Crash) bool {
 	if err := osutil.WriteFile(filepath.Join(dir, "description"), []byte(crash.Title+"\n")); err != nil {
 		log.Logf(0, "failed to write crash: %v", err)
 	}
-	// Save up to 100 reports. If we already have 100, overwrite the oldest one.
+
+	// Save up to mgr.cfg.MaxCrashLogs reports, overwrite the oldest once we've reached that number.
 	// Newer reports are generally more useful. Overwriting is also needed
 	// to be able to understand if a particular bug still happens or already fixed.
 	oldestI := 0
 	var oldestTime time.Time
-	for i := 0; i < 100; i++ {
+	for i := 0; i < mgr.cfg.MaxCrashLogs; i++ {
 		info, err := os.Stat(filepath.Join(dir, fmt.Sprintf("log%v", i)))
 		if err != nil {
 			oldestI = i
@@ -741,29 +748,25 @@ func (mgr *Manager) saveCrash(crash *Crash) bool {
 			oldestTime = info.ModTime()
 		}
 	}
-	osutil.WriteFile(filepath.Join(dir, fmt.Sprintf("log%v", oldestI)), crash.Output)
-	if mgr.cfg.Tag != "" {
-		osutil.WriteFile(filepath.Join(dir, fmt.Sprintf("tag%v", oldestI)), []byte(mgr.cfg.Tag))
+	writeOrRemove := func(name string, data []byte) {
+		filename := filepath.Join(dir, name+fmt.Sprint(oldestI))
+		if len(data) == 0 {
+			os.Remove(filename)
+			return
+		}
+		osutil.WriteFile(filename, data)
 	}
-	if len(crash.Report.Report) > 0 {
-		osutil.WriteFile(filepath.Join(dir, fmt.Sprintf("report%v", oldestI)), crash.Report.Report)
-	}
-	if len(crash.machineInfo) > 0 {
-		osutil.WriteFile(filepath.Join(dir, fmt.Sprintf("machineInfo%v", oldestI)), crash.machineInfo)
-	}
-
+	writeOrRemove("log", crash.Output)
+	writeOrRemove("tag", []byte(mgr.cfg.Tag))
+	writeOrRemove("report", crash.Report.Report)
+	writeOrRemove("machineInfo", crash.machineInfo)
 	return mgr.needLocalRepro(crash)
 }
 
 const maxReproAttempts = 3
 
 func (mgr *Manager) needLocalRepro(crash *Crash) bool {
-	if !mgr.cfg.Reproduce || crash.Corrupted {
-		return false
-	}
-	if mgr.checkResult == nil || (mgr.checkResult.Features[host.FeatureLeak].Enabled &&
-		crash.Type != report.MemoryLeak) {
-		// Leak checking is very slow, don't bother reproducing other crashes.
+	if !mgr.cfg.Reproduce || crash.Corrupted || crash.Suppressed {
 		return false
 	}
 	sig := hash.Hash([]byte(crash.Title))
@@ -783,16 +786,20 @@ func (mgr *Manager) needRepro(crash *Crash) bool {
 	if crash.hub {
 		return true
 	}
+	if mgr.checkResult == nil || (mgr.checkResult.Features[host.FeatureLeak].Enabled &&
+		crash.Type != report.MemoryLeak) {
+		// Leak checking is very slow, don't bother reproducing other crashes on leak instance.
+		return false
+	}
 	if mgr.dash == nil {
 		return mgr.needLocalRepro(crash)
 	}
-	if crash.Type == report.MemoryLeak {
-		return true
-	}
 	cid := &dashapi.CrashID{
-		BuildID:   mgr.cfg.Tag,
-		Title:     crash.Title,
-		Corrupted: crash.Corrupted,
+		BuildID:      mgr.cfg.Tag,
+		Title:        crash.Title,
+		Corrupted:    crash.Corrupted,
+		Suppressed:   crash.Suppressed,
+		MayBeMissing: crash.Type == report.MemoryLeak, // we did not send the original crash w/o repro
 	}
 	needRepro, err := mgr.dash.NeedRepro(cid)
 	if err != nil {
@@ -802,15 +809,18 @@ func (mgr *Manager) needRepro(crash *Crash) bool {
 }
 
 func (mgr *Manager) saveFailedRepro(rep *report.Report, stats *repro.Stats) {
-	if rep.Type == report.MemoryLeak {
-		// Don't send failed leak repro attempts to dashboard
-		// as we did not send the crash itself.
-		return
-	}
 	if mgr.dash != nil {
+		if rep.Type == report.MemoryLeak {
+			// Don't send failed leak repro attempts to dashboard
+			// as we did not send the crash itself.
+			return
+		}
 		cid := &dashapi.CrashID{
-			BuildID: mgr.cfg.Tag,
-			Title:   rep.Title,
+			BuildID:      mgr.cfg.Tag,
+			Title:        rep.Title,
+			Corrupted:    rep.Corrupted,
+			Suppressed:   rep.Suppressed,
+			MayBeMissing: rep.Type == report.MemoryLeak,
 		}
 		if err := mgr.dash.ReportFailedRepro(cid); err != nil {
 			log.Logf(0, "failed to report failed repro to dashboard: %v", err)
@@ -870,6 +880,7 @@ func (mgr *Manager) saveRepro(res *repro.Result, stats *repro.Stats, hub bool) {
 			BuildID:    mgr.cfg.Tag,
 			Title:      res.Report.Title,
 			AltTitles:  res.Report.AltTitles,
+			Suppressed: res.Report.Suppressed,
 			Recipients: res.Report.Recipients.ToDash(),
 			Log:        res.Report.Output,
 			Report:     res.Report.Report,

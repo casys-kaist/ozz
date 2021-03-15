@@ -184,33 +184,33 @@ type uiCrashTable struct {
 }
 
 type uiJob struct {
-	Type            JobType
-	Flags           JobFlags
-	Created         time.Time
-	BugLink         string
-	ExternalLink    string
-	User            string
-	Reporting       string
-	Namespace       string
-	Manager         string
-	BugTitle        string
-	BugID           string
-	KernelAlias     string
-	KernelCommit    string
-	PatchLink       string
-	Attempts        int
-	Started         time.Time
-	Finished        time.Time
-	Duration        time.Duration
-	CrashTitle      string
-	CrashLogLink    string
-	CrashReportLink string
-	LogLink         string
-	ErrorLink       string
-	Commit          *uiCommit   // for conclusive bisection
-	Commits         []*uiCommit // for inconclusive bisection
-	Crash           *uiCrash
-	Reported        bool
+	Type             JobType
+	Flags            JobFlags
+	Created          time.Time
+	BugLink          string
+	ExternalLink     string
+	User             string
+	Reporting        string
+	Namespace        string
+	Manager          string
+	BugTitle         string
+	BugID            string
+	KernelAlias      string
+	KernelCommitLink string
+	PatchLink        string
+	Attempts         int
+	Started          time.Time
+	Finished         time.Time
+	Duration         time.Duration
+	CrashTitle       string
+	CrashLogLink     string
+	CrashReportLink  string
+	LogLink          string
+	ErrorLink        string
+	Commit           *uiCommit   // for conclusive bisection
+	Commits          []*uiCommit // for inconclusive bisection
+	Crash            *uiCrash
+	Reported         bool
 }
 
 // handleMain serves main page.
@@ -220,11 +220,11 @@ func handleMain(c context.Context, w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	accessLevel := accessLevel(c, r)
-	managers, err := loadManagers(c, accessLevel, hdr.Namespace)
+	manager := r.FormValue("manager")
+	managers, err := loadManagers(c, accessLevel, hdr.Namespace, manager)
 	if err != nil {
 		return err
 	}
-	manager := r.FormValue("manager")
 	groups, err := fetchNamespaceBugs(c, accessLevel, hdr.Namespace, manager)
 	if err != nil {
 		return err
@@ -303,7 +303,7 @@ func handleAdmin(c context.Context, w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return err
 	}
-	managers, err := loadManagers(c, accessLevel, "")
+	managers, err := loadManagers(c, accessLevel, "", "")
 	if err != nil {
 		return err
 	}
@@ -709,35 +709,36 @@ func loadDupsForBug(c context.Context, r *http.Request, bug *Bug, state *Reporti
 }
 
 func loadSimilarBugs(c context.Context, r *http.Request, bug *Bug, state *ReportingState) (*uiBugGroup, error) {
-	var similar []*Bug
-	_, err := db.NewQuery("Bug").
-		Filter("Title=", bug.Title).
-		GetAll(c, &similar)
-	if err != nil {
-		return nil, err
-	}
 	managers := make(map[string][]string)
 	var results []*uiBug
 	accessLevel := accessLevel(c, r)
 	domain := config.Namespaces[bug.Namespace].SimilarityDomain
-	for _, similar := range similar {
-		if accessLevel < similar.sanitizeAccess(accessLevel) {
-			continue
+	dedup := make(map[string]bool)
+	dedup[bug.keyHash()] = true
+	for _, title := range bug.AltTitles {
+		var similar []*Bug
+		_, err := db.NewQuery("Bug").
+			Filter("AltTitles=", title).
+			GetAll(c, &similar)
+		if err != nil {
+			return nil, err
 		}
-		if similar.Namespace == bug.Namespace && similar.Seq == bug.Seq {
-			continue
-		}
-		if config.Namespaces[similar.Namespace].SimilarityDomain != domain {
-			continue
-		}
-		if managers[similar.Namespace] == nil {
-			mgrs, err := managerList(c, similar.Namespace)
-			if err != nil {
-				return nil, err
+		for _, similar := range similar {
+			if accessLevel < similar.sanitizeAccess(accessLevel) ||
+				config.Namespaces[similar.Namespace].SimilarityDomain != domain ||
+				dedup[similar.keyHash()] {
+				continue
 			}
-			managers[similar.Namespace] = mgrs
+			dedup[similar.keyHash()] = true
+			if managers[similar.Namespace] == nil {
+				mgrs, err := managerList(c, similar.Namespace)
+				if err != nil {
+					return nil, err
+				}
+				managers[similar.Namespace] = mgrs
+			}
+			results = append(results, createUIBug(c, similar, state, managers[similar.Namespace]))
 		}
-		results = append(results, createUIBug(c, similar, state, managers[similar.Namespace]))
 	}
 	group := &uiBugGroup{
 		Now:           timeNow(c),
@@ -957,10 +958,10 @@ func makeUIBuild(build *Build) *uiBuild {
 	}
 }
 
-func loadManagers(c context.Context, accessLevel AccessLevel, ns string) ([]*uiManager, error) {
+func loadManagers(c context.Context, accessLevel AccessLevel, ns, manager string) ([]*uiManager, error) {
 	now := timeNow(c)
 	date := timeDate(now)
-	managers, managerKeys, err := loadManagerList(c, accessLevel, ns)
+	managers, managerKeys, err := loadManagerList(c, accessLevel, ns, manager)
 	if err != nil {
 		return nil, err
 	}
@@ -1042,7 +1043,7 @@ func loadManagers(c context.Context, accessLevel AccessLevel, ns string) ([]*uiM
 	return results, nil
 }
 
-func loadManagerList(c context.Context, accessLevel AccessLevel, ns string) ([]*Manager, []*db.Key, error) {
+func loadManagerList(c context.Context, accessLevel AccessLevel, ns, manager string) ([]*Manager, []*db.Key, error) {
 	managers, keys, err := loadAllManagers(c, ns)
 	if err != nil {
 		return nil, nil, err
@@ -1055,6 +1056,9 @@ func loadManagerList(c context.Context, accessLevel AccessLevel, ns string) ([]*
 			continue
 		}
 		if ns == "" && cfg.Decommissioned {
+			continue
+		}
+		if manager != "" && manager != mgr.Name {
 			continue
 		}
 		filtered = append(filtered, mgr)
@@ -1093,7 +1097,13 @@ func loadTestPatchJobs(c context.Context, bug *Bug) ([]*uiJob, error) {
 	}
 	var results []*uiJob
 	for i, job := range jobs {
-		results = append(results, makeUIJob(job, keys[i], nil, nil, nil))
+		var build *Build
+		if job.BuildID != "" {
+			if build, err = loadBuild(c, bug.Namespace, job.BuildID); err != nil {
+				return nil, err
+			}
+		}
+		results = append(results, makeUIJob(job, keys[i], nil, nil, build))
 	}
 	return results, nil
 }
@@ -1147,6 +1157,11 @@ func makeUIJob(job *Job, jobKey *db.Key, bug *Bug, crash *Crash, build *Build) *
 	}
 	if crash != nil {
 		ui.Crash = makeUICrash(crash, build)
+	}
+	if build != nil {
+		ui.KernelCommitLink = vcs.CommitLink(build.KernelRepo, build.KernelCommit)
+	} else {
+		ui.KernelCommitLink = vcs.CommitLink(job.KernelRepo, job.KernelBranch)
 	}
 	return ui
 }

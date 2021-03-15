@@ -79,7 +79,7 @@ static void cover_open(cover_t* cov, bool extra)
 	if (fd == -1)
 		fail("open of /sys/kernel/debug/kcov failed");
 	if (dup2(fd, cov->fd) < 0)
-		fail("filed to dup2(%d, %d) cover fd", fd, cov->fd);
+		failmsg("filed to dup cover fd", "from=%d, to=%d", fd, cov->fd);
 	close(fd);
 	const int kcov_init_trace = is_kernel_64_bit ? KCOV_INIT_TRACE64 : KCOV_INIT_TRACE32;
 	const int cover_size = extra ? kExtraCoverSize : kCoverSize;
@@ -222,4 +222,5 @@ static feature_t features[] = {
     {"kcsan", setup_kcsan},
     {"usb", setup_usb},
     {"sysctl", setup_sysctl},
+    {"802154", setup_802154},
 };
