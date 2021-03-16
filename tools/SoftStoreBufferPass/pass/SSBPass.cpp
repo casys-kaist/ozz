@@ -282,7 +282,7 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
     return true;
   }
 
-  if (!F.hasFnAttribute(Attribute::SoftStoreBuffer))
+  if (F.hasFnAttribute(Attribute::NoSoftStoreBuffer))
     return false;
 
   if (F.getSection() == ".noinstr.text")
