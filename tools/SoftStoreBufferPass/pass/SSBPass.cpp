@@ -21,6 +21,11 @@ using namespace llvm;
 
 #define DEBUG_TYPE "ssb"
 
+static cl::opt<bool> ClFlushOnly(
+    "ssb-flush-only",
+    cl::desc("Only instrument the flush callback at the function entry"),
+    cl::init(false));
+
 static cl::opt<bool> ClBuileKernel("ssb-kernel",
                                    cl::desc("Build a Linux kernel"),
                                    cl::init(false));
@@ -281,8 +286,10 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
   LLVM_DEBUG(dbgs() << "=== Instrumenting a function " << F.getName()
                     << " ===\n");
 
-  if (IRQEntry || SyscallEntry) {
+  if (IRQEntry || SyscallEntry || ClFlushOnly) {
     instrumentFlush(F.getEntryBlock().getTerminator());
+    if (!(IRQEntry || SyscallEntry))
+      return true;
     for (auto &BB : F) {
       for (auto &I : BB)
         if (isa<ReturnInst>(I))
