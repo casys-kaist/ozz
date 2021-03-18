@@ -57,6 +57,7 @@ private:
                                       SmallVectorImpl<Instruction *> &All,
                                       const DataLayout &DL);
   int getMemoryAccessFuncIndex(Value *Addr, const DataLayout &DL);
+  bool isInterestingLoadStore(Instruction *I);
   bool isMemBarrierOfTargetArch(Instruction *I);
   bool isHardIRQEntryOfTargetArch(Function &F);
   bool isSoftIRQEntryOfTargetArch(Function &F);
@@ -260,6 +261,15 @@ bool SoftStoreBuffer::isSyscallEntryOfTargetArch(Function &F) {
     return isEntry(F, &SyscallEntryArm64, 1);
 }
 
+bool SoftStoreBuffer::isInterestingLoadStore(Instruction *I) {
+  if (auto *LI = dyn_cast<LoadInst>(I))
+    return LI->isSimple() && LI->getSyncScopeID() != SyncScope::SingleThread;
+  else if (auto *SI = dyn_cast<StoreInst>(I))
+    return SI->isSimple() && SI->getSyncScopeID() != SyncScope::SingleThread;
+  else
+    return false;
+}
+
 bool SoftStoreBuffer::instrumentFunction(Function &F,
                                          const TargetLibraryInfo &TLI) {
   initialize(*F.getParent());
@@ -296,7 +306,7 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
     for (auto &Inst : BB) {
       if (isAtomic(&Inst) || isRMWBitOps(&Inst))
         AtomicAccesses.push_back(&Inst);
-      else if (isa<LoadInst>(Inst) || isa<StoreInst>(Inst))
+      else if (isInterestingLoadStore(&Inst))
         LocalLoadsAndStores.push_back(&Inst);
       else if (isa<CallInst>(Inst) || isa<InvokeInst>(Inst)) {
         if (CallInst *CI = dyn_cast<CallInst>(&Inst))
@@ -324,7 +334,6 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
     Res |= instrumentFlush(Inst);
 
   return Res | HasCalls;
-  ;
 }
 
 bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
