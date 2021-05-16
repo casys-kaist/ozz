@@ -9,11 +9,20 @@ NETWORK="-netdev user,id=vnet0,hostfwd=tcp::$PORT-:22 \
 		-device virtio-net-pci,netdev=vnet0"
 HMP="-monitor unix:/tmp/monitor.sock,server,nowait -serial mon:stdio"
 QMP="-qmp unix:/tmp/qmp.sock,server,nowait"
-SNAPSHOT="-snapshot"
-KVM="-enable-kvm"
 
-$QEMU -smp cpus=4 \
-	  -cpu host \
+if [ -z $NO_SNAPSHOT ]; then
+	SNAPSHOT="-snapshot"
+fi
+
+if [ -z $NO_KVM ]; then
+	KVM="-enable-kvm -cpu host"
+fi
+
+if [ -z $NUM_CPUS ]; then
+	NUM_CPUS=4
+fi
+
+$QEMU -smp cpus=$NUM_CPUS \
 	  -append 'console=ttyS0 root=/dev/sda crashkernel=512M selinux=0' \
 	  -nographic \
 	  -hda $IMAGE \
