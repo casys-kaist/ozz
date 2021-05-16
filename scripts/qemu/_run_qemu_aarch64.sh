@@ -1,5 +1,8 @@
 #!/bin/sh -e
 
+echo "Use run_qemu.sh instead"
+exit 1
+
 QEMU=qemu-system-aarch64
 IMAGE="$KERNELS_DIR/guest/images/arm64/rootfs.ext3"
 MEMORY=2048
