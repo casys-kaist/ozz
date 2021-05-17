@@ -64,6 +64,7 @@ private:
   int getMemoryAccessFuncIndex(Value *Addr, const DataLayout &DL);
   bool isInterestingLoadStore(Instruction *I);
   bool isMemBarrierOfTargetArch(Instruction *I);
+  bool isIndirectCall(Instruction *I);
   bool isHardIRQEntryOfTargetArch(Function &F);
   bool isSoftIRQEntryOfTargetArch(Function &F);
   bool isIRQEntryOfTargetArch(Function &F);
@@ -74,6 +75,7 @@ private:
   SmallVector<Instruction *, 8> AtomicAccesses;
   SmallVector<Instruction *, 8> MemIntrinCalls;
   SmallVector<Instruction *, 8> MemBarrier;
+  SmallVector<Instruction *, 8> IndirectCalls;
   /* Callbacks */
   // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
   static const size_t kNumberOfAccessSizes = 5;
@@ -275,6 +277,15 @@ bool SoftStoreBuffer::isInterestingLoadStore(Instruction *I) {
     return false;
 }
 
+bool SoftStoreBuffer::isIndirectCall(Instruction *I) {
+  if (auto *CI = dyn_cast<CallInst>(I))
+    return CI->isIndirectCall();
+  else if (auto *II = dyn_cast<InvokeInst>(I))
+    return II->isIndirectCall();
+  else
+    assert(0);
+}
+
 bool SoftStoreBuffer::instrumentFunction(Function &F,
                                          const TargetLibraryInfo &TLI) {
   initialize(*F.getParent());
@@ -318,6 +329,8 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
       else if (isa<CallInst>(Inst) || isa<InvokeInst>(Inst)) {
         if (CallInst *CI = dyn_cast<CallInst>(&Inst))
           maybeMarkSanitizerLibraryCallNoBuiltin(CI, &TLI);
+        if (isIndirectCall(&Inst))
+          IndirectCalls.push_back(&Inst);
         if (isa<MemIntrinsic>(Inst))
           MemIntrinCalls.push_back(&Inst);
         if (isMemBarrierOfTargetArch(&Inst))
@@ -338,6 +351,9 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
     Res |= instrumentFlush(Inst);
 
   for (auto Inst : AtomicAccesses)
+    Res |= instrumentFlush(Inst);
+
+  for (auto Inst : IndirectCalls)
     Res |= instrumentFlush(Inst);
 
   return Res | HasCalls;
