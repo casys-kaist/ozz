@@ -16,6 +16,7 @@
 
 #include "pass/SSBPass.h"
 #include "pass/entries.h"
+#include "llvm/ADT/DenseSet.h"
 
 using namespace llvm;
 
@@ -41,15 +42,17 @@ static cl::opt<std::string>
 
 static cl::opt<std::string> ClFuncListFileName(
     "ssb-function-list-filename",
-    cl::desc("File containing a list of target functions. If it is a relative "
+    cl::desc("File name containing a list of to-be-instrumented functions. If "
+             "it is a relative "
              "path, it starts from $PROJECT_HOME/tmp"),
-    cl::init("target-functions.lst"));
+    cl::init("to-be-instrumented-functions.lst"));
 
 static cl::opt<bool> ClSecondPass(
     "ssb-second-pass",
-    cl::desc("true if it is the second pass. In the first pass, target "
-             "functions are collected into target-function-list. The second "
-             "pass is intended to instrument the binary"),
+    cl::desc(
+        "true if it is the second pass. In the first pass, to-be-instrumented "
+        "functions are collected into instrumented-function-list. The second "
+        "pass is intended to instrument the binary"),
     cl::init(true));
 
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
@@ -59,10 +62,10 @@ STATISTIC(NumAccessesWithBadSize, "Number of accesses with bad size");
 
 namespace {
 
-static std::string getTargetFunctionFileName() {
+static std::string getIFLFileName() {
   // TODO: Clarify lifetimes of string variations (i.e., StringRef,
   // SmallString, std:: string). And then clean this function.
-  // TODO: Seperate target files if necessary.
+  // TODO: Seperate the file into multiple files if necessary.
   const char *env_p = std::getenv("PROJECT_HOME");
   StringRef EnvRef = StringRef(env_p);
 #define MAXLEN 256
@@ -71,6 +74,69 @@ static std::string getTargetFunctionFileName() {
   FileName += ClFuncListFileName;
   return std::string(FileName);
 }
+
+typedef DenseSet<StringRef> InstrumentedFunctionList;
+
+struct InstrumentedFunctionListPass : public ModulePass {
+  static char ID;
+  InstrumentedFunctionList ifl;
+
+  InstrumentedFunctionListPass() : ModulePass(ID) {}
+  ~InstrumentedFunctionListPass();
+  StringRef getPassName() const override;
+  InstrumentedFunctionList &getIFL() { return ifl; }
+  bool runOnModule(Module &M) override;
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
+};
+
+char InstrumentedFunctionListPass::ID = 0;
+
+StringRef InstrumentedFunctionListPass::getPassName() const {
+  return "InstrumentedFunctionListPass";
+}
+
+InstrumentedFunctionListPass::~InstrumentedFunctionListPass() {
+  for (auto it = ifl.begin(); it != ifl.end(); ++it) {
+    StringRef S = *it;
+    delete S.data();
+  }
+}
+
+// TODO: Oh no...
+#include <stdio.h>
+bool InstrumentedFunctionListPass::runOnModule(Module &M) {
+  if (!ClSecondPass)
+    return false;
+
+  std::error_code EC;
+  std::string fn = getIFLFileName();
+
+  LLVM_DEBUG(dbgs() << "Reading " << fn << "\n");
+
+  // TODO: Does LLVM not provide istream? What the heck is this...
+  FILE *fp = fopen(fn.c_str(), "r");
+  if (fp == NULL)
+    return false;
+
+  char *line = NULL;
+  size_t len = 0;
+  ssize_t size;
+
+  while ((size = getline(&line, &len, fp)) != -1) {
+    char *buf = new char[len + 1];
+    strncpy(buf, line, len);
+    StringRef s(buf);
+    ifl.insert(s);
+  }
+  free(line);
+
+  return false;
+}
+
+void InstrumentedFunctionListPass::getAnalysisUsage(AnalysisUsage &AU) const {}
+
+static RegisterPass<InstrumentedFunctionListPass>
+    XX("tfl", "Summarize to-be-instrumented functions", true, true);
 
 /*
  *Pass Implementation
@@ -490,7 +556,7 @@ void SoftStoreBuffer::appendFunctionName(Function &F) {
   StringRef fn = F.getName();
   std::error_code EC;
   LLVM_DEBUG(dbgs() << "Writing " << fn << "\n");
-  raw_fd_ostream out(getTargetFunctionFileName(), EC, sys::fs::OF_Append);
+  raw_fd_ostream out(getIFLFileName(), EC, sys::fs::OF_Append);
   if (!EC)
     out << fn << '\n';
   else
