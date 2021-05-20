@@ -39,12 +39,38 @@ static cl::opt<std::string>
                    cl::desc("Architecture on which the target program runs"),
                    cl::init(""));
 
+static cl::opt<std::string> ClFuncListFileName(
+    "ssb-function-list-filename",
+    cl::desc("File containing a list of target functions. If it is a relative "
+             "path, it starts from $PROJECT_HOME/tmp"),
+    cl::init("target-functions.lst"));
+
+static cl::opt<bool> ClSecondPass(
+    "ssb-second-pass",
+    cl::desc("true if it is the second pass. In the first pass, target "
+             "functions are collected into target-function-list. The second "
+             "pass is intended to instrument the binary"),
+    cl::init(true));
+
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
 STATISTIC(NumInstrumentedFlushes, "Number of instrumented flushed");
 STATISTIC(NumAccessesWithBadSize, "Number of accesses with bad size");
 
 namespace {
+
+static std::string getTargetFunctionFileName() {
+  // TODO: Clarify lifetimes of string variations (i.e., StringRef,
+  // SmallString, std:: string). And then clean this function.
+  // TODO: Seperate target files if necessary.
+  const char *env_p = std::getenv("PROJECT_HOME");
+  StringRef EnvRef = StringRef(env_p);
+#define MAXLEN 256
+  SmallString<MAXLEN> FileName(EnvRef);
+  FileName += "/tmp/";
+  FileName += ClFuncListFileName;
+  return std::string(FileName);
+}
 
 /*
  *Pass Implementation
@@ -86,6 +112,7 @@ private:
   FunctionCallee SSBFlush;
   enum Architecture { X86_64, Aarch64, kNumberOfArchitectures };
   Architecture TargetArchitecture;
+  void appendFunctionName(Function &F);
 };
 
 // Do not instrument known races/"benign races" that come from compiler
@@ -307,6 +334,11 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
   if (F.getSection() == ".noinstr.text")
     return false;
 
+  if (!ClSecondPass) {
+    appendFunctionName(F);
+    return false;
+  }
+
   bool HasCalls = false;
   const DataLayout &DL = F.getParent()->getDataLayout();
 
@@ -452,6 +484,18 @@ int SoftStoreBuffer::getMemoryAccessFuncIndex(Value *Addr,
   size_t Idx = countTrailingZeros(TypeSize / 8);
   assert(Idx < kNumberOfAccessSizes);
   return Idx;
+}
+
+void SoftStoreBuffer::appendFunctionName(Function &F) {
+  StringRef fn = F.getName();
+  std::error_code EC;
+  LLVM_DEBUG(dbgs() << "Writing " << fn << "\n");
+  raw_fd_ostream out(getTargetFunctionFileName(), EC, sys::fs::OF_Append);
+  if (!EC)
+    out << fn << '\n';
+  else
+    LLVM_DEBUG(dbgs() << "error opening file for writing");
+  out.close();
 }
 
 static bool isIndirectCall(Instruction *I) {
