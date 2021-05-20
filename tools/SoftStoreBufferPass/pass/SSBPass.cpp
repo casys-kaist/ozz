@@ -583,6 +583,34 @@ static bool isNotInstrumentedCall(CallBase *CB,
   return (F ? IFL.find(F->getName()) == IFL.end() : true);
 }
 
+static bool isAssumeLikeIntrinsic(IntrinsicInst *II) {
+  // NOTE: LLVM 13.0.0 provides this method as a member function of
+  // IntrinsicInst. As we are using LLVM 11.0.0, just copy-and-paste
+  // it.
+  // Ref:
+  // https://llvm.org/doxygen/classllvm_1_1IntrinsicInst.html#a00e7e0d4898946398f1c351251b8c7d2
+  switch (II->getIntrinsicID()) {
+  default:
+    break;
+  case Intrinsic::assume:
+  case Intrinsic::sideeffect:
+  // case Intrinsic::pseudoprobe:
+  case Intrinsic::dbg_declare:
+  case Intrinsic::dbg_value:
+  case Intrinsic::dbg_label:
+  case Intrinsic::invariant_start:
+  case Intrinsic::invariant_end:
+  case Intrinsic::lifetime_start:
+  case Intrinsic::lifetime_end:
+  // case Intrinsic::experimental_noalias_scope_decl:
+  case Intrinsic::objectsize:
+  case Intrinsic::ptr_annotation:
+  case Intrinsic::var_annotation:
+    return true;
+  }
+  return false;
+}
+
 bool SoftStoreBuffer::isOutofScopeCall(Instruction *I,
                                        const InstrumentedFunctionList &IFL) {
   assert(isa<CallBase>(I));
@@ -594,6 +622,13 @@ bool SoftStoreBuffer::isOutofScopeCall(Instruction *I,
     // kernel not bootable.
     return false;
   }
+
+  if (auto *II = dyn_cast<IntrinsicInst>(I))
+    // Intrinsic function calls are sometimes used to annotate
+    // semantics, and do not generate any real code. We don't need to
+    // instrument the flush callback in this case.
+    return !isAssumeLikeIntrinsic(II);
+
   bool ret = isIndirectCall(CB) || isNotInstrumentedCall(CB, IFL);
   if (ret)
     LLVM_DEBUG(dbgs() << *I << " is calling a function out-of-scope\n");
