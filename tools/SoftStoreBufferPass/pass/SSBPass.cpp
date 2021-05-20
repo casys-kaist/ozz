@@ -64,7 +64,7 @@ private:
   int getMemoryAccessFuncIndex(Value *Addr, const DataLayout &DL);
   bool isInterestingLoadStore(Instruction *I);
   bool isMemBarrierOfTargetArch(Instruction *I);
-  bool isIndirectCall(Instruction *I);
+  bool isOutofScopeCall(Instruction *I);
   bool isHardIRQEntryOfTargetArch(Function &F);
   bool isSoftIRQEntryOfTargetArch(Function &F);
   bool isIRQEntryOfTargetArch(Function &F);
@@ -75,7 +75,7 @@ private:
   SmallVector<Instruction *, 8> AtomicAccesses;
   SmallVector<Instruction *, 8> MemIntrinCalls;
   SmallVector<Instruction *, 8> MemBarrier;
-  SmallVector<Instruction *, 8> IndirectCalls;
+  SmallVector<Instruction *, 8> OutofScopeCalls;
   /* Callbacks */
   // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
   static const size_t kNumberOfAccessSizes = 5;
@@ -277,15 +277,6 @@ bool SoftStoreBuffer::isInterestingLoadStore(Instruction *I) {
     return false;
 }
 
-bool SoftStoreBuffer::isIndirectCall(Instruction *I) {
-  if (auto *CI = dyn_cast<CallInst>(I))
-    return CI->isIndirectCall();
-  else if (auto *II = dyn_cast<InvokeInst>(I))
-    return II->isIndirectCall();
-  else
-    assert(0);
-}
-
 bool SoftStoreBuffer::instrumentFunction(Function &F,
                                          const TargetLibraryInfo &TLI) {
   initialize(*F.getParent());
@@ -329,8 +320,8 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
       else if (isa<CallInst>(Inst) || isa<InvokeInst>(Inst)) {
         if (CallInst *CI = dyn_cast<CallInst>(&Inst))
           maybeMarkSanitizerLibraryCallNoBuiltin(CI, &TLI);
-        if (isIndirectCall(&Inst))
-          IndirectCalls.push_back(&Inst);
+        if (isOutofScopeCall(&Inst))
+          OutofScopeCalls.push_back(&Inst);
         if (isa<MemIntrinsic>(Inst))
           MemIntrinCalls.push_back(&Inst);
         if (isMemBarrierOfTargetArch(&Inst))
@@ -353,7 +344,7 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
   for (auto Inst : AtomicAccesses)
     Res |= instrumentFlush(Inst);
 
-  for (auto Inst : IndirectCalls)
+  for (auto Inst : OutofScopeCalls)
     Res |= instrumentFlush(Inst);
 
   return Res | HasCalls;
@@ -367,9 +358,9 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
                         : cast<LoadInst>(I)->getPointerOperand();
   FunctionCallee OnAccessFunc = nullptr;
 
-  // swifterror memory addresses are mem2reg promoted by instruction selection.
-  // As such they cannot have regular uses like an instrumentation function and
-  // it makes no sense to track them as memory.
+  // swifterror memory addresses are mem2reg promoted by instruction
+  // selection. As such they cannot have regular uses like an instrumentation
+  // function and it makes no sense to track them as memory.
   if (Addr->isSwiftError())
     return false;
 
@@ -461,6 +452,21 @@ int SoftStoreBuffer::getMemoryAccessFuncIndex(Value *Addr,
   size_t Idx = countTrailingZeros(TypeSize / 8);
   assert(Idx < kNumberOfAccessSizes);
   return Idx;
+}
+
+static bool isIndirectCall(Instruction *I) {
+  if (auto *CI = dyn_cast<CallInst>(I))
+    return CI->isIndirectCall();
+  else if (auto *II = dyn_cast<InvokeInst>(I))
+    return II->isIndirectCall();
+  else
+    assert(0);
+}
+
+bool SoftStoreBuffer::isOutofScopeCall(Instruction *I) {
+  if (isIndirectCall(I))
+    return true;
+  return false;
 }
 
 /*
