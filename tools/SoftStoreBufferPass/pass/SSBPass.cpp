@@ -142,7 +142,8 @@ static RegisterPass<InstrumentedFunctionListPass>
  *Pass Implementation
  */
 struct SoftStoreBuffer {
-  bool instrumentFunction(Function &F, const TargetLibraryInfo &TLI);
+  bool instrumentFunction(Function &F, const TargetLibraryInfo &TLI,
+                          const InstrumentedFunctionList &IFL);
 
 private:
   void initialize(Module &M);
@@ -156,7 +157,7 @@ private:
   int getMemoryAccessFuncIndex(Value *Addr, const DataLayout &DL);
   bool isInterestingLoadStore(Instruction *I);
   bool isMemBarrierOfTargetArch(Instruction *I);
-  bool isOutofScopeCall(Instruction *I);
+  bool isOutofScopeCall(Instruction *I, const InstrumentedFunctionList &IFL);
   bool isHardIRQEntryOfTargetArch(Function &F);
   bool isSoftIRQEntryOfTargetArch(Function &F);
   bool isIRQEntryOfTargetArch(Function &F);
@@ -371,7 +372,8 @@ bool SoftStoreBuffer::isInterestingLoadStore(Instruction *I) {
 }
 
 bool SoftStoreBuffer::instrumentFunction(Function &F,
-                                         const TargetLibraryInfo &TLI) {
+                                         const TargetLibraryInfo &TLI,
+                                         const InstrumentedFunctionList &IFL) {
   initialize(*F.getParent());
 
   bool Res = false;
@@ -418,7 +420,7 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
       else if (isa<CallInst>(Inst) || isa<InvokeInst>(Inst)) {
         if (CallInst *CI = dyn_cast<CallInst>(&Inst))
           maybeMarkSanitizerLibraryCallNoBuiltin(CI, &TLI);
-        if (isOutofScopeCall(&Inst))
+        if (isOutofScopeCall(&Inst, IFL))
           OutofScopeCalls.push_back(&Inst);
         if (isa<MemIntrinsic>(Inst))
           MemIntrinCalls.push_back(&Inst);
@@ -502,9 +504,10 @@ bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
   return true;
 }
 
-static bool visitor(Function &F, const TargetLibraryInfo &TLI) {
+static bool visitor(Function &F, const TargetLibraryInfo &TLI,
+                    const InstrumentedFunctionList &IFL) {
   SoftStoreBuffer SSB;
-  return SSB.instrumentFunction(F, TLI);
+  return SSB.instrumentFunction(F, TLI, IFL);
 }
 
 void SoftStoreBuffer::initialize(Module &M) {
@@ -564,19 +567,30 @@ void SoftStoreBuffer::appendFunctionName(Function &F) {
   out.close();
 }
 
-static bool isIndirectCall(Instruction *I) {
-  if (auto *CI = dyn_cast<CallInst>(I))
-    return CI->isIndirectCall();
-  else if (auto *II = dyn_cast<InvokeInst>(I))
-    return II->isIndirectCall();
-  else
-    assert(0);
+static bool isIndirectCall(CallBase *CB) { return CB->isIndirectCall(); }
+
+static bool isNotInstrumentedCall(CallBase *CB,
+                                  const InstrumentedFunctionList &IFL) {
+  auto *F = CB->getCalledFunction();
+  // XXX: This check is possibly redundant with isIndirectCall().
+  return (F ? IFL.find(F->getName()) == IFL.end() : true);
 }
 
-bool SoftStoreBuffer::isOutofScopeCall(Instruction *I) {
-  if (isIndirectCall(I))
-    return true;
-  return false;
+bool SoftStoreBuffer::isOutofScopeCall(Instruction *I,
+                                       const InstrumentedFunctionList &IFL) {
+  assert(isa<CallBase>(I));
+  auto *CB = cast<CallBase>(I);
+  if (IFL.empty()) {
+    // XXX: We don't have a list of target functions so we cannot
+    // determine the CB's callee is out-of-scope or not. To
+    // workaround, always return false. This will probably make the
+    // kernel not bootable.
+    return false;
+  }
+  bool ret = isIndirectCall(CB) || isNotInstrumentedCall(CB, IFL);
+  if (ret)
+    LLVM_DEBUG(dbgs() << *I << " is calling a function out-of-scope\n");
+  return ret;
 }
 
 /*
@@ -590,7 +604,8 @@ struct SoftStoreBufferLegacy : public FunctionPass {
 
   bool runOnFunction(Function &F) override {
     auto &TLI = getAnalysis<TargetLibraryInfoWrapperPass>().getTLI(F);
-    return visitor(F, TLI);
+    auto &IFL = getAnalysis<InstrumentedFunctionListPass>().getIFL();
+    return visitor(F, TLI, IFL);
   }
 };
 
@@ -602,6 +617,7 @@ StringRef SoftStoreBufferLegacy::getPassName() const {
 
 void SoftStoreBufferLegacy::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<TargetLibraryInfoWrapperPass>();
+  AU.addRequired<InstrumentedFunctionListPass>();
 }
 
 static RegisterPass<SoftStoreBufferLegacy>
@@ -624,7 +640,9 @@ static llvm::RegisterStandardPasses
  */
 PreservedAnalyses SoftStoreBufferPass::run(Function &F,
                                            FunctionAnalysisManager &FAM) {
-  visitor(F, FAM.getResult<TargetLibraryAnalysis>(F));
+  // TODO: We are not using the new pass manager stuff. Implement this
+  // later.
+  // visitor(F, FAM.getResult<TargetLibraryAnalysis>(F));
   return PreservedAnalyses::all();
 }
 
