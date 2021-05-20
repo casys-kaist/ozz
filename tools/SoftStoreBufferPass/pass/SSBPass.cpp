@@ -22,6 +22,12 @@ using namespace llvm;
 
 #define DEBUG_TYPE "ssb"
 
+static cl::opt<bool> ClInstrumentOutofScopeCalls(
+    "instrument-out-of-scope",
+    cl::desc(
+        "Instrument the flush callback before calling out-of-scope functions"),
+    cl::init(true));
+
 static cl::opt<bool> ClFlushOnly(
     "ssb-flush-only",
     cl::desc("Only instrument the flush callback at the function entry"),
@@ -444,8 +450,9 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
   for (auto Inst : AtomicAccesses)
     Res |= instrumentFlush(Inst);
 
-  for (auto Inst : OutofScopeCalls)
-    Res |= instrumentFlush(Inst);
+  if (ClInstrumentOutofScopeCalls)
+    for (auto Inst : OutofScopeCalls)
+      Res |= instrumentFlush(Inst);
 
   return Res | HasCalls;
 }
@@ -582,7 +589,7 @@ bool SoftStoreBuffer::isOutofScopeCall(Instruction *I,
   auto *CB = cast<CallBase>(I);
   if (IFL.empty()) {
     // XXX: We don't have a list of target functions so we cannot
-    // determine the CB's callee is out-of-scope or not. To
+    // determine the CB's callee is out-of-scope or not. As a
     // workaround, always return false. This will probably make the
     // kernel not bootable.
     return false;
