@@ -673,7 +673,7 @@ static RegisterPass<SoftStoreBufferLegacy>
     );
 
 static llvm::RegisterStandardPasses
-    Y(llvm::PassManagerBuilder::EP_EarlyAsPossible,
+    Y(llvm::PassManagerBuilder::EP_OptimizerLast,
       [](const llvm::PassManagerBuilder &Builder,
          llvm::legacy::PassManagerBase &PM) {
         PM.add(new SoftStoreBufferLegacy());
