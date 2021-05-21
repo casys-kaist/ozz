@@ -510,7 +510,7 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
 bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
   IRBuilder<> IRB(I);
   LLVM_DEBUG(dbgs() << "Instrumenting a membarrier callback at " << *I << "\n");
-  IRB.CreateCall(SSBFlush, ConstantPointerNull::get(IRB.getInt8PtrTy()));
+  IRB.CreateCall(SSBFlush);
   NumInstrumentedFlushes++;
   return true;
 }
@@ -544,8 +544,7 @@ void SoftStoreBuffer::initialize(Module &M) {
     SSBLoad[i] =
         M.getOrInsertFunction(LoadName, Attr, IntNTy, IRB.getInt8PtrTy());
     SmallString<32> FlushName("__ssb_" + TargetMemoryModelStr + "_flush");
-    SSBFlush = M.getOrInsertFunction(FlushName, Attr, IRB.getVoidTy(),
-                                     IRB.getInt8PtrTy());
+    SSBFlush = M.getOrInsertFunction(FlushName, Attr, IRB.getVoidTy());
   }
 }
 
