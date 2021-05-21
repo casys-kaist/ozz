@@ -16,10 +16,17 @@
 
 #include "pass/SSBPass.h"
 #include "pass/entries.h"
+#include "llvm/ADT/DenseSet.h"
 
 using namespace llvm;
 
 #define DEBUG_TYPE "ssb"
+
+static cl::opt<bool> ClInstrumentOutofScopeCalls(
+    "instrument-out-of-scope",
+    cl::desc(
+        "Instrument the flush callback before calling out-of-scope functions"),
+    cl::init(true));
 
 static cl::opt<bool> ClFlushOnly(
     "ssb-flush-only",
@@ -39,6 +46,21 @@ static cl::opt<std::string>
                    cl::desc("Architecture on which the target program runs"),
                    cl::init(""));
 
+static cl::opt<std::string> ClFuncListFileName(
+    "ssb-function-list-filename",
+    cl::desc("File name containing a list of to-be-instrumented functions. If "
+             "it is a relative "
+             "path, it starts from $PROJECT_HOME/tmp"),
+    cl::init("to-be-instrumented-functions.lst"));
+
+static cl::opt<bool> ClSecondPass(
+    "ssb-second-pass",
+    cl::desc(
+        "true if it is the second pass. In the first pass, to-be-instrumented "
+        "functions are collected into instrumented-function-list. The second "
+        "pass is intended to instrument the binary"),
+    cl::init(true));
+
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
 STATISTIC(NumInstrumentedFlushes, "Number of instrumented flushed");
@@ -46,11 +68,88 @@ STATISTIC(NumAccessesWithBadSize, "Number of accesses with bad size");
 
 namespace {
 
+static std::string getIFLFileName() {
+  // TODO: Clarify lifetimes of string variations (i.e., StringRef,
+  // SmallString, std:: string). And then clean this function.
+  // TODO: Seperate the file into multiple files if necessary.
+  const char *env_p = std::getenv("PROJECT_HOME");
+  StringRef EnvRef = StringRef(env_p);
+#define MAXLEN 256
+  SmallString<MAXLEN> FileName(EnvRef);
+  FileName += "/tmp/";
+  FileName += ClFuncListFileName;
+  return std::string(FileName);
+}
+
+typedef DenseSet<StringRef> InstrumentedFunctionList;
+
+struct InstrumentedFunctionListPass : public ModulePass {
+  static char ID;
+  InstrumentedFunctionList ifl;
+
+  InstrumentedFunctionListPass() : ModulePass(ID) {}
+  ~InstrumentedFunctionListPass();
+  StringRef getPassName() const override;
+  InstrumentedFunctionList &getIFL() { return ifl; }
+  bool runOnModule(Module &M) override;
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
+};
+
+char InstrumentedFunctionListPass::ID = 0;
+
+StringRef InstrumentedFunctionListPass::getPassName() const {
+  return "InstrumentedFunctionListPass";
+}
+
+InstrumentedFunctionListPass::~InstrumentedFunctionListPass() {
+  for (auto it = ifl.begin(); it != ifl.end(); ++it) {
+    StringRef S = *it;
+    delete S.data();
+  }
+}
+
+// TODO: Oh no...
+#include <stdio.h>
+bool InstrumentedFunctionListPass::runOnModule(Module &M) {
+  if (!ClSecondPass)
+    return false;
+
+  std::error_code EC;
+  std::string fn = getIFLFileName();
+
+  LLVM_DEBUG(dbgs() << "Reading " << fn << "\n");
+
+  // TODO: Does LLVM not provide istream? What the heck is this...
+  FILE *fp = fopen(fn.c_str(), "r");
+  if (fp == NULL)
+    return false;
+
+  char *line = NULL;
+  size_t len = 0;
+  ssize_t size;
+
+  while ((size = getline(&line, &len, fp)) != -1) {
+    char *buf = new char[len + 1];
+    strncpy(buf, line, len);
+    StringRef s(buf);
+    ifl.insert(s);
+  }
+  free(line);
+
+  return false;
+}
+
+void InstrumentedFunctionListPass::getAnalysisUsage(AnalysisUsage &AU) const {}
+
+static RegisterPass<InstrumentedFunctionListPass>
+    XX("tfl", "Summarize to-be-instrumented functions", true, true);
+
 /*
  *Pass Implementation
  */
 struct SoftStoreBuffer {
-  bool instrumentFunction(Function &F, const TargetLibraryInfo &TLI);
+  bool instrumentFunction(Function &F, const TargetLibraryInfo &TLI,
+                          const InstrumentedFunctionList &IFL);
 
 private:
   void initialize(Module &M);
@@ -64,6 +163,7 @@ private:
   int getMemoryAccessFuncIndex(Value *Addr, const DataLayout &DL);
   bool isInterestingLoadStore(Instruction *I);
   bool isMemBarrierOfTargetArch(Instruction *I);
+  bool isOutofScopeCall(Instruction *I, const InstrumentedFunctionList &IFL);
   bool isHardIRQEntryOfTargetArch(Function &F);
   bool isSoftIRQEntryOfTargetArch(Function &F);
   bool isIRQEntryOfTargetArch(Function &F);
@@ -74,6 +174,7 @@ private:
   SmallVector<Instruction *, 8> AtomicAccesses;
   SmallVector<Instruction *, 8> MemIntrinCalls;
   SmallVector<Instruction *, 8> MemBarrier;
+  SmallVector<Instruction *, 8> OutofScopeCalls;
   /* Callbacks */
   // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
   static const size_t kNumberOfAccessSizes = 5;
@@ -84,6 +185,7 @@ private:
   FunctionCallee SSBFlush;
   enum Architecture { X86_64, Aarch64, kNumberOfArchitectures };
   Architecture TargetArchitecture;
+  void appendFunctionName(Function &F);
 };
 
 // Do not instrument known races/"benign races" that come from compiler
@@ -276,7 +378,8 @@ bool SoftStoreBuffer::isInterestingLoadStore(Instruction *I) {
 }
 
 bool SoftStoreBuffer::instrumentFunction(Function &F,
-                                         const TargetLibraryInfo &TLI) {
+                                         const TargetLibraryInfo &TLI,
+                                         const InstrumentedFunctionList &IFL) {
   initialize(*F.getParent());
 
   bool Res = false;
@@ -305,6 +408,11 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
   if (F.getSection() == ".noinstr.text")
     return false;
 
+  if (!ClSecondPass) {
+    appendFunctionName(F);
+    return false;
+  }
+
   bool HasCalls = false;
   const DataLayout &DL = F.getParent()->getDataLayout();
 
@@ -318,6 +426,8 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
       else if (isa<CallInst>(Inst) || isa<InvokeInst>(Inst)) {
         if (CallInst *CI = dyn_cast<CallInst>(&Inst))
           maybeMarkSanitizerLibraryCallNoBuiltin(CI, &TLI);
+        if (isOutofScopeCall(&Inst, IFL))
+          OutofScopeCalls.push_back(&Inst);
         if (isa<MemIntrinsic>(Inst))
           MemIntrinCalls.push_back(&Inst);
         if (isMemBarrierOfTargetArch(&Inst))
@@ -340,6 +450,10 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
   for (auto Inst : AtomicAccesses)
     Res |= instrumentFlush(Inst);
 
+  if (ClInstrumentOutofScopeCalls)
+    for (auto Inst : OutofScopeCalls)
+      Res |= instrumentFlush(Inst);
+
   return Res | HasCalls;
 }
 
@@ -351,9 +465,9 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
                         : cast<LoadInst>(I)->getPointerOperand();
   FunctionCallee OnAccessFunc = nullptr;
 
-  // swifterror memory addresses are mem2reg promoted by instruction selection.
-  // As such they cannot have regular uses like an instrumentation function and
-  // it makes no sense to track them as memory.
+  // swifterror memory addresses are mem2reg promoted by instruction
+  // selection. As such they cannot have regular uses like an instrumentation
+  // function and it makes no sense to track them as memory.
   if (Addr->isSwiftError())
     return false;
 
@@ -397,9 +511,10 @@ bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
   return true;
 }
 
-static bool visitor(Function &F, const TargetLibraryInfo &TLI) {
+static bool visitor(Function &F, const TargetLibraryInfo &TLI,
+                    const InstrumentedFunctionList &IFL) {
   SoftStoreBuffer SSB;
-  return SSB.instrumentFunction(F, TLI);
+  return SSB.instrumentFunction(F, TLI, IFL);
 }
 
 void SoftStoreBuffer::initialize(Module &M) {
@@ -447,6 +562,79 @@ int SoftStoreBuffer::getMemoryAccessFuncIndex(Value *Addr,
   return Idx;
 }
 
+void SoftStoreBuffer::appendFunctionName(Function &F) {
+  StringRef fn = F.getName();
+  std::error_code EC;
+  LLVM_DEBUG(dbgs() << "Writing " << fn << "\n");
+  raw_fd_ostream out(getIFLFileName(), EC, sys::fs::OF_Append);
+  if (!EC)
+    out << fn << '\n';
+  else
+    LLVM_DEBUG(dbgs() << "error opening file for writing");
+  out.close();
+}
+
+static bool isIndirectCall(CallBase *CB) { return CB->isIndirectCall(); }
+
+static bool isNotInstrumentedCall(CallBase *CB,
+                                  const InstrumentedFunctionList &IFL) {
+  auto *F = CB->getCalledFunction();
+  // XXX: This check is possibly redundant with isIndirectCall().
+  return (F ? IFL.find(F->getName()) == IFL.end() : true);
+}
+
+static bool isAssumeLikeIntrinsic(IntrinsicInst *II) {
+  // NOTE: LLVM 13.0.0 provides this method as a member function of
+  // IntrinsicInst. As we are using LLVM 11.0.0, just copy-and-paste
+  // it.
+  // Ref:
+  // https://llvm.org/doxygen/classllvm_1_1IntrinsicInst.html#a00e7e0d4898946398f1c351251b8c7d2
+  switch (II->getIntrinsicID()) {
+  default:
+    break;
+  case Intrinsic::assume:
+  case Intrinsic::sideeffect:
+  // case Intrinsic::pseudoprobe:
+  case Intrinsic::dbg_declare:
+  case Intrinsic::dbg_value:
+  case Intrinsic::dbg_label:
+  case Intrinsic::invariant_start:
+  case Intrinsic::invariant_end:
+  case Intrinsic::lifetime_start:
+  case Intrinsic::lifetime_end:
+  // case Intrinsic::experimental_noalias_scope_decl:
+  case Intrinsic::objectsize:
+  case Intrinsic::ptr_annotation:
+  case Intrinsic::var_annotation:
+    return true;
+  }
+  return false;
+}
+
+bool SoftStoreBuffer::isOutofScopeCall(Instruction *I,
+                                       const InstrumentedFunctionList &IFL) {
+  assert(isa<CallBase>(I));
+  auto *CB = cast<CallBase>(I);
+  if (IFL.empty()) {
+    // XXX: We don't have a list of target functions so we cannot
+    // determine the CB's callee is out-of-scope or not. As a
+    // workaround, always return false. This will probably make the
+    // kernel not bootable.
+    return false;
+  }
+
+  if (auto *II = dyn_cast<IntrinsicInst>(I))
+    // Intrinsic function calls are sometimes used to annotate
+    // semantics, and do not generate any real code. We don't need to
+    // instrument the flush callback in this case.
+    return !isAssumeLikeIntrinsic(II);
+
+  bool ret = isIndirectCall(CB) || isNotInstrumentedCall(CB, IFL);
+  if (ret)
+    LLVM_DEBUG(dbgs() << *I << " is calling a function out-of-scope\n");
+  return ret;
+}
+
 /*
  * Legacy PassManager stuffs
  */
@@ -458,7 +646,8 @@ struct SoftStoreBufferLegacy : public FunctionPass {
 
   bool runOnFunction(Function &F) override {
     auto &TLI = getAnalysis<TargetLibraryInfoWrapperPass>().getTLI(F);
-    return visitor(F, TLI);
+    auto &IFL = getAnalysis<InstrumentedFunctionListPass>().getIFL();
+    return visitor(F, TLI, IFL);
   }
 };
 
@@ -470,6 +659,7 @@ StringRef SoftStoreBufferLegacy::getPassName() const {
 
 void SoftStoreBufferLegacy::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<TargetLibraryInfoWrapperPass>();
+  AU.addRequired<InstrumentedFunctionListPass>();
 }
 
 static RegisterPass<SoftStoreBufferLegacy>
@@ -492,7 +682,9 @@ static llvm::RegisterStandardPasses
  */
 PreservedAnalyses SoftStoreBufferPass::run(Function &F,
                                            FunctionAnalysisManager &FAM) {
-  visitor(F, FAM.getResult<TargetLibraryAnalysis>(F));
+  // TODO: We are not using the new pass manager stuff. Implement this
+  // later.
+  // visitor(F, FAM.getResult<TargetLibraryAnalysis>(F));
   return PreservedAnalyses::all();
 }
 
