@@ -129,9 +129,13 @@ bool InstrumentedFunctionListPass::runOnModule(Module &M) {
   ssize_t size;
 
   while ((size = getline(&line, &len, fp)) != -1) {
-    char *buf = new char[len + 1];
-    strncpy(buf, line, len);
+    assert(size > 0);
+    // Cut the delimiter first
+    line[size - 1] = 0;
+    char *buf = new char[size];
+    strncpy(buf, line, size);
     StringRef s(buf);
+    // LLVM_DEBUG(dbgs() << s << "\n");
     ifl.insert(s);
   }
   free(line);
