@@ -22,6 +22,12 @@ using namespace llvm;
 
 #define DEBUG_TYPE "ssb"
 
+static cl::opt<bool> ClDumpIRs(
+    "dump-ir",
+    cl::desc(
+        "Dump IRs before and after instrumenting callbacks (for debugging)"),
+    cl::init(false));
+
 static cl::opt<bool> ClInstrumentOutofScopeCalls(
     "instrument-out-of-scope",
     cl::desc(
@@ -534,10 +540,30 @@ bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
   return true;
 }
 
+static void dumpIR(Function &F, std::string prefix) {
+  const char *tmpdirp;
+  std::string tmpdir;
+  if ((tmpdirp = std::getenv("TMP_DIR")))
+    tmpdir.append(tmpdirp);
+
+  std::string fn = tmpdir + "/" + F.getName().str() + "." + prefix + ".ll";
+  std::error_code EC;
+
+  raw_fd_ostream out(fn, EC, sys::fs::OF_Text);
+
+  F.print(out, NULL /*default*/, false /*default*/, true /*IsForDebug*/);
+}
+
 static bool visitor(Function &F, const TargetLibraryInfo &TLI,
                     const InstrumentedFunctionList &IFL) {
   SoftStoreBuffer SSB;
-  return SSB.instrumentFunction(F, TLI, IFL);
+  bool ret;
+  if (ClDumpIRs)
+    dumpIR(F, std::string("before"));
+  ret = SSB.instrumentFunction(F, TLI, IFL);
+  if (ClDumpIRs)
+    dumpIR(F, std::string("after"));
+  return ret;
 }
 
 void SoftStoreBuffer::initialize(Module &M) {
