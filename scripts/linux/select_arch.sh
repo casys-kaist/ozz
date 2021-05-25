@@ -21,5 +21,6 @@ fi
 export LLVM=1
 if [ -n "$INSTRUMENT" ]; then
 	PASS="$TOOLS_DIR/SoftStoreBufferPass/build/pass/libSSBPass.so"
-	export CFLAGS_KSSB="-Xclang -load -Xclang $PASS -mllvm -arch=$ARCH -mllvm -memorymodel=$MEMMODEL -DINSTRUMENT_KSSB"
+	export CFLAGS_KSSB="-Xclang -load -Xclang $PASS -mllvm -arch=$ARCH -mllvm -memorymodel=$MEMMODEL"
+	export CFLAGS_KSSB_FLUSHONLY="-Xclang -load -Xclang $PASS -mllvm -arch=$ARCH -mllvm -memorymodel=$MEMMODEL -mllvm -ssb-flush-only=true"
 fi
