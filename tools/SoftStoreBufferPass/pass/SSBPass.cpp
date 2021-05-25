@@ -158,6 +158,9 @@ struct SoftStoreBuffer {
 
 private:
   void initialize(Module &M);
+  bool instrumentFlushOnly(Function &F, bool DoInstrument);
+  bool instrumentAll(Function &F, const TargetLibraryInfo &TLI,
+                     const InstrumentedFunctionList &IFL);
   bool instrumentLoadOrStore(Instruction *I, const DataLayout &DL);
   bool instrumentFlush(Instruction *I);
   FunctionCallee findCallbackFunction();
@@ -382,33 +385,30 @@ bool SoftStoreBuffer::isInterestingLoadStore(Instruction *I) {
     return false;
 }
 
-bool SoftStoreBuffer::instrumentFunction(Function &F,
-                                         const TargetLibraryInfo &TLI,
-                                         const InstrumentedFunctionList &IFL) {
-  initialize(*F.getParent());
+bool SoftStoreBuffer::instrumentFlushOnly(Function &F, bool DoInstrument) {
+  LLVM_DEBUG(dbgs() << "=== Instrumenting a function (flush-only)"
+                    << F.getName() << " ===\n");
+  if (!DoInstrument)
+    return false;
 
-  bool Res = false;
-  bool IRQEntry = isIRQEntryOfTargetArch(F);
-  bool SyscallEntry = isSyscallEntryOfTargetArch(F);
+  instrumentFlush(F.getEntryBlock().getTerminator());
 
-  if (IRQEntry || SyscallEntry || ClFlushEntryOnly) {
-    LLVM_DEBUG(dbgs() << "=== Instrumenting a function (flush-only)"
-                      << F.getName() << " ===\n");
-    if (!(IRQEntry || SyscallEntry))
-      return false;
-    instrumentFlush(F.getEntryBlock().getTerminator());
-    for (auto &BB : F) {
-      for (auto &I : BB)
-        if (isa<ReturnInst>(I))
-          instrumentFlush(BB.getFirstNonPHI());
-    }
-    // We do not instrument other instructions in entry functions.
-    return true;
+  for (auto &BB : F) {
+    for (auto &I : BB)
+      if (isa<ReturnInst>(I))
+        instrumentFlush(BB.getFirstNonPHI());
   }
 
+  // We do not instrument other instructions in entry functions.
+  return true;
+}
+
+bool SoftStoreBuffer::instrumentAll(Function &F, const TargetLibraryInfo &TLI,
+                                    const InstrumentedFunctionList &IFL) {
   LLVM_DEBUG(dbgs() << "=== Instrumenting a function " << F.getName()
                     << " ===\n");
 
+  // Early checks
   if (F.hasFnAttribute(Attribute::NoSoftStoreBuffer))
     return false;
 
@@ -420,6 +420,8 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
     return false;
   }
 
+  // Now we are instrumenting callbacks
+  bool Res = false;
   bool HasCalls = false;
   const DataLayout &DL = F.getParent()->getDataLayout();
 
@@ -462,6 +464,20 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
       Res |= instrumentFlush(Inst);
 
   return Res | HasCalls;
+}
+
+bool SoftStoreBuffer::instrumentFunction(Function &F,
+                                         const TargetLibraryInfo &TLI,
+                                         const InstrumentedFunctionList &IFL) {
+  initialize(*F.getParent());
+
+  bool IRQEntry = isIRQEntryOfTargetArch(F);
+  bool SyscallEntry = isSyscallEntryOfTargetArch(F);
+
+  if (IRQEntry || SyscallEntry || ClFlushEntryOnly)
+    return instrumentFlushOnly(F, IRQEntry || SyscallEntry);
+  else
+    return instrumentAll(F, TLI, IFL);
 }
 
 bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
