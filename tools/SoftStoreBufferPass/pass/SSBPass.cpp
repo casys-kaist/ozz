@@ -28,10 +28,11 @@ static cl::opt<bool> ClInstrumentOutofScopeCalls(
         "Instrument the flush callback before calling out-of-scope functions"),
     cl::init(true));
 
-static cl::opt<bool> ClFlushOnly(
-    "ssb-flush-only",
-    cl::desc("Only instrument the flush callback at the function entry"),
-    cl::init(false));
+static cl::opt<bool>
+    ClFlushEntryOnly("ssb-flush-only",
+                     cl::desc("Only instrument the flush callback at entry "
+                              "functions of IRQs and syscalls"),
+                     cl::init(false));
 
 static cl::opt<bool> ClBuileKernel("ssb-kernel",
                                    cl::desc("Build a Linux kernel"),
@@ -390,13 +391,12 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
   bool IRQEntry = isIRQEntryOfTargetArch(F);
   bool SyscallEntry = isSyscallEntryOfTargetArch(F);
 
-  LLVM_DEBUG(dbgs() << "=== Instrumenting a function " << F.getName()
-                    << " ===\n");
-
-  if (IRQEntry || SyscallEntry || ClFlushOnly) {
-    instrumentFlush(F.getEntryBlock().getTerminator());
+  if (IRQEntry || SyscallEntry || ClFlushEntryOnly) {
+    LLVM_DEBUG(dbgs() << "=== Instrumenting a function (flush-only)"
+                      << F.getName() << " ===\n");
     if (!(IRQEntry || SyscallEntry))
-      return true;
+      return false;
+    instrumentFlush(F.getEntryBlock().getTerminator());
     for (auto &BB : F) {
       for (auto &I : BB)
         if (isa<ReturnInst>(I))
@@ -405,6 +405,9 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
     // We do not instrument other instructions in entry functions.
     return true;
   }
+
+  LLVM_DEBUG(dbgs() << "=== Instrumenting a function " << F.getName()
+                    << " ===\n");
 
   if (F.hasFnAttribute(Attribute::NoSoftStoreBuffer))
     return false;
