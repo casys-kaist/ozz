@@ -28,10 +28,11 @@ static cl::opt<bool> ClInstrumentOutofScopeCalls(
         "Instrument the flush callback before calling out-of-scope functions"),
     cl::init(true));
 
-static cl::opt<bool> ClFlushEntryOnly(
-    "ssb-flush-only",
-    cl::desc("Only instrument the flush callback at entry functions of IRQs and syscalls"),
-    cl::init(false));
+static cl::opt<bool>
+    ClFlushEntryOnly("ssb-flush-only",
+                     cl::desc("Only instrument the flush callback at entry "
+                              "functions of IRQs and syscalls"),
+                     cl::init(false));
 
 static cl::opt<bool> ClBuileKernel("ssb-kernel",
                                    cl::desc("Build a Linux kernel"),
