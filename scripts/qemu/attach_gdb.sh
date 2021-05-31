@@ -2,7 +2,7 @@
 
 [ -n "$PROJECT_HOME" ] || exit 1
 
-BATCHCMD=$PROJECT_HOME/.gdb-cmds.batch
+BATCHCMD_DEFAULT=$TMP_DIR/gdb-cmds.batch
 
 if [ -z "$ARCH" ]; then
 	ARCH="x86_64"
@@ -14,7 +14,7 @@ else
 	TARGET_ARCH="aarch64"
 fi
 
-cat <<EOF > $BATCHCMD
+cat <<EOF > $BATCHCMD_DEFAULT
 set architecture $TARGET_ARCH
 target remote :1234
 set disassemble-next-line on
@@ -29,5 +29,10 @@ else
 	VMLINUX=$1
 fi
 
+if [ -n "$BATCHCMD" ]; then
+	BATCHCMD_ADDITIONAL="-x $BATCHCMD"
+fi
+
+
 set -x
-gdb-multiarch -x $BATCHCMD $VMLINUX
+gdb-multiarch -x $BATCHCMD_DEFAULT $BATCHCMD_ADDITIONAL $VMLINUX
