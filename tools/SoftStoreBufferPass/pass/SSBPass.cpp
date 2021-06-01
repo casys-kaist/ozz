@@ -399,11 +399,11 @@ bool SoftStoreBuffer::instrumentFlushOnly(Function &F, bool DoInstrument) {
 
   instrumentFlush(F.getEntryBlock().getTerminator());
 
-  for (auto &BB : F) {
-    for (auto &I : BB)
-      if (isa<ReturnInst>(I))
-        instrumentFlush(BB.getFirstNonPHI());
-  }
+  // for (auto &BB : F) {
+  //   for (auto &I : BB)
+  //     if (isa<ReturnInst>(I))
+  //       instrumentFlush(BB.getFirstNonPHI());
+  // }
 
   // We do not instrument other instructions in entry functions.
   return true;
