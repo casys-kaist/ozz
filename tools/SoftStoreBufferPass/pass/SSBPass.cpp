@@ -384,9 +384,9 @@ bool SoftStoreBuffer::isSyscallEntryOfTargetArch(Function &F) {
 
 bool SoftStoreBuffer::isInterestingLoadStore(Instruction *I) {
   if (auto *LI = dyn_cast<LoadInst>(I))
-    return LI->isSimple() && LI->getSyncScopeID() != SyncScope::SingleThread;
+    return !LI->isAtomic() && LI->getSyncScopeID() != SyncScope::SingleThread;
   else if (auto *SI = dyn_cast<StoreInst>(I))
-    return SI->isSimple() && SI->getSyncScopeID() != SyncScope::SingleThread;
+    return !SI->isAtomic() && SI->getSyncScopeID() != SyncScope::SingleThread;
   else
     return false;
 }
