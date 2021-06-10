@@ -9,6 +9,7 @@
 #define SYS_SSB_FEEDINPUT 500
 #define SYS_PSO_WRITER 501
 #define SYS_PSO_READER 502
+#define SYS_PSO_CLEAR 504
 
 void *th1(void *_arg)
 {
@@ -30,7 +31,7 @@ int main(void)
 {
 	pthread_t pth1, pth2;
 	int go = 0;
-	int flush_vector[] = {0, 1};
+	int flush_vector[] = {1, 0};
 
 	syscall(SYS_SSB_FEEDINPUT, flush_vector, 2);
 
@@ -41,5 +42,8 @@ int main(void)
 
 	pthread_join(pth1, NULL);
 	pthread_join(pth2, NULL);
+
+	syscall(SYS_PSO_CLEAR);
+
 	return 0;
 }
