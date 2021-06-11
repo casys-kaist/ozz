@@ -71,6 +71,7 @@ static cl::opt<bool> ClSecondPass(
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
 STATISTIC(NumInstrumentedFlushes, "Number of instrumented flushed");
+STATISTIC(NumInstrumentedRetCheck, "Number of instrumented return check");
 STATISTIC(NumAccessesWithBadSize, "Number of accesses with bad size");
 
 namespace {
@@ -169,6 +170,7 @@ private:
                      const InstrumentedFunctionList &IFL);
   bool instrumentLoadOrStore(Instruction *I, const DataLayout &DL);
   bool instrumentFlush(Instruction *I);
+  bool instrumentRetCheck(Instruction *I);
   FunctionCallee findCallbackFunction();
   bool addrPointsToConstantData(Value *Addr);
   void chooseInstructionsToInstrument(SmallVectorImpl<Instruction *> &Local,
@@ -188,6 +190,7 @@ private:
   SmallVector<Instruction *, 8> AtomicAccesses;
   SmallVector<Instruction *, 8> MemIntrinCalls;
   SmallVector<Instruction *, 8> MemBarrier;
+  SmallVector<Instruction *, 8> AllReturns;
   SmallVector<Instruction *, 8> OutofScopeCalls;
   /* Callbacks */
   // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
@@ -197,6 +200,7 @@ private:
   FunctionCallee SSBLoad[kNumberOfAccessSizes];
   FunctionCallee SSBStore[kNumberOfAccessSizes];
   FunctionCallee SSBFlush;
+  FunctionCallee SSBRetCheck;
   enum Architecture { X86_64, Aarch64, kNumberOfArchitectures };
   Architecture TargetArchitecture;
   void appendFunctionName(Function &F);
@@ -399,11 +403,11 @@ bool SoftStoreBuffer::instrumentFlushOnly(Function &F, bool DoInstrument) {
 
   instrumentFlush(F.getEntryBlock().getTerminator());
 
-  // for (auto &BB : F) {
-  //   for (auto &I : BB)
-  //     if (isa<ReturnInst>(I))
-  //       instrumentFlush(BB.getFirstNonPHI());
-  // }
+  for (auto &BB : F) {
+    for (auto &I : BB)
+      if (isa<ReturnInst>(I))
+        instrumentFlush(BB.getFirstNonPHI());
+  }
 
   // We do not instrument other instructions in entry functions.
   return true;
@@ -438,6 +442,8 @@ bool SoftStoreBuffer::instrumentAll(Function &F, const TargetLibraryInfo &TLI,
         AtomicAccesses.push_back(&Inst);
       else if (isInterestingLoadStore(&Inst))
         LocalLoadsAndStores.push_back(&Inst);
+      else if (isa<ReturnInst>(&Inst))
+        AllReturns.push_back(&Inst);
       else if (isa<CallInst>(Inst) || isa<InvokeInst>(Inst)) {
         if (CallInst *CI = dyn_cast<CallInst>(&Inst))
           maybeMarkSanitizerLibraryCallNoBuiltin(CI, &TLI);
@@ -468,6 +474,9 @@ bool SoftStoreBuffer::instrumentAll(Function &F, const TargetLibraryInfo &TLI,
   if (ClInstrumentOutofScopeCalls)
     for (auto Inst : OutofScopeCalls)
       Res |= instrumentFlush(Inst);
+
+  for (auto Inst : AllReturns)
+    instrumentRetCheck(Inst);
 
   return Res | HasCalls;
 }
@@ -540,6 +549,19 @@ bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
   return true;
 }
 
+bool SoftStoreBuffer::instrumentRetCheck(Instruction *I) {
+  IRBuilder<> IRB(I);
+  LLVM_DEBUG(dbgs() << "Instrumenting a retchk callback at " << *I << "\n");
+  auto Args = SmallVector<Value *, 8>();
+  Value *ReturnAddress = IRB.CreateCall(
+      Intrinsic::getDeclaration(I->getModule(), Intrinsic::returnaddress),
+      IRB.getInt32(0));
+  Args.push_back(ReturnAddress);
+  IRB.CreateCall(SSBRetCheck, Args);
+  NumInstrumentedRetCheck++;
+  return true;
+}
+
 static void dumpIR(Function &F, std::string prefix) {
   const char *tmpdirp;
   std::string tmpdir;
@@ -590,6 +612,9 @@ void SoftStoreBuffer::initialize(Module &M) {
         M.getOrInsertFunction(LoadName, Attr, IntNTy, IRB.getInt8PtrTy());
     SmallString<32> FlushName("__ssb_" + TargetMemoryModelStr + "_flush");
     SSBFlush = M.getOrInsertFunction(FlushName, Attr, IRB.getVoidTy());
+    SmallString<32> RetCheckName("__ssb_" + TargetMemoryModelStr + "_retchk");
+    SSBRetCheck = M.getOrInsertFunction(RetCheckName, Attr, IRB.getVoidTy(),
+                                        IRB.getInt8PtrTy());
   }
 }
 
