@@ -552,7 +552,12 @@ bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
 bool SoftStoreBuffer::instrumentRetCheck(Instruction *I) {
   IRBuilder<> IRB(I);
   LLVM_DEBUG(dbgs() << "Instrumenting a retchk callback at " << *I << "\n");
-  IRB.CreateCall(SSBRetCheck);
+  auto Args = SmallVector<Value *, 8>();
+  Value *ReturnAddress = IRB.CreateCall(
+      Intrinsic::getDeclaration(I->getModule(), Intrinsic::returnaddress),
+      IRB.getInt32(0));
+  Args.push_back(ReturnAddress);
+  IRB.CreateCall(SSBRetCheck, Args);
   NumInstrumentedRetCheck++;
   return true;
 }
@@ -608,7 +613,8 @@ void SoftStoreBuffer::initialize(Module &M) {
     SmallString<32> FlushName("__ssb_" + TargetMemoryModelStr + "_flush");
     SSBFlush = M.getOrInsertFunction(FlushName, Attr, IRB.getVoidTy());
     SmallString<32> RetCheckName("__ssb_" + TargetMemoryModelStr + "_retchk");
-    SSBRetCheck = M.getOrInsertFunction(RetCheckName, Attr, IRB.getVoidTy());
+    SSBRetCheck = M.getOrInsertFunction(RetCheckName, Attr, IRB.getVoidTy(),
+                                        IRB.getInt8PtrTy());
   }
 }
 
