@@ -6,7 +6,7 @@ instances:
  - upstream-selinux-kasan:	[linux-next, x86_64, gcc, lsm, selinux, slab, kasan, kfence]
  - upstream-smack-kasan:	[linux-next, x86_64, clang, bpfjit, lsm, smack, kasan, kfence]
  - upstream-kmsan:		[x86_64, clang, lsm, apparmor, nonoise, kmsan]
- - upstream-kcsan:		[upstream, x86_64, clang, bpfjit, lsm, apparmor, slab, nonoise, kcsan]
+ - upstream-kcsan:		[upstream, x86_64, clang, baseline, slab, nonoise, kcsan]
  - upstream-leak:		[upstream, x86_64, gcc, bpfjit, lsm, apparmor, slab, nonoise, kmemleak]
  - upstream-usb:		[upstream, x86_64, gcc, lsm, apparmor, onlyusb, kasan]
  - upstream-arm64-kasan:	[upstream, arm64, gcc, lsm, selinux, reduced, kasan]
@@ -17,8 +17,8 @@ instances:
  - upstream-riscv64-kasan:	[upstream, riscv, gcc, bpfjit, lsm, apparmor, reduced, kasan]
  - upstream-s390-kasan:		[upstream, s390, gcc, bpfjit, lsm, selinux, nonoise, reduced, kasan]
  - stable-5.4-kasan:		[stable-5.4, x86_64, gcc, bpfjit, lsm, apparmor, kasan]
- - android-5.4:			[android, android-5.4, x86_64, clang, onlyusb, nonoise, kasan]
- - chromeos-5.4:		[chromeos, chromeos-5.4, x86_64, onlyusb, kasan]
+ - android-5.4:			[android, android-5.4, nodefconfig, x86_64, clang, onlyusb, nonoise, kasan]
+ - chromeos-5.4:		[chromeos, chromeos-5.4, nodefconfig, x86_64, onlyusb, kasan]
 
 # These files are included from the bits/ dir.
 includes:
@@ -35,6 +35,7 @@ includes:
  - s390.yml: [s390]
  - subsystems.yml: [-baseline, -onlyusb]
  - subsystems_net.yml: [-baseline, -onlyusb, -reduced]
+ - crypto.yml: [-baseline, -onlyusb]
  - bpf.yml: [-baseline, -onlyusb]
  - partitions.yml: [-baseline, -onlyusb, -reduced]
  - filesystems.yml: [-baseline, -onlyusb, -reduced]

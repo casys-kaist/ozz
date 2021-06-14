@@ -73,6 +73,8 @@ func ctorLinux(cfg *config) (Reporter, []string, error) {
 		regexp.MustCompile(`^arch/.*/kernel/traps.c`),
 		regexp.MustCompile(`^arch/.*/mm/fault.c`),
 		regexp.MustCompile(`^arch/.*/mm/physaddr.c`),
+		regexp.MustCompile(`^arch/.*/kernel/stacktrace.c`),
+		regexp.MustCompile(`^arch/arm64/kernel/entry.*.c`),
 		regexp.MustCompile(`^kernel/locking/.*`),
 		regexp.MustCompile(`^kernel/panic.c`),
 		regexp.MustCompile(`^kernel/printk/printk.*.c`),
@@ -659,6 +661,10 @@ var linuxStallAnchorFrames = []*regexp.Regexp{
 	compile("vfs_iter_write"),
 	compile("do_iter_read"),
 	compile("do_iter_write"),
+	compile("call_read_iter"),
+	compile("call_write_iter"),
+	compile("new_sync_read"),
+	compile("new_sync_write"),
 	compile("vfs_ioctl"),
 	compile("ksys_ioctl"), // vfs_ioctl may be inlined
 	compile("compat_ioctl"),
@@ -695,7 +701,6 @@ var linuxStallAnchorFrames = []*regexp.Regexp{
 	compile("^(sys_)?(socketpair|connect|ioctl)"),
 	// Page fault entry points:
 	compile("__do_fault"),
-	compile("handle_mm_fault"),
 	compile("do_page_fault"),
 	compile("^page_fault$"),
 	// exit_to_usermode_loop callbacks:
@@ -759,11 +764,13 @@ var linuxStackParams = &stackParams{
 		"warn_alloc",
 		"warn_bogus",
 		"__warn",
-		"alloc_pages",
+		"alloc_page",
 		"kmalloc",
 		"kcalloc",
 		"kzalloc",
 		"krealloc",
+		"kmem_cache",
+		"slab_",
 		"debug_object",
 		"timer_is_static_object",
 		"work_is_static_object",
@@ -981,7 +988,7 @@ var linuxOopses = append([]*oops{
 						linuxCallTrace,
 						parseStackTrace,
 					},
-					skip: []string{"kmem_", "slab_", "kfree", "vunmap", "vfree"},
+					skip: []string{"slab_", "kfree", "vunmap", "vfree"},
 				},
 			},
 			{
@@ -1275,7 +1282,7 @@ var linuxOopses = append([]*oops{
 				fmt:   "WARNING: ODEBUG bug in %[1]v",
 				// Skip all users of ODEBUG as well.
 				stack: warningStackFmt("debug_", "rcu", "hrtimer_", "timer_",
-					"work_", "percpu_", "kmem_", "slab_", "kfree", "vunmap",
+					"work_", "percpu_", "vunmap",
 					"vfree", "__free_", "debug_check", "kobject_"),
 			},
 			{
@@ -1319,6 +1326,11 @@ var linuxOopses = append([]*oops{
 				fmt:   "WARNING: kmalloc bug in %[1]v",
 				stack: warningStackFmt("kmalloc", "kcalloc", "kzalloc", "krealloc",
 					"vmalloc", "slab", "kmem"),
+			},
+			{
+				title: compile("WARNING: .*mm/vmalloc.c.*__vmalloc_node"),
+				fmt:   "WARNING: zero-size vmalloc in %[1]v",
+				stack: warningStackFmt("vmalloc"),
 			},
 			{
 				title: compile("WARNING: .* usb_submit_urb"),

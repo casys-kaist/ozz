@@ -7,12 +7,22 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/google/syzkaller/pkg/osutil"
 	"github.com/google/syzkaller/sys/targets"
 )
+
+func TestCollectMachineInfo(t *testing.T) {
+	info, err := CollectMachineInfo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("machine info:\n%s", info)
+}
 
 func TestReadCPUInfoLinux(t *testing.T) {
 	buf := new(bytes.Buffer)
@@ -141,6 +151,14 @@ D:	d
 		t.Fatalf("expected \"%s: %s\", got end of output",
 			expected.key, expected.val)
 	}
+}
+
+func TestGetModulesInfo(t *testing.T) {
+	modules, err := getModulesInfo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("modules:\n%v", modules)
 }
 
 type cannedTest struct {
@@ -361,4 +379,35 @@ address sizes	: 46 bits physical, 48 bits virtual
 power management:
 `,
 	},
+}
+
+func TestGetGlobsInfo(t *testing.T) {
+	if err := osutil.MkdirAll("globstest/a/b/c/d"); err != nil {
+		t.Fatal(err)
+	}
+	if err := osutil.MkdirAll("globstest/a/b/c/e"); err != nil {
+		t.Fatal(err)
+	}
+	if err := osutil.MkdirAll("globstest/a/c/d"); err != nil {
+		t.Fatal(err)
+	}
+	if err := osutil.MkdirAll("globstest/a/c/e"); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll("globstest")
+
+	globs := map[string]bool{
+		"globstest/a/**/*:-globstest/a/c/e": true,
+	}
+	infos, err := getGlobsInfo(globs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, files := range infos {
+		for _, file := range files {
+			if file == "globstest/a/c/e" {
+				t.Fatal("failed to exclude globstest/a/c/e")
+			}
+		}
+	}
 }

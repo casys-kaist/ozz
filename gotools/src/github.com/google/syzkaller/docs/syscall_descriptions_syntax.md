@@ -9,7 +9,7 @@ arg = argname type
 argname = identifier
 type = typename [ "[" type-options "]" ]
 typename = "const" | "intN" | "intptr" | "flags" | "array" | "ptr" |
-	   "string" | "strconst" | "filename" | "len" |
+	   "string" | "strconst" | "filename" | "glob" | "len" |
 	   "bytesize" | "bytesizeN" | "bitsize" | "vma" | "proc"
 type-options = [type-opt ["," type-opt]]
 ```
@@ -42,6 +42,10 @@ rest of the type-options are type-specific:
 "stringnoz": a non-zero-terminated memory buffer (no pointer indirection implied), type-options:
 	either a string value in quotes for constant strings (e.g. "foo" or `deadbeef` for hex literal),
 	or a reference to string flags,
+"glob": glob pattern to match on the target files, type-options:
+	a pattern string in quotes (syntax: https://golang.org/pkg/path/filepath/#Match)
+	(e.g. "/sys/" or "/sys/**/*"),
+	or include exclude glob too (e.g. "/sys/**/*:-/sys/power/state")
 "fmt": a string representation of an integer (not zero-terminated), type-options:
 	format (one of "dec", "hex", "oct") and the value (a resource, int, flags, const or proc)
 	the resulting data is always fixed-size (formatted as "%020llu", "0x%016llx" or "%023llo", respectively)

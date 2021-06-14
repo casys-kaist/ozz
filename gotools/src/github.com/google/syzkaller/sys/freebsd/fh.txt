@@ -16,7 +16,8 @@ fhlinkat(fhp ptr[in, fhandle], fd fd, to ptr[in, filename])
 
 fhopen(fhp ptr[in, fhandle], flags flags[open_flags]) fd
 fhstat(fhp ptr[in, fhandle], statbuf ptr[out, stat])
-fhstatfs(fhp ptr[in, fhandle], buf buffer[out])
+fhstatfs(fhp ptr[in, fhandle], buf ptr[out, statfs])
+freebsd11_fhstatfs(fhp ptr[in, fhandle], buf ptr[out, freebsd11_statfs])
 
 fhreadlink(fhp ptr[in, fhandle], buf buffer[out], bufsize len[buf])
 
@@ -35,4 +36,4 @@ fhandle {
 	fh_fid	fid
 }
 
-getfhat_flags = AT_SYMLINK_NOFOLLOW, AT_BENEATH
+getfhat_flags = AT_SYMLINK_NOFOLLOW

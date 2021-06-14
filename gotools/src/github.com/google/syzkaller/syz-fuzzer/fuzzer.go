@@ -60,7 +60,8 @@ type Fuzzer struct {
 	maxSignal    signal.Signal // max signal ever observed including flakes
 	newSignal    signal.Signal // diff of maxSignal since last sync with master
 
-	logMu sync.Mutex
+	checkResult *rpctype.CheckArgs
+	logMu       sync.Mutex
 }
 
 type FuzzerSnapshot struct {
@@ -166,30 +167,31 @@ func main() {
 	}()
 
 	checkArgs := &checkArgs{
-		target:      target,
-		sandbox:     sandbox,
-		ipcConfig:   config,
-		ipcExecOpts: execOpts,
+		target:         target,
+		sandbox:        sandbox,
+		ipcConfig:      config,
+		ipcExecOpts:    execOpts,
+		gitRevision:    prog.GitRevision,
+		targetRevision: target.Revision,
 	}
 	if *flagTest {
 		testImage(*flagManager, checkArgs)
 		return
 	}
 
-	machineInfo, err := host.CollectMachineInfo()
-	if err != nil {
-		log.Fatalf("failed to collect machine information: %v", err)
-	}
+	machineInfo, modules := collectMachineInfos(target)
 
 	log.Logf(0, "dialing manager at %v", *flagManager)
 	manager, err := rpctype.NewRPCClient(*flagManager, timeouts.Scale)
 	if err != nil {
 		log.Fatalf("failed to connect to manager: %v ", err)
 	}
+
 	log.Logf(1, "connecting to manager...")
 	a := &rpctype.ConnectArgs{
 		Name:        *flagName,
 		MachineInfo: machineInfo,
+		Modules:     modules,
 	}
 	r := &rpctype.ConnectRes{}
 	if err := manager.Call("Manager.Connect", a, r); err != nil {
@@ -198,6 +200,11 @@ func main() {
 	featureFlags, err := csource.ParseFeaturesFlags("none", "none", true)
 	if err != nil {
 		log.Fatal(err)
+	}
+	if r.CoverFilterBitmap != nil {
+		if err := osutil.WriteFile("syz-cover-bitmap", r.CoverFilterBitmap); err != nil {
+			log.Fatalf("failed to write syz-cover-bitmap: %v", err)
+		}
 	}
 	if r.CheckResult == nil {
 		checkArgs.gitRevision = r.GitRevision
@@ -250,6 +257,7 @@ func main() {
 		faultInjectionEnabled:    r.CheckResult.Features[host.FeatureFault].Enabled,
 		comparisonTracingEnabled: r.CheckResult.Features[host.FeatureComparisons].Enabled,
 		corpusHashes:             make(map[hash.Sig]struct{}),
+		checkResult:              r.CheckResult,
 	}
 	gateCallback := fuzzer.useBugFrames(r, *flagProcs)
 	fuzzer.gate = ipc.NewGate(2**flagProcs, gateCallback)
@@ -266,7 +274,7 @@ func main() {
 	}
 	fuzzer.choiceTable = target.BuildChoiceTable(fuzzer.corpus, calls)
 
-	if r.EnabledCoverFilter {
+	if r.CoverFilterBitmap != nil {
 		fuzzer.execOpts.Flags |= ipc.FlagEnableCoverageFilter
 	}
 
@@ -281,6 +289,25 @@ func main() {
 	}
 
 	fuzzer.pollLoop()
+}
+
+func collectMachineInfos(target *prog.Target) ([]byte, []host.KernelModule) {
+	machineInfo, err := host.CollectMachineInfo()
+	if err != nil {
+		log.Fatalf("failed to collect machine information: %v", err)
+	}
+	modules, err := host.CollectModulesInfo()
+	if err != nil {
+		log.Fatalf("failed to collect modules info: %v", err)
+	}
+
+	globFiles, err := host.CollectGlobsInfo(target.GetGlobs())
+	if err != nil {
+		log.Fatalf("faield to collect glob info: %v", err)
+	}
+	target.UpdateGlobs(globFiles)
+
+	return machineInfo, modules
 }
 
 // Returns gateCallback for leak checking if enabled.
@@ -442,10 +469,34 @@ func (fuzzer *Fuzzer) deserializeInput(inp []byte) *prog.Prog {
 	if err != nil {
 		log.Fatalf("failed to deserialize prog: %v\n%s", err, inp)
 	}
+	// We build choice table only after we received the initial corpus,
+	// so we don't check the initial corpus here, we check it later in BuildChoiceTable.
+	if fuzzer.choiceTable != nil {
+		fuzzer.checkDisabledCalls(p)
+	}
 	if len(p.Calls) > prog.MaxCalls {
 		return nil
 	}
 	return p
+}
+
+func (fuzzer *Fuzzer) checkDisabledCalls(p *prog.Prog) {
+	for _, call := range p.Calls {
+		if !fuzzer.choiceTable.Enabled(call.Meta.ID) {
+			fmt.Printf("executing disabled syscall %v [%v]\n", call.Meta.Name, call.Meta.ID)
+			sandbox := ipc.FlagsToSandbox(fuzzer.config.Flags)
+			fmt.Printf("check result for sandbox=%v:\n", sandbox)
+			for _, id := range fuzzer.checkResult.EnabledCalls[sandbox] {
+				meta := fuzzer.target.Syscalls[id]
+				fmt.Printf("  %v [%v]\n", meta.Name, meta.ID)
+			}
+			fmt.Printf("choice table:\n")
+			for i, meta := range fuzzer.target.Syscalls {
+				fmt.Printf("  #%v: %v [%v]: enabled=%v\n", i, meta.Name, meta.ID, fuzzer.choiceTable.Enabled(meta.ID))
+			}
+			panic("disabled syscall")
+		}
+	}
 }
 
 func (fuzzer *FuzzerSnapshot) chooseProgram(r *rand.Rand) *prog.Prog {

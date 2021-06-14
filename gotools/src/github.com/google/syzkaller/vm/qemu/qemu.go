@@ -4,6 +4,7 @@
 package qemu
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,6 +25,7 @@ import (
 )
 
 func init() {
+	var _ vmimpl.Infoer = (*instance)(nil)
 	vmimpl.Register("qemu", ctor, true)
 }
 
@@ -71,6 +73,7 @@ type Pool struct {
 	cfg        *Config
 	target     *targets.Target
 	archConfig *archConfig
+	version    string
 }
 
 type instance struct {
@@ -78,6 +81,8 @@ type instance struct {
 	cfg         *Config
 	target      *targets.Target
 	archConfig  *archConfig
+	version     string
+	args        []string
 	image       string
 	debug       bool
 	os          string
@@ -119,41 +124,29 @@ var archConfigs = map[string]*archConfig{
 		// But other arches don't use e1000e, e.g. arm64 uses virtio by default.
 		NetDev: "e1000",
 		RngDev: "virtio-rng-pci",
-		CmdLine: append(linuxCmdline,
+		CmdLine: []string{
 			"root=/dev/sda",
 			"console=ttyS0",
-			"kvm-intel.nested=1",
-			"kvm-intel.unrestricted_guest=1",
-			"kvm-intel.vmm_exclusive=1",
-			"kvm-intel.fasteoi=1",
-			"kvm-intel.ept=1",
-			"kvm-intel.flexpriority=1",
-			"kvm-intel.vpid=1",
-			"kvm-intel.emulate_invalid_guest_state=1",
-			"kvm-intel.eptad=1",
-			"kvm-intel.enable_shadow_vmcs=1",
-			"kvm-intel.pml=1",
-			"kvm-intel.enable_apicv=1",
-		),
+		},
 	},
 	"linux/386": {
 		Qemu:   "qemu-system-i386",
 		NetDev: "e1000",
 		RngDev: "virtio-rng-pci",
-		CmdLine: append(linuxCmdline,
+		CmdLine: []string{
 			"root=/dev/sda",
 			"console=ttyS0",
-		),
+		},
 	},
 	"linux/arm64": {
 		Qemu:     "qemu-system-aarch64",
 		QemuArgs: "-machine virt,virtualization=on -cpu cortex-a57",
 		NetDev:   "virtio-net-pci",
 		RngDev:   "virtio-rng-pci",
-		CmdLine: append(linuxCmdline,
+		CmdLine: []string{
 			"root=/dev/vda",
 			"console=ttyAMA0",
-		),
+		},
 	},
 	"linux/arm": {
 		Qemu:                   "qemu-system-arm",
@@ -161,27 +154,26 @@ var archConfigs = map[string]*archConfig{
 		NetDev:                 "virtio-net-device",
 		RngDev:                 "virtio-rng-device",
 		UseNewQemuImageOptions: true,
-		CmdLine: append(linuxCmdline,
+		CmdLine: []string{
 			"root=/dev/vda",
 			"console=ttyAMA0",
-		),
+		},
 	},
 	"linux/mips64le": {
 		Qemu:     "qemu-system-mips64el",
 		QemuArgs: "-M malta -cpu MIPS64R2-generic -nodefaults",
 		NetDev:   "e1000",
 		RngDev:   "virtio-rng-pci",
-		CmdLine: append(linuxCmdline,
+		CmdLine: []string{
 			"root=/dev/sda",
 			"console=ttyS0",
-		),
+		},
 	},
 	"linux/ppc64le": {
 		Qemu:     "qemu-system-ppc64",
 		QemuArgs: "-enable-kvm -vga none",
 		NetDev:   "virtio-net-pci",
 		RngDev:   "virtio-rng-pci",
-		CmdLine:  linuxCmdline,
 	},
 	"linux/riscv64": {
 		Qemu:                   "qemu-system-riscv64",
@@ -189,25 +181,32 @@ var archConfigs = map[string]*archConfig{
 		NetDev:                 "virtio-net-pci",
 		RngDev:                 "virtio-rng-pci",
 		UseNewQemuImageOptions: true,
-		CmdLine: append(linuxCmdline,
+		CmdLine: []string{
 			"root=/dev/vda",
 			"console=ttyS0",
-		),
+		},
 	},
 	"linux/s390x": {
 		Qemu:     "qemu-system-s390x",
 		QemuArgs: "-M s390-ccw-virtio -cpu max,zpci=on",
 		NetDev:   "virtio-net-pci",
 		RngDev:   "virtio-rng-ccw",
-		CmdLine: append(linuxCmdline,
+		CmdLine: []string{
 			"root=/dev/vda",
-		),
+		},
 	},
 	"freebsd/amd64": {
 		Qemu:     "qemu-system-x86_64",
 		QemuArgs: "-enable-kvm",
 		NetDev:   "e1000",
 		RngDev:   "virtio-rng-pci",
+	},
+	"darwin/amd64": {
+		Qemu:      "qemu-system-x86_64",
+		QemuArgs:  "-enable-kvm -machine q35 -cpu host,migratable=off",
+		TargetDir: "/tmp",
+		NetDev:    "e1000-82545em",
+		RngDev:    "virtio-rng-pci",
 	},
 	"netbsd/amd64": {
 		Qemu:     "qemu-system-x86_64",
@@ -232,18 +231,6 @@ var archConfigs = map[string]*archConfig{
 		NetDev:   "e1000",
 		RngDev:   "virtio-rng-pci",
 	},
-}
-
-var linuxCmdline = []string{
-	"earlyprintk=serial",
-	"oops=panic",
-	"nmi_watchdog=panic",
-	"panic_on_warn=1",
-	"panic=1",
-	"ftrace_dump_on_oops=orig_cpu",
-	"vsyscall=native",
-	"net.ifnames=0",
-	"biosdevname=0",
 }
 
 func ctor(env *vmimpl.Env) (vmimpl.Pool, error) {
@@ -291,9 +278,17 @@ func ctor(env *vmimpl.Env) (vmimpl.Pool, error) {
 	}
 	cfg.Kernel = osutil.Abs(cfg.Kernel)
 	cfg.Initrd = osutil.Abs(cfg.Initrd)
+
+	output, err := osutil.RunCmd(time.Minute, "", cfg.Qemu, "--version")
+	if err != nil {
+		return nil, err
+	}
+	version := string(bytes.Split(output, []byte{'\n'})[0])
+
 	pool := &Pool{
 		env:        env,
 		cfg:        cfg,
+		version:    version,
 		target:     targets.Get(env.OS, env.Arch),
 		archConfig: archConfig,
 	}
@@ -339,6 +334,7 @@ func (pool *Pool) ctor(workdir, sshkey, sshuser string, index int) (vmimpl.Insta
 		cfg:        pool.cfg,
 		target:     pool.target,
 		archConfig: pool.archConfig,
+		version:    pool.version,
 		image:      pool.env.Image,
 		debug:      pool.env.Debug,
 		os:         pool.env.OS,
@@ -400,7 +396,7 @@ func (inst *instance) boot() error {
 	args := []string{
 		"-m", strconv.Itoa(inst.cfg.Mem),
 		"-smp", strconv.Itoa(inst.cfg.CPU),
-		"-chardev", fmt.Sprintf("socket,id=SOCKSYZ,server,nowait,host=localhost,port=%v", inst.monport),
+		"-chardev", fmt.Sprintf("socket,id=SOCKSYZ,server=on,nowait,host=localhost,port=%v", inst.monport),
 		"-mon", "chardev=SOCKSYZ,mode=control",
 		"-display", "none",
 		"-serial", "stdio",
@@ -465,6 +461,7 @@ func (inst *instance) boot() error {
 	if inst.debug {
 		log.Logf(0, "running command: %v %#v", inst.cfg.Qemu, args)
 	}
+	inst.args = args
 	qemu := osutil.Command(inst.cfg.Qemu, args...)
 	qemu.Stdout = inst.wpipe
 	qemu.Stderr = inst.wpipe
@@ -645,6 +642,11 @@ func (inst *instance) Run(timeout time.Duration, stop <-chan bool, command strin
 		cmd.Wait()
 	}()
 	return inst.merger.Output, errc, nil
+}
+
+func (inst *instance) Info() ([]byte, error) {
+	info := fmt.Sprintf("%v\n%v %q\n", inst.version, inst.cfg.Qemu, inst.args)
+	return []byte(info), nil
 }
 
 func (inst *instance) Diagnose(rep *report.Report) ([]byte, bool) {

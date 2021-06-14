@@ -128,6 +128,7 @@ func getBuilder(targetOS, targetArch, vmType string) (builder, error) {
 		{targets.OpenBSD, []string{targets.AMD64}, []string{"gce", "vmm"}, openbsd{}},
 		{targets.NetBSD, []string{targets.AMD64}, []string{"gce", "qemu"}, netbsd{}},
 		{targets.FreeBSD, []string{targets.AMD64}, []string{"gce", "qemu"}, freebsd{}},
+		{targets.Darwin, []string{targets.AMD64}, []string{"qemu"}, darwin{}},
 		{targets.TestOS, []string{targets.TestArch64}, []string{"qemu"}, test{}},
 	}
 	for _, s := range supported {
@@ -295,6 +296,7 @@ var buildFailureCauses = [...]buildFailureCause{
 	{pattern: regexp.MustCompile(`: Permission denied`)},
 	{pattern: regexp.MustCompile(`: not found`)},
 	{pattern: regexp.MustCompile(`^([a-zA-Z0-9_\-/.]+):[0-9]+:([0-9]+:)?.*(error|invalid|fatal|wrong)`)},
+	{pattern: regexp.MustCompile(`FAILED unresolved symbol`)},
 	{weak: true, pattern: regexp.MustCompile(`: final link failed: `)},
 	{weak: true, pattern: regexp.MustCompile(`collect2: error: `)},
 	{weak: true, pattern: regexp.MustCompile(`FAILED: Build did NOT complete`)},

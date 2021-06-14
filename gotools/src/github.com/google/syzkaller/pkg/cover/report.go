@@ -8,15 +8,16 @@ import (
 	"sort"
 
 	"github.com/google/syzkaller/pkg/cover/backend"
+	"github.com/google/syzkaller/pkg/host"
+	"github.com/google/syzkaller/pkg/mgrconfig"
 	"github.com/google/syzkaller/sys/targets"
 )
 
 type ReportGenerator struct {
 	target    *targets.Target
 	srcDir    string
-	objDir    string
 	buildDir  string
-	subsystem []Subsystem
+	subsystem []mgrconfig.Subsystem
 	*backend.Impl
 }
 
@@ -27,20 +28,19 @@ type Prog struct {
 
 var RestorePC = backend.RestorePC
 
-func MakeReportGenerator(target *targets.Target, vm, objDir, srcDir, buildDir string,
-	subsystem []Subsystem) (*ReportGenerator, error) {
-	impl, err := backend.Make(target, vm, objDir, srcDir, buildDir)
+func MakeReportGenerator(target *targets.Target, vm, objDir, srcDir, buildDir string, subsystem []mgrconfig.Subsystem,
+	moduleObj []string, modules []host.KernelModule) (*ReportGenerator, error) {
+	impl, err := backend.Make(target, vm, objDir, srcDir, buildDir, moduleObj, modules)
 	if err != nil {
 		return nil, err
 	}
-	subsystem = append(subsystem, Subsystem{
+	subsystem = append(subsystem, mgrconfig.Subsystem{
 		Name:  "all",
 		Paths: []string{""},
 	})
 	rg := &ReportGenerator{
 		target:    target,
 		srcDir:    srcDir,
-		objDir:    objDir,
 		buildDir:  buildDir,
 		subsystem: subsystem,
 		Impl:      impl,
@@ -152,7 +152,7 @@ func (rg *ReportGenerator) lazySymbolize(progs []Prog) error {
 	}
 	symbolize := make(map[*backend.Symbol]bool)
 	uniquePCs := make(map[uint64]bool)
-	var pcs []uint64
+	pcs := make(map[*backend.Module][]uint64)
 	for _, prog := range progs {
 		for _, pc := range prog.PCs {
 			if uniquePCs[pc] {
@@ -160,20 +160,15 @@ func (rg *ReportGenerator) lazySymbolize(progs []Prog) error {
 			}
 			uniquePCs[pc] = true
 			sym := rg.findSymbol(pc)
-			if sym == nil {
+			if sym == nil || (sym.Symbolized || symbolize[sym]) {
 				continue
 			}
-			if !sym.Symbolized && !symbolize[sym] {
-				symbolize[sym] = true
-				pcs = append(pcs, sym.PCs...)
-			}
+			symbolize[sym] = true
+			pcs[sym.Module] = append(pcs[sym.Module], sym.PCs...)
 		}
 	}
 	if len(uniquePCs) == 0 {
 		return fmt.Errorf("no coverage collected so far")
-	}
-	if len(pcs) == 0 {
-		return nil
 	}
 	frames, err := rg.Symbolize(pcs)
 	if err != nil {

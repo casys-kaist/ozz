@@ -130,3 +130,70 @@ func TestExecutorMacros(t *testing.T) {
 		}
 	}
 }
+
+func TestSource(t *testing.T) {
+	t.Parallel()
+	target, err := prog.GetTarget(targets.TestOS, targets.TestArch64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type Test struct {
+		input  string
+		output string
+	}
+	tests := []Test{
+		{
+			input: `
+r0 = csource0(0x1)
+csource1(r0)
+`,
+			output: `
+res = syscall(SYS_csource0, 1);
+if (res != -1)
+	r[0] = res;
+syscall(SYS_csource1, r[0]);
+`,
+		},
+		{
+			input: `
+csource2(&AUTO="12345678")
+csource3(&AUTO)
+csource4(&AUTO)
+csource5(&AUTO)
+csource6(&AUTO)
+`,
+			output: `
+NONFAILING(memcpy((void*)0x20000040, "\x12\x34\x56\x78", 4));
+syscall(SYS_csource2, 0x20000040ul);
+NONFAILING(memset((void*)0x20000080, 0, 10));
+syscall(SYS_csource3, 0x20000080ul);
+NONFAILING(memset((void*)0x200000c0, 48, 10));
+syscall(SYS_csource4, 0x200000c0ul);
+NONFAILING(memcpy((void*)0x20000100, "0101010101", 10));
+syscall(SYS_csource5, 0x20000100ul);
+NONFAILING(memcpy((void*)0x20000140, "101010101010", 12));
+syscall(SYS_csource6, 0x20000140ul);
+`,
+		},
+	}
+	for i, test := range tests {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			p, err := target.Deserialize([]byte(test.input), prog.Strict)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := &context{
+				target:    target,
+				sysTarget: targets.Get(target.OS, target.Arch),
+			}
+			calls, _, err := ctx.generateProgCalls(p, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := regexp.MustCompile(`(\n|^)\t`).ReplaceAllString(strings.Join(calls, ""), "\n")
+			if test.output != got {
+				t.Fatalf("input:\n%v\nwant:\n%v\ngot:\n%v", test.input, test.output, got)
+			}
+		})
+	}
+}
