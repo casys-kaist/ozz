@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/google/syzkaller/pkg/cover/backend"
+	"github.com/google/syzkaller/pkg/mgrconfig"
 	"github.com/google/syzkaller/pkg/osutil"
 	"github.com/google/syzkaller/pkg/symbolizer"
 	_ "github.com/google/syzkaller/sys"
@@ -43,13 +44,13 @@ func TestReportGenerator(t *testing.T) {
 			Name:     "no-coverage",
 			CFlags:   []string{"-g"},
 			AddCover: true,
-			Result:   `.* doesn't contain coverage callbacks \(set CONFIG_KCOV=y\)`,
+			Result:   `.* doesn't contain coverage callbacks \(set CONFIG_KCOV=y on linux\)`,
 		},
 		{
 			Name:     "no-debug-info",
 			CFlags:   []string{"-fsanitize-coverage=trace-pc"},
 			AddCover: true,
-			Result:   `failed to parse DWARF.*\(set CONFIG_DEBUG_INFO=y\?\)`,
+			Result:   `failed to parse DWARF.*\(set CONFIG_DEBUG_INFO=y on linux\)`,
 		},
 		{
 			Name:   "no-pcs",
@@ -180,7 +181,7 @@ func generateReport(t *testing.T, target *targets.Target, test Test) ([]byte, []
 	}
 	defer os.RemoveAll(dir)
 	bin := buildTestBinary(t, target, test, dir)
-	subsystem := []Subsystem{
+	subsystem := []mgrconfig.Subsystem{
 		{
 			Name: "sound",
 			Paths: []string{
@@ -190,7 +191,7 @@ func generateReport(t *testing.T, target *targets.Target, test Test) ([]byte, []
 		},
 	}
 
-	rg, err := MakeReportGenerator(target, "", dir, dir, dir, subsystem)
+	rg, err := MakeReportGenerator(target, "", dir, dir, dir, subsystem, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}

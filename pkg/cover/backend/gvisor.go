@@ -10,15 +10,19 @@ import (
 	"regexp"
 	"strconv"
 
+	"github.com/google/syzkaller/pkg/host"
 	"github.com/google/syzkaller/pkg/osutil"
 	"github.com/google/syzkaller/sys/targets"
 )
 
-func makeGvisor(target *targets.Target, objDir, srcDir, buildDir string) (*Impl, error) {
-	// pkg/build stores runsc as 'vmlinux' (we pretent to be linux), but a local build will have it as 'runsc'.
+func makeGvisor(target *targets.Target, objDir, srcDir, buildDir string, modules []host.KernelModule) (*Impl, error) {
+	if len(modules) != 0 {
+		return nil, fmt.Errorf("gvisor coverage does not support modules")
+	}
 	bin := filepath.Join(objDir, target.KernelObject)
+	// pkg/build stores runsc as 'vmlinux' (we pretent to be linux), but a local build will have it as 'runsc'.
 	if !osutil.IsExist(bin) {
-		bin = filepath.Join(objDir, "runsc")
+		bin = filepath.Join(filepath.Dir(bin), "runsc")
 	}
 	frames, err := gvisorSymbolize(bin, srcDir)
 	if err != nil {

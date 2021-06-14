@@ -11,6 +11,13 @@ var commonHeader = `
 
 #if GOOS_freebsd || GOOS_test && HOSTGOOS_freebsd
 #include <sys/endian.h>
+#elif GOOS_darwin
+#include <libkern/OSByteOrder.h>
+#define htobe16(x) OSSwapHostToBigInt16(x)
+#define htobe32(x) OSSwapHostToBigInt32(x)
+#define htobe64(x) OSSwapHostToBigInt64(x)
+#define le16toh(x) OSSwapLittleToHostInt16(x)
+#define htole16(x) OSSwapHostToLittleInt16(x)
 #elif GOOS_windows
 #define htobe16 _byteswap_ushort
 #define htobe32 _byteswap_ulong
@@ -45,7 +52,7 @@ NORETURN void doexit(int status)
 #if SYZ_EXECUTOR || SYZ_MULTI_PROC || SYZ_REPEAT && SYZ_CGROUPS ||         \
     SYZ_NET_DEVICES || __NR_syz_mount_image || __NR_syz_read_part_table || \
     __NR_syz_usb_connect || __NR_syz_usb_connect_ath9k ||                  \
-    (GOOS_freebsd || GOOS_openbsd || GOOS_netbsd) && SYZ_NET_INJECTION
+    (GOOS_freebsd || GOOS_darwin || GOOS_openbsd || GOOS_netbsd) && SYZ_NET_INJECTION
 static unsigned long long procid;
 #endif
 
@@ -188,7 +195,7 @@ static void use_temporary_dir(void)
 #endif
 #endif
 
-#if GOOS_akaros || GOOS_netbsd || GOOS_freebsd || GOOS_openbsd || GOOS_test
+#if GOOS_akaros || GOOS_netbsd || GOOS_freebsd || GOOS_darwin || GOOS_openbsd || GOOS_test
 #if (SYZ_EXECUTOR || SYZ_REPEAT) && SYZ_EXECUTOR_USES_FORK_SERVER && (SYZ_EXECUTOR || SYZ_USE_TMP_DIR)
 #include <dirent.h>
 #include <errno.h>
@@ -275,7 +282,7 @@ static void thread_start(void* (*fn)(void*), void* arg)
 #endif
 #endif
 
-#if GOOS_freebsd || GOOS_netbsd || GOOS_openbsd || GOOS_akaros || GOOS_test
+#if GOOS_freebsd || GOOS_darwin || GOOS_netbsd || GOOS_openbsd || GOOS_akaros || GOOS_test
 #if SYZ_EXECUTOR || SYZ_THREADED
 
 #include <pthread.h>
@@ -423,7 +430,7 @@ void child()
 }
 #endif
 
-#elif GOOS_freebsd || GOOS_netbsd || GOOS_openbsd
+#elif GOOS_freebsd || GOOS_darwin || GOOS_netbsd || GOOS_openbsd
 
 #include <unistd.h>
 
@@ -1622,12 +1629,11 @@ static int fault_injected(int fd)
 
 #endif
 
-#if GOOS_openbsd
-
+#if GOOS_openbsd || GOOS_darwin
 #define __syscall syscall
+#endif
 
-#if SYZ_EXECUTOR || __NR_syz_open_pts
-
+#if GOOS_openbsd && (SYZ_EXECUTOR || __NR_syz_open_pts)
 #include <termios.h>
 #include <util.h>
 
@@ -1641,15 +1647,14 @@ static uintptr_t syz_open_pts(void)
 		close(master);
 	return slave;
 }
-
-#endif
-
 #endif
 
 #if SYZ_EXECUTOR || SYZ_NET_INJECTION
 
 #include <fcntl.h>
+#if !GOOS_darwin
 #include <net/if_tun.h>
+#endif
 #include <sys/types.h>
 
 static int tunfd = -1;
@@ -1779,7 +1784,7 @@ static void initialize_tun(int tun_id)
 
 #endif
 
-#if SYZ_EXECUTOR || __NR_syz_emit_ethernet && SYZ_NET_INJECTION
+#if !GOOS_darwin && SYZ_EXECUTOR || __NR_syz_emit_ethernet && SYZ_NET_INJECTION
 #include <stdbool.h>
 #include <sys/uio.h>
 
@@ -1796,7 +1801,7 @@ static long syz_emit_ethernet(volatile long a0, volatile long a1)
 }
 #endif
 
-#if SYZ_EXECUTOR || SYZ_NET_INJECTION && (__NR_syz_extract_tcp_res || SYZ_REPEAT)
+#if !GOOS_darwin && SYZ_EXECUTOR || SYZ_NET_INJECTION && (__NR_syz_extract_tcp_res || SYZ_REPEAT)
 #include <errno.h>
 
 static int read_tun(char* data, int size)
@@ -1814,14 +1819,14 @@ static int read_tun(char* data, int size)
 }
 #endif
 
-#if SYZ_EXECUTOR || __NR_syz_extract_tcp_res && SYZ_NET_INJECTION
+#if !GOOS_darwin && SYZ_EXECUTOR || __NR_syz_extract_tcp_res && SYZ_NET_INJECTION
 
 struct tcp_resources {
 	uint32 seq;
 	uint32 ack;
 };
 
-#if GOOS_freebsd
+#if GOOS_freebsd || GOOS_darwin
 #include <net/ethernet.h>
 #else
 #include <net/ethertypes.h>
@@ -1999,7 +2004,7 @@ static int do_sandbox_setuid(void)
 #include <zircon/syscalls.h>
 
 #if SYZ_EXECUTOR || __NR_get_root_resource
-#include <ddk/driver.h>
+#include <lib/ddk/driver.h>
 #endif
 
 #if SYZ_EXECUTOR || SYZ_HANDLE_SEGV
@@ -9417,11 +9422,14 @@ static void setup_usb()
 
 #if SYZ_EXECUTOR || SYZ_SYSCTL
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
 
 static void setup_sysctl()
 {
-	static struct {
+	char mypid[32];
+	snprintf(mypid, sizeof(mypid), "%d", getpid());
+	struct {
 		const char* name;
 		const char* data;
 	} files[] = {
@@ -9439,8 +9447,9 @@ static void setup_sysctl()
 		{"/proc/sys/kernel/printk", "7 4 1 3"},
 		{"/proc/sys/net/ipv4/ping_group_range", "0 65535"},
 		{"/proc/sys/kernel/keys/gc_delay", "1"},
-		{"/proc/sys/vm/nr_overcommit_hugepages", "4"},
 		{"/proc/sys/vm/oom_kill_allocating_task", "1"},
+		{"/proc/sys/kernel/ctrl-alt-del", "0"},
+		{"/proc/sys/kernel/cad_pid", mypid},
 	};
 	for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
 		if (!write_file(files[i].name, files[i].data))

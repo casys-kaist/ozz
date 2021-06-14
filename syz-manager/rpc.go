@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/syzkaller/pkg/cover"
+	"github.com/google/syzkaller/pkg/host"
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/pkg/mgrconfig"
 	"github.com/google/syzkaller/pkg/rpctype"
@@ -21,6 +22,7 @@ import (
 type RPCServer struct {
 	mgr                   RPCManagerView
 	cfg                   *mgrconfig.Config
+	modules               []host.KernelModule
 	port                  int
 	targetEnabledSyscalls map[*prog.Syscall]bool
 	coverFilter           map[uint32]uint32
@@ -40,6 +42,7 @@ type RPCServer struct {
 
 type Fuzzer struct {
 	name          string
+	rotated       bool
 	inputs        []rpctype.RPCInput
 	newMaxSignal  signal.Signal
 	rotatedSignal signal.Signal
@@ -53,7 +56,8 @@ type BugFrames struct {
 
 // RPCManagerView restricts interface between RPCServer and Manager.
 type RPCManagerView interface {
-	fuzzerConnect() ([]rpctype.RPCInput, BugFrames, bool)
+	fuzzerConnect([]host.KernelModule) (
+		[]rpctype.RPCInput, BugFrames, map[uint32]uint32, []byte, error)
 	machineChecked(result *rpctype.CheckArgs, enabledSyscalls map[*prog.Syscall]bool)
 	newInput(inp rpctype.RPCInput, sign signal.Signal) bool
 	candidateBatch(size int) []rpctype.RPCCandidate
@@ -62,12 +66,11 @@ type RPCManagerView interface {
 
 func startRPCServer(mgr *Manager) (*RPCServer, error) {
 	serv := &RPCServer{
-		mgr:         mgr,
-		cfg:         mgr.cfg,
-		coverFilter: mgr.coverFilter,
-		stats:       mgr.stats,
-		fuzzers:     make(map[string]*Fuzzer),
-		rnd:         rand.New(rand.NewSource(time.Now().UnixNano())),
+		mgr:     mgr,
+		cfg:     mgr.cfg,
+		stats:   mgr.stats,
+		fuzzers: make(map[string]*Fuzzer),
+		rnd:     rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	serv.batchSize = 5
 	if serv.batchSize < mgr.cfg.Procs {
@@ -87,7 +90,12 @@ func (serv *RPCServer) Connect(a *rpctype.ConnectArgs, r *rpctype.ConnectRes) er
 	log.Logf(1, "fuzzer %v connected", a.Name)
 	serv.stats.vmRestarts.inc()
 
-	corpus, bugFrames, enabledCoverFilter := serv.mgr.fuzzerConnect()
+	corpus, bugFrames, coverFilter, coverBitmap, err := serv.mgr.fuzzerConnect(a.Modules)
+	if err != nil {
+		return err
+	}
+	serv.coverFilter = coverFilter
+	serv.modules = a.Modules
 
 	serv.mu.Lock()
 	defer serv.mu.Unlock()
@@ -99,10 +107,10 @@ func (serv *RPCServer) Connect(a *rpctype.ConnectArgs, r *rpctype.ConnectRes) er
 	serv.fuzzers[a.Name] = f
 	r.MemoryLeakFrames = bugFrames.memoryLeaks
 	r.DataRaceFrames = bugFrames.dataRaces
+	r.CoverFilterBitmap = coverBitmap
 	r.EnabledCalls = serv.cfg.Syscalls
 	r.GitRevision = prog.GitRevision
 	r.TargetRevision = serv.cfg.Target.Revision
-	r.EnabledCoverFilter = enabledCoverFilter
 	if serv.mgr.rotateCorpus() && serv.rnd.Intn(5) == 0 {
 		// We do rotation every other time because there are no objective
 		// proofs regarding its efficiency either way.
@@ -159,6 +167,7 @@ func (serv *RPCServer) rotateCorpus(f *Fuzzer, corpus []rpctype.RPCInput) *rpcty
 	// Remove the corresponding signal from rotatedSignal which will
 	// be used to accept new inputs from this manager.
 	f.rotatedSignal = serv.corpusSignal.Intersection(f.newMaxSignal)
+	f.rotated = true
 
 	result := *serv.checkResult
 	result.EnabledCalls = map[string][]int{serv.cfg.Sandbox: callIDs}
@@ -254,7 +263,7 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 	// but this request is already in-flight.
 	genuine := !serv.corpusSignal.Diff(inputSignal).Empty()
 	rotated := false
-	if !genuine && f != nil && f.rotatedSignal != nil {
+	if !genuine && f != nil && f.rotated {
 		rotated = !f.rotatedSignal.Diff(inputSignal).Empty()
 	}
 	if !genuine && !rotated {
@@ -264,14 +273,14 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 		return nil
 	}
 
-	if f != nil && f.rotatedSignal != nil {
+	if f != nil && f.rotated {
 		f.rotatedSignal.Merge(inputSignal)
 	}
 	diff := serv.corpusCover.MergeDiff(a.Cover)
 	serv.stats.corpusCover.set(len(serv.corpusCover))
 	if len(diff) != 0 && serv.coverFilter != nil {
 		// Note: ReportGenerator is already initialized if coverFilter is enabled.
-		rg, err := getReportGenerator(serv.cfg)
+		rg, err := getReportGenerator(serv.cfg, serv.modules)
 		if err != nil {
 			return err
 		}
@@ -294,7 +303,7 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 
 		a.RPCInput.Cover = nil // Don't send coverage back to all fuzzers.
 		for _, other := range serv.fuzzers {
-			if other == f || other.rotatedSignal != nil {
+			if other == f || other.rotated {
 				continue
 			}
 			other.inputs = append(other.inputs, a.RPCInput)
@@ -321,13 +330,13 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 		serv.maxSignal.Merge(newMaxSignal)
 		serv.stats.maxSignal.set(len(serv.maxSignal))
 		for _, f1 := range serv.fuzzers {
-			if f1 == f || f1.rotatedSignal != nil {
+			if f1 == f || f1.rotated {
 				continue
 			}
 			f1.newMaxSignal.Merge(newMaxSignal)
 		}
 	}
-	if f.rotatedSignal != nil {
+	if f.rotated {
 		// Let rotated VMs run in isolation, don't send them anything.
 		return nil
 	}

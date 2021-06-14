@@ -9,8 +9,9 @@ shell:
 config:
  # We reduce number of vivid/netrom/rose/hcd devices to 2 because we use at most 2 procs
  # with emulation and creating these devices takes time during boot.
- - CMDLINE: [append, "root=/dev/vda console=ttyAMA0 watchdog_thresh=165 workqueue.watchdog_thresh=420 dummy_hcd.num=2"]
- - CMDLINE_EXTEND
+ - CMDLINE: [append, "root=/dev/vda console=ttyAMA0 watchdog_thresh=165 workqueue.watchdog_thresh=420 sysctl.net.core.netdev_unregister_timeout_secs=420 dummy_hcd.num=2"]
+ # Was dropped in "arm64: Drop support for CMDLINE_EXTEND".
+ - CMDLINE_EXTEND: [-v5.12]
  # See the comment in x86_64.yml re these numbers.
  - RCU_CPU_STALL_TIMEOUT: 300
  - DEFAULT_HUNG_TASK_TIMEOUT: [420, -nonoise, -kmsan, -kcsan, -kmemleak]
@@ -18,6 +19,11 @@ config:
  - ARM64_TAGGED_ADDR_ABI
  - ARM64_PMEM
  - ARM64_MTE
+
+ - ARCH_VEXPRESS
+ - I2C_VERSATILE
+ - CLK_SP810
+ - ICST
 
  # These are enabled by defconfig, but we don't test them (presumably).
  # Disable them to speed up kernel boot (slow in emulation).
@@ -111,7 +117,6 @@ config:
  - ARCH_THUNDER: n
  - ARCH_THUNDER2: n
  - ARCH_UNIPHIER: n
- - ARCH_VEXPRESS: n
  - ARCH_VISCONTI: n
  - ARCH_XGENE: n
  - ARCH_ZX: n
@@ -419,7 +424,6 @@ config:
  - I2C_TEGRA_BPMP: n
  - I2C_UNIPHIER: n
  - I2C_UNIPHIER_F: n
- - I2C_VERSATILE: n
  - I2C_WMT: n
  - I2C_OCTEON: n
  - I2C_THUNDERX: n

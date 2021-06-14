@@ -88,8 +88,10 @@ type Manager struct {
 	// Maps file name to modification time.
 	usedFiles map[string]time.Time
 
-	coverFilterFilename string
-	coverFilter         map[uint32]uint32
+	modules            []host.KernelModule
+	coverFilter        map[uint32]uint32
+	coverFilterBitmap  []byte
+	modulesInitialized bool
 }
 
 const (
@@ -174,13 +176,9 @@ func RunManager(cfg *mgrconfig.Config) {
 	}
 
 	mgr.preloadCorpus()
-	mgr.initHTTP() // Creates HTTP server.
+	mgr.initStats() // Initializes prometheus variables.
+	mgr.initHTTP()  // Creates HTTP server.
 	mgr.collectUsedFiles()
-
-	mgr.coverFilterFilename, mgr.coverFilter, err = createCoverageFilter(mgr.cfg)
-	if err != nil {
-		log.Fatalf("failed to create coverage filter: %v", err)
-	}
 
 	// Create RPC server for fuzzers.
 	mgr.serv, err = startRPCServer(mgr)
@@ -560,9 +558,12 @@ func (mgr *Manager) runInstance(index int) (*Crash, error) {
 	mgr.checkUsedFiles()
 	instanceName := fmt.Sprintf("vm-%d", index)
 
-	rep, err := mgr.runInstanceInner(index, instanceName)
+	rep, vmInfo, err := mgr.runInstanceInner(index, instanceName)
 
 	machineInfo := mgr.serv.shutdownInstance(instanceName)
+	if len(vmInfo) != 0 {
+		machineInfo = append(append(vmInfo, '\n'), machineInfo...)
+	}
 
 	// Error that is not a VM crash.
 	if err != nil {
@@ -581,28 +582,21 @@ func (mgr *Manager) runInstance(index int) (*Crash, error) {
 	return crash, nil
 }
 
-func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Report, error) {
+func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Report, []byte, error) {
 	inst, err := mgr.vmPool.Create(index)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create instance: %v", err)
+		return nil, nil, fmt.Errorf("failed to create instance: %v", err)
 	}
 	defer inst.Close()
 
 	fwdAddr, err := inst.Forward(mgr.serv.port)
 	if err != nil {
-		return nil, fmt.Errorf("failed to setup port forwarding: %v", err)
-	}
-
-	if mgr.coverFilterFilename != "" {
-		_, err = inst.Copy(mgr.coverFilterFilename)
-		if err != nil {
-			return nil, fmt.Errorf("failed to copy coverage filter bitmap: %v", err)
-		}
+		return nil, nil, fmt.Errorf("failed to setup port forwarding: %v", err)
 	}
 
 	fuzzerBin, err := inst.Copy(mgr.cfg.FuzzerBin)
 	if err != nil {
-		return nil, fmt.Errorf("failed to copy binary: %v", err)
+		return nil, nil, fmt.Errorf("failed to copy binary: %v", err)
 	}
 
 	// If ExecutorBin is provided, it means that syz-executor is already in the image,
@@ -611,7 +605,7 @@ func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Re
 	if executorBin == "" {
 		executorBin, err = inst.Copy(mgr.cfg.ExecutorBin)
 		if err != nil {
-			return nil, fmt.Errorf("failed to copy binary: %v", err)
+			return nil, nil, fmt.Errorf("failed to copy binary: %v", err)
 		}
 	}
 
@@ -632,15 +626,22 @@ func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Re
 		mgr.cfg.Cover, *flagDebug, false, false, true, mgr.cfg.Timeouts.Slowdown)
 	outc, errc, err := inst.Run(mgr.cfg.Timeouts.VMRunningTime, mgr.vmStop, cmd)
 	if err != nil {
-		return nil, fmt.Errorf("failed to run fuzzer: %v", err)
+		return nil, nil, fmt.Errorf("failed to run fuzzer: %v", err)
 	}
 
+	var vmInfo []byte
 	rep := inst.MonitorExecution(outc, errc, mgr.reporter, vm.ExitTimeout)
 	if rep == nil {
 		// This is the only "OK" outcome.
 		log.Logf(0, "%s: running for %v, restarting", instanceName, time.Since(start))
+	} else {
+		vmInfo, err = inst.Info()
+		if err != nil {
+			vmInfo = []byte(fmt.Sprintf("error getting VM info: %v\n", err))
+		}
 	}
-	return rep, nil
+
+	return rep, vmInfo, nil
 }
 
 func (mgr *Manager) emailCrash(crash *Crash) {
@@ -1051,7 +1052,8 @@ func (mgr *Manager) collectSyscallInfoUnlocked() map[string]*CallCov {
 	return calls
 }
 
-func (mgr *Manager) fuzzerConnect() ([]rpctype.RPCInput, BugFrames, bool) {
+func (mgr *Manager) fuzzerConnect(modules []host.KernelModule) (
+	[]rpctype.RPCInput, BugFrames, map[uint32]uint32, []byte, error) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
@@ -1060,15 +1062,26 @@ func (mgr *Manager) fuzzerConnect() ([]rpctype.RPCInput, BugFrames, bool) {
 	for _, inp := range mgr.corpus {
 		corpus = append(corpus, inp)
 	}
-	memoryLeakFrames := make([]string, 0, len(mgr.memoryLeakFrames))
+	frames := BugFrames{
+		memoryLeaks: make([]string, 0, len(mgr.memoryLeakFrames)),
+		dataRaces:   make([]string, 0, len(mgr.dataRaceFrames)),
+	}
 	for frame := range mgr.memoryLeakFrames {
-		memoryLeakFrames = append(memoryLeakFrames, frame)
+		frames.memoryLeaks = append(frames.memoryLeaks, frame)
 	}
-	dataRaceFrames := make([]string, 0, len(mgr.dataRaceFrames))
 	for frame := range mgr.dataRaceFrames {
-		dataRaceFrames = append(dataRaceFrames, frame)
+		frames.dataRaces = append(frames.dataRaces, frame)
 	}
-	return corpus, BugFrames{memoryLeaks: memoryLeakFrames, dataRaces: dataRaceFrames}, mgr.coverFilterFilename != ""
+	if !mgr.modulesInitialized {
+		var err error
+		mgr.modules = modules
+		mgr.coverFilterBitmap, mgr.coverFilter, err = mgr.createCoverageFilter()
+		if err != nil {
+			log.Fatalf("failed to create coverage filter: %v", err)
+		}
+		mgr.modulesInitialized = true
+	}
+	return corpus, frames, mgr.coverFilter, mgr.coverFilterBitmap, nil
 }
 
 func (mgr *Manager) machineChecked(a *rpctype.CheckArgs, enabledSyscalls map[*prog.Syscall]bool) {

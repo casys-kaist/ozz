@@ -217,7 +217,7 @@ func checkRevisions(args *checkArgs) error {
 		return fmt.Errorf("mismatching fuzzer/executor git revisions: %v vs %v",
 			prog.GitRevision, vers[3])
 	}
-	if args.gitRevision != "" && args.gitRevision != prog.GitRevision {
+	if args.gitRevision != prog.GitRevision {
 		return fmt.Errorf("mismatching manager/fuzzer git revisions: %v vs %v",
 			args.gitRevision, prog.GitRevision)
 	}
@@ -225,9 +225,9 @@ func checkRevisions(args *checkArgs) error {
 		return fmt.Errorf("mismatching fuzzer/executor system call descriptions: %v vs %v",
 			args.target.Revision, vers[2])
 	}
-	if args.targetRevision != "" && args.targetRevision != args.target.Revision {
-		return fmt.Errorf("mismatching manager/fuzzer system call descriptions: %v vs %v",
-			args.targetRevision, args.target.Revision)
+	if args.target.Revision != args.targetRevision {
+		return fmt.Errorf("mismatching fuzzer/manager system call descriptions: %v vs %v",
+			args.target.Revision, args.targetRevision)
 	}
 	return nil
 }

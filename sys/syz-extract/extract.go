@@ -61,6 +61,7 @@ var extractors = map[string]Extractor{
 	targets.Akaros:  new(akaros),
 	targets.Linux:   new(linux),
 	targets.FreeBSD: new(freebsd),
+	targets.Darwin:  new(darwin),
 	targets.NetBSD:  new(netbsd),
 	targets.OpenBSD: new(openbsd),
 	"android":       new(linux),
@@ -87,6 +88,10 @@ func main() {
 	arches, err := createArches(OS, archArray, files)
 	if err != nil {
 		tool.Fail(err)
+	}
+	if *flagSourceDir == "" {
+		tool.Fail(fmt.Errorf("provide path to kernel checkout via -sourcedir " +
+			"flag (or make extract SOURCEDIR)"))
 	}
 	if err := extractor.prepare(*flagSourceDir, *flagBuild, arches); err != nil {
 		tool.Fail(err)

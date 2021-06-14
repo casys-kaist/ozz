@@ -19,7 +19,9 @@ config:
  - DEBUG_KERNEL
 
  # panic=86400: prevents kernel from rebooting so that we don't get reboot output in all crash reports.
- - CMDLINE: "earlyprintk=serial net.ifnames=0 sysctl.kernel.hung_task_all_cpu_backtrace=1 ima_policy=tcb nf-conntrack-ftp.ports=20000 nf-conntrack-tftp.ports=20000 nf-conntrack-sip.ports=20000 nf-conntrack-irc.ports=20000 nf-conntrack-sane.ports=20000 binder.debug_mask=0 rcupdate.rcu_expedited=1 no_hash_pointers"
+ # Huge page overcommit is disabled by default, allowing some overcommit
+ # with vm.nr_overcommit_hugepages is intended to give more coverage.
+ - CMDLINE: "earlyprintk=serial net.ifnames=0 sysctl.kernel.hung_task_all_cpu_backtrace=1 ima_policy=tcb nf-conntrack-ftp.ports=20000 nf-conntrack-tftp.ports=20000 nf-conntrack-sip.ports=20000 nf-conntrack-irc.ports=20000 nf-conntrack-sane.ports=20000 binder.debug_mask=0 rcupdate.rcu_expedited=1 no_hash_pointers page_owner=on sysctl.vm.nr_hugepages=4 sysctl.vm.nr_overcommit_hugepages=4"
 
  # This config can be used to enable any additional temporal debugging features in linux-next tree.
  - DEBUG_AID_FOR_SYZBOT: [linux-next]
@@ -50,7 +52,7 @@ config:
  - HW_RANDOM_AMD: n
  - HW_RANDOM_VIA: n
  - RANDOM_TRUST_CPU: [-arm, -riscv]
- - RANDOM_TRUST_BOOTLOADER
+ - RANDOM_TRUST_BOOTLOADER: [v4.16]
 
  # For detection of supported syscalls
  - KALLSYMS
@@ -80,22 +82,26 @@ config:
  - HARDENED_USERCOPY_FALLBACK
  - BUG_ON_DATA_CORRUPTION
  - DEBUG_LIST
+ - DEBUG_STACKOVERFLOW: [-v5.0]
 
  # CONFIG_DEBUG_PI_LIST was renamed to CONFIG_DEBUG_PLIST in 8e18faeac3e4.
  - DEBUG_PLIST: [v5.2]
  - DEBUG_PI_LIST: [-v5.2]
 
  # CONFIG_REFCOUNT_FULL was removed in fb041bb7c0a9.
- - REFCOUNT_FULL: [-v5.5]
+ - REFCOUNT_FULL: [v4.16, -v5.5]
+ # Added in 919067cc845f ("net: add CONFIG_PCPU_DEV_REFCNT") and should appear in v5.13.
+ - PCPU_DEV_REFCNT: [n, v5.13]
 
  # This config does not add any debug checks (only debug output).
  - DEBUG_KOBJECT: n
 
  - DEBUG_INFO
  - DEBUG_INFO_BTF
+ - DEBUG_INFO_REDUCED: n
 
  # This should make behavior more deterministic.
- - INIT_ON_ALLOC_DEFAULT_ON
+ - INIT_ON_ALLOC_DEFAULT_ON: [v4.16]
 
  # KCOV slows down execution too much with KASAN_HW_TAGS and in qemu emulation in general.
  # KCOV crashes on Arm:
@@ -131,8 +137,8 @@ config:
  - UEVENT_HELPER_PATH: "/sbin/hotplug"
 
  # QEMU disk is usually on the generic PCI bus.
- - PCI_HOST_GENERIC
- - OF
+ - PCI_HOST_GENERIC: [v4.16]
+ - OF: [v4.16]
 
  # Options enabled to boot Debian Stretch.
  - CONFIGFS_FS
@@ -148,6 +154,8 @@ config:
 
  # Disable magic SysRq completely, as it can be reached over USB and through tty.
  - MAGIC_SYSRQ: n
+ # We don't need it and it enables MAGIC_SYSRQ and KPROBES.
+ - KGDB: n
 
  - RUNTIME_TESTING_MENU: n
 

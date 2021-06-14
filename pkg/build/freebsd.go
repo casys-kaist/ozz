@@ -35,6 +35,7 @@ options 	RATELIMIT
 
 options 	DEBUG_VFS_LOCKS
 options 	DIAGNOSTIC
+options 	DEBUG_REDZONE
 `)
 	}
 	if err := osutil.WriteFile(filepath.Join(confDir, confFile), config); err != nil {
@@ -81,6 +82,23 @@ tcp_bbr_load="YES"
 tcp_rack_load="YES"
 sem_load="YES"
 mqueuefs_load="YES"
+cryptodev_load="YES"
+cc_cdg_load="YES"
+cc_chd_load="YES"
+cc_cubic_load="YES"
+cc_dctcp_load="YES"
+cc_hd_load="YES"
+cc_htcp_load="YES"
+cc_vegas_load="YES"
+
+kern.ipc.tls.enable="1"
+vm.panic_on_oom="1"
+__EOF__
+
+cat | sudo tee -a ${tmpdir}/etc/sysctl.conf <<__EOF__
+net.inet.sctp.udp_tunneling_port=9899
+net.inet.tcp.udp_tunneling_port=9811
+vm.redzone.panic=1
 __EOF__
 
 sudo umount $tmpdir
