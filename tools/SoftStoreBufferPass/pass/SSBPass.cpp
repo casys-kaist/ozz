@@ -156,6 +156,13 @@ void InstrumentedFunctionListPass::getAnalysisUsage(AnalysisUsage &AU) const {}
 static RegisterPass<InstrumentedFunctionListPass>
     XX("tfl", "Summarize to-be-instrumented functions", true, true);
 
+static llvm::RegisterStandardPasses
+    YY(llvm::PassManagerBuilder::EP_EarlyAsPossible,
+       [](const llvm::PassManagerBuilder &Builder,
+          llvm::legacy::PassManagerBase &PM) {
+         PM.add(new InstrumentedFunctionListPass());
+       });
+
 /*
  *Pass Implementation
  */
@@ -661,6 +668,11 @@ int SoftStoreBuffer::getMemoryAccessFuncIndex(Value *Addr,
 
 void SoftStoreBuffer::appendFunctionName(Function &F) {
   StringRef fn = F.getName();
+  // NOTE: We treat weak symbols as not-instrumented since its
+  // corresponding strong symbol may not be instrumented.
+  // TODO: Determine if the strong symbol is really not instrumented.
+  if (F.hasWeakLinkage())
+    return;
   std::error_code EC;
   LLVM_DEBUG(dbgs() << "Writing " << fn << "\n");
   raw_fd_ostream out(getIFLFileName(), EC, sys::fs::OF_Append);
