@@ -7,7 +7,8 @@ all: $(DEPS)
 prep:
 	mkdir -p $(OUTDIR)
 
-$(OUTDIR)/%: %.c prep
+$(OUTDIR)/%: %.c
+	@make prep
 	@gcc $< -o $@ -x86_64 -lpthread
 	@aarch64-linux-gnu-gcc $< -o $@-aarch64 -lpthread
 
