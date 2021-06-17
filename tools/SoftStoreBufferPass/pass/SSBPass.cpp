@@ -179,6 +179,7 @@ private:
   int getMemoryAccessFuncIndex(Value *Addr, const DataLayout &DL);
   bool isInterestingLoadStore(Instruction *I);
   bool isMemBarrierOfTargetArch(Instruction *I);
+  bool isBUG(Instruction *I);
   bool isOutofScopeCall(Instruction *I, const InstrumentedFunctionList &IFL);
   bool isHardIRQEntryOfTargetArch(Function &F);
   bool isSoftIRQEntryOfTargetArch(Function &F);
@@ -413,6 +414,27 @@ bool SoftStoreBuffer::instrumentFlushOnly(Function &F, bool DoInstrument) {
   return true;
 }
 
+static bool isBUG_X86_64(Instruction *I) {
+  if (CallInst *CI = dyn_cast<CallInst>(I)) {
+    if (CI->isInlineAsm()) {
+      auto *Asm = cast<InlineAsm>(CI->getCalledOperand());
+      auto Str = Asm->getAsmString();
+#define UD2 ".byte 0x0f, 0x0"
+      return Str.find(UD2) != std::string::npos;
+    }
+  }
+  return false;
+}
+
+bool SoftStoreBuffer::isBUG(Instruction *I) {
+  if (TargetArchitecture == X86_64) {
+    return isBUG_X86_64(I);
+  } else {
+    // TODO: aarch64
+    return false;
+  }
+}
+
 bool SoftStoreBuffer::instrumentAll(Function &F, const TargetLibraryInfo &TLI,
                                     const InstrumentedFunctionList &IFL) {
   LLVM_DEBUG(dbgs() << "=== Instrumenting a function " << F.getName()
@@ -456,6 +478,8 @@ bool SoftStoreBuffer::instrumentAll(Function &F, const TargetLibraryInfo &TLI,
         HasCalls = true;
         chooseInstructionsToInstrument(LocalLoadsAndStores, AllLoadsAndStores,
                                        DL);
+        if (isBUG(&Inst))
+          break;
       }
     }
     chooseInstructionsToInstrument(LocalLoadsAndStores, AllLoadsAndStores, DL);
