@@ -92,6 +92,42 @@ void test_breakpoint(void) {
 		perror("clear_schedule"), exit(1);
 }
 
+void test_breakpoint_twice(void) {
+	printf("%s\n", __func__);
+
+	unsigned long addr = sys_kcsched_test_addr();
+	struct kcschedpoint bp = {
+		.addr = addr,
+		.order = 0,
+	};
+
+	cpu_set_t set;
+	CPU_ZERO(&set);
+	CPU_SET(0, &set);
+
+	if(sched_setaffinity(getpid(), sizeof(set), &set))
+		perror("sched_setaffinity"), exit(1);
+
+	if(syscall(sys_setup_schedule, 1, 1, &bp))
+		perror("setup_schedule"), exit(1);
+
+	if(syscall(sys_freeze_schedule, 1, 1))
+		perror("freeze_schedule"), exit(1);
+
+	if(syscall(sys_kcsched_test))
+		perror("kcsched_test"), exit(1);
+
+	if(syscall(sys_kcsched_test))
+		perror("kcsched_test2"), exit(1);
+
+	if(syscall(sys_unfreeze_schedule, 1, 1))
+		perror("unfreeze_schedule"), exit(1);
+
+	if(syscall(sys_clear_schedule, 1))
+		perror("clear_schedule"), exit(1);
+}
+
+
 int main(int arch, char *argv[])
 {
 	/* Benign behaviors */
@@ -99,5 +135,6 @@ int main(int arch, char *argv[])
 	test_setup_and_clear_twice_schedule();
 	test_setup_and_freeze_and_unfreeze_and_clear_schedule();
 	test_breakpoint();
+	test_breakpoint_twice();
 	return 0;
 }
