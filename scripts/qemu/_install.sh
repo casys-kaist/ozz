@@ -5,8 +5,8 @@
 . $SCRIPTS_DIR/qemu/_envsetup.sh
 
 _download() {
-	REPO="git@github.com:qemu/qemu.git"
-	__git_clone "$REPO" "$QEMU_PATH" "$QEMU_VERSION"
+	# Now qemu resides in tools/qemu
+	(cd "$QEMU_PATH"; git submodule update --init --recursive)
 }
 
 _build() {
