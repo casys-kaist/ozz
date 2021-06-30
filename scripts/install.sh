@@ -49,8 +49,8 @@ __install_tools() {
 
 # Install a speicified tool/toolchains
 if [ -n "$1" ]; then
-	TOOLPATH="$SCRIPS_DIR/$1"
-	__install_tool $1
+	TOOLPATH="$SCRIPTS_DIR/$1"
+	__install_tool $TOOLPATH
 	exit $?
 fi
 
