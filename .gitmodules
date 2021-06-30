@@ -1,3 +1,69 @@
 [submodule "kernels/guest/linux"]
 	path = kernels/guest/linux
 	url = git@dragon.kaist.ac.kr:linux
+[submodule "tools/qemu/roms/seabios"]
+	path = tools/qemu/roms/seabios
+	url = https://gitlab.com/qemu-project/seabios.git/
+[submodule "tools/qemu/roms/SLOF"]
+	path = tools/qemu/roms/SLOF
+	url = https://gitlab.com/qemu-project/SLOF.git
+[submodule "tools/qemu/roms/ipxe"]
+	path = tools/qemu/roms/ipxe
+	url = https://gitlab.com/qemu-project/ipxe.git
+[submodule "tools/qemu/roms/openbios"]
+	path = tools/qemu/roms/openbios
+	url = https://gitlab.com/qemu-project/openbios.git
+[submodule "tools/qemu/roms/qemu-palcode"]
+	path = tools/qemu/roms/qemu-palcode
+	url = https://gitlab.com/qemu-project/qemu-palcode.git
+[submodule "tools/qemu/roms/sgabios"]
+	path = tools/qemu/roms/sgabios
+	url = https://gitlab.com/qemu-project/sgabios.git
+[submodule "tools/qemu/dtc"]
+	path = tools/qemu/dtc
+	url = https://gitlab.com/qemu-project/dtc.git
+[submodule "tools/qemu/roms/u-boot"]
+	path = tools/qemu/roms/u-boot
+	url = https://gitlab.com/qemu-project/u-boot.git
+[submodule "tools/qemu/roms/skiboot"]
+	path = tools/qemu/roms/skiboot
+	url = https://gitlab.com/qemu-project/skiboot.git
+[submodule "tools/qemu/roms/QemuMacDrivers"]
+	path = tools/qemu/roms/QemuMacDrivers
+	url = https://gitlab.com/qemu-project/QemuMacDrivers.git
+[submodule "tools/qemu/ui/keycodemapdb"]
+	path = tools/qemu/ui/keycodemapdb
+	url = https://gitlab.com/qemu-project/keycodemapdb.git
+[submodule "tools/qemu/capstone"]
+	path = tools/qemu/capstone
+	url = https://gitlab.com/qemu-project/capstone.git
+[submodule "tools/qemu/roms/seabios-hppa"]
+	path = tools/qemu/roms/seabios-hppa
+	url = https://gitlab.com/qemu-project/seabios-hppa.git
+[submodule "tools/qemu/roms/u-boot-sam460ex"]
+	path = tools/qemu/roms/u-boot-sam460ex
+	url = https://gitlab.com/qemu-project/u-boot-sam460ex.git
+[submodule "tools/qemu/tests/fp/berkeley-testfloat-3"]
+	path = tools/qemu/tests/fp/berkeley-testfloat-3
+	url = https://gitlab.com/qemu-project/berkeley-testfloat-3.git
+[submodule "tools/qemu/tests/fp/berkeley-softfloat-3"]
+	path = tools/qemu/tests/fp/berkeley-softfloat-3
+	url = https://gitlab.com/qemu-project/berkeley-softfloat-3.git
+[submodule "tools/qemu/roms/edk2"]
+	path = tools/qemu/roms/edk2
+	url = https://gitlab.com/qemu-project/edk2.git
+[submodule "tools/qemu/slirp"]
+	path = tools/qemu/slirp
+	url = https://gitlab.com/qemu-project/libslirp.git
+[submodule "tools/qemu/roms/opensbi"]
+	path = tools/qemu/roms/opensbi
+	url = 	https://gitlab.com/qemu-project/opensbi.git
+[submodule "tools/qemu/roms/qboot"]
+	path = tools/qemu/roms/qboot
+	url = https://gitlab.com/qemu-project/qboot.git
+[submodule "tools/qemu/meson"]
+	path = tools/qemu/meson
+	url = https://gitlab.com/qemu-project/meson.git
+[submodule "tools/qemu/roms/vbootrom"]
+	path = tools/qemu/roms/vbootrom
+	url = https://gitlab.com/qemu-project/vbootrom.git
