@@ -467,6 +467,8 @@ multiprocess="auto"
 malloc_trim="auto"
 gio="$default_feature"
 
+qcsched="yes"
+
 # parse CC options second
 for opt do
   optarg=$(expr "x$opt" : 'x[^=]*=\(.*\)')
@@ -1565,6 +1567,10 @@ for opt do
   ;;
   --disable-gio) gio=no
   ;;
+  --enable-qcsched) qcsched=yes
+  ;;
+  --disable-qcsched) qcsched=no
+  ;;
   *)
       echo "ERROR: unknown option $opt"
       echo "Try '$0 --help' for more information"
@@ -1919,6 +1925,7 @@ disabled with --disable-FEATURE, default is enabled if available
   fuse-lseek      SEEK_HOLE/SEEK_DATA support for FUSE exports
   multiprocess    Out of process device emulation support
   gio             libgio support
+  qcsched         QEMU custom scheduler
 
 NOTE: The object files are built at the place where configure is launched
 EOF
@@ -5679,6 +5686,9 @@ if test "$gio" = "yes" ; then
     echo "GIO_CFLAGS=$gio_cflags" >> $config_host_mak
     echo "GIO_LIBS=$gio_libs" >> $config_host_mak
     echo "GDBUS_CODEGEN=$gdbus_codegen" >> $config_host_mak
+fi
+if test "$qcsched" = "yes"; then
+	echo "CONFIG_QCSCHED=y" >> $config_host_mak
 fi
 echo "CONFIG_TLS_PRIORITY=\"$tls_priority\"" >> $config_host_mak
 if test "$gnutls" = "yes" ; then
