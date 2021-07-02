@@ -22,7 +22,7 @@ if [ -z $ARCH ]; then
 fi
 
 if [ $ARCH = "x86_64" ]; then
-	QEMU=qemu-system-x86_64
+	QEMU=$QEMU_X86
 	IMAGE="$KERNELS_DIR/guest/images/x86_64/stretch.img"
 	KERNEL="$KERNELS_DIR/guest/builds/x86_64/arch/x86_64/boot/bzImage"
 	NETWORK="-netdev user,id=vnet0,hostfwd=tcp::$PORT-:22 \
@@ -30,7 +30,7 @@ if [ $ARCH = "x86_64" ]; then
 	KERNELCMD='console=ttyS0 root=/dev/sda crashkernel=512M selinux=0'
 	MACHINE=
 else
-	QEMU=qemu-system-aarch64
+	QEMU=$QEMU_ARM
 	IMAGE="$KERNELS_DIR/guest/images/arm64/rootfs.ext3"
 	KERNEL="$KERNELS_DIR/guest/builds/arm64/arch/arm64/boot/Image"
 	NETWORK="-net user,hostfwd=tcp:127.0.0.1:$PORT-:22 -net nic"
