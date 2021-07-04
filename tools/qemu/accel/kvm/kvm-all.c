@@ -49,6 +49,11 @@
 
 #include "hw/boards.h"
 
+#ifdef CONFIG_QCSCHED
+#include "qemu/qcsched/qcsched.h"
+#include "qemu/qcsched/hcall.h"
+#endif
+
 /* This check must be after config-host.h is included */
 #ifdef CONFIG_EVENTFD
 #include <sys/eventfd.h>
@@ -2468,6 +2473,10 @@ int kvm_cpu_exec(CPUState *cpu)
 
         attrs = kvm_arch_post_run(cpu, run);
 
+#ifdef CONFIG_QCSCHED
+        qcsched_post_run(cpu);
+#endif
+
 #ifdef KVM_HAVE_MCE_INJECTION
         if (unlikely(have_sigbus_pending)) {
             qemu_mutex_lock_iothread();
@@ -2501,6 +2510,12 @@ int kvm_cpu_exec(CPUState *cpu)
 
         trace_kvm_run_exit(cpu->cpu_index, run->exit_reason);
         switch (run->exit_reason) {
+#ifdef CONFIG_QCSCHED
+        case KVM_EXIT_HCALL:
+            qcsched_handle_hcall(cpu, run);
+            ret = 0;
+            break;
+#endif
         case KVM_EXIT_IO:
             DPRINTF("handle_io\n");
             /* Called outside BQL */
@@ -2566,6 +2581,11 @@ int kvm_cpu_exec(CPUState *cpu)
             ret = kvm_arch_handle_exit(cpu, run);
             break;
         }
+
+#ifdef CONFIG_QCSCHED
+        if (ret == EXCP_DEBUG)
+            ret = qcsched_handle_breakpoint(cpu);
+#endif
     } while (ret == 0);
 
     cpu_exec_end(cpu);
