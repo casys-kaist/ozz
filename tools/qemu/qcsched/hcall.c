@@ -104,9 +104,13 @@ static target_ulong qcsched_deactivate_breakpoint(CPUState *unused)
     return 0;
 }
 
-static target_ulong qcsched_clear_breakpoint(CPUState *cpu)
+static target_ulong qcsched_clear_breakpoint(CPUState *unused)
 {
+    CPUState *cpu;
+
     DRPRINTF("%s\n", __func__);
+
+    CPU_FOREACH(cpu) { kvm_remove_all_breakpoints_cpu(cpu); }
     memset(&sched, 0, sizeof(struct qcsched));
     return 0;
 }
