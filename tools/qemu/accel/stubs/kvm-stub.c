@@ -71,6 +71,32 @@ void kvm_remove_all_breakpoints(CPUState *cpu)
 {
 }
 
+int kvm_insert_breakpoint_cpu(CPUState *cpu, target_ulong addr,
+                          target_ulong len, int type)
+{
+    return -EINVAL;
+}
+
+int kvm_remove_breakpoint_cpu(CPUState *cpu, target_ulong addr,
+                          target_ulong len, int type)
+{
+    return -EINVAL;
+}
+
+void kvm_remove_all_breakpoints_cpu(CPUState *cpu)
+{
+}
+
+int kvm_read_registers(CPUState *cpu, struct kvm_regs *regs)
+{
+    return -EINVAL;
+}
+
+int kvm_write_registers(CPUState *cpu, struct kvm_regs *regs)
+{
+    return -EINVAL;
+}
+
 int kvm_on_sigbus_vcpu(CPUState *cpu, int code, void *addr)
 {
     return 1;

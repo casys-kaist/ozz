@@ -244,6 +244,13 @@ int kvm_insert_breakpoint(CPUState *cpu, target_ulong addr,
 int kvm_remove_breakpoint(CPUState *cpu, target_ulong addr,
                           target_ulong len, int type);
 void kvm_remove_all_breakpoints(CPUState *cpu);
+#ifdef CONFIG_QCSCHED
+int kvm_insert_breakpoint_cpu(CPUState *cpu, target_ulong addr,
+                          target_ulong len, int type);
+int kvm_remove_breakpoint_cpu(CPUState *cpu, target_ulong addr,
+                          target_ulong len, int type);
+void kvm_remove_all_breakpoints_cpu(CPUState *cpu);
+#endif
 int kvm_update_guest_debug(CPUState *cpu, unsigned long reinject_trap);
 
 int kvm_on_sigbus_vcpu(CPUState *cpu, int code, void *addr);
@@ -414,6 +421,15 @@ int kvm_arch_remove_hw_breakpoint(target_ulong addr,
                                   target_ulong len, int type);
 void kvm_arch_remove_all_hw_breakpoints(void);
 
+#ifdef CONFIG_QCSCHED
+int kvm_arch_insert_hw_breakpoint_cpu(CPUState *cpu, target_ulong addr,
+                                  target_ulong len, int type);
+int kvm_arch_remove_hw_breakpoint_cpu(CPUState *cpu, target_ulong addr,
+                                  target_ulong len, int type);
+void kvm_arch_remove_all_hw_breakpoints_cpu(CPUState *cpu);
+void kvm_arch_update_guest_debug_cpu(CPUState *cpu, struct kvm_guest_debug *dbg);
+#endif
+
 void kvm_arch_update_guest_debug(CPUState *cpu, struct kvm_guest_debug *dbg);
 
 bool kvm_arch_stop_on_emulation_error(CPUState *cpu);
@@ -533,6 +549,9 @@ int kvm_set_one_reg(CPUState *cs, uint64_t id, void *source);
 int kvm_get_one_reg(CPUState *cs, uint64_t id, void *target);
 struct ppc_radix_page_info *kvm_get_radix_page_info(void);
 int kvm_get_max_memslots(void);
+
+int kvm_read_registers(CPUState *cpu, struct kvm_regs *regs);
+int kvm_write_registers(CPUState *cpu, struct kvm_regs *regs);
 
 /* Notify resamplefd for EOI of specific interrupts. */
 void kvm_resample_fd_notify(int gsi);

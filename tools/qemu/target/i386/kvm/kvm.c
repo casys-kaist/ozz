@@ -4503,6 +4503,10 @@ static int kvm_handle_debug(X86CPU *cpu,
 
 void kvm_arch_update_guest_debug(CPUState *cpu, struct kvm_guest_debug *dbg)
 {
+#ifdef CONFIG_QCSCHED
+    // NOTE: This breaks the breakpoint facility of GDB on QEMU.
+    kvm_arch_update_guest_debug_cpu(cpu, dbg);
+#else
     const uint8_t type_code[] = {
         [GDB_BREAKPOINT_HW] = 0x0,
         [GDB_WATCHPOINT_WRITE] = 0x1,
@@ -4526,6 +4530,7 @@ void kvm_arch_update_guest_debug(CPUState *cpu, struct kvm_guest_debug *dbg)
                 ((uint32_t)len_code[hw_breakpoint[n].len] << (18 + n*4));
         }
     }
+#endif
 }
 
 static bool host_supports_vmx(void)

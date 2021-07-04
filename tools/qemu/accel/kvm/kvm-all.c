@@ -3080,6 +3080,16 @@ int kvm_get_one_reg(CPUState *cs, uint64_t id, void *target)
     return r;
 }
 
+int kvm_read_registers(CPUState *cpu, struct kvm_regs *regs)
+{
+    return kvm_vcpu_ioctl(cpu, KVM_GET_REGS, regs);
+}
+
+int kvm_write_registers(CPUState *cpu, struct kvm_regs *regs)
+{
+    return kvm_vcpu_ioctl(cpu, KVM_SET_REGS, regs);
+}
+
 static bool kvm_accel_has_memory(MachineState *ms, AddressSpace *as,
                                  hwaddr start_addr, hwaddr size)
 {
