@@ -139,8 +139,8 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
         hcall_ret = qcsched_clear_breakpoint(cpu);
         break;
     case HCALL_VMI_FUNC_ADDR:
-        addr = args[1];
-        subcmd = args[2];
+        subcmd = args[1];
+        addr = args[2];
         hcall_ret = 0;
         switch (subcmd) {
         case VMI_TRAMPOLINE:
