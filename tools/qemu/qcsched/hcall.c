@@ -12,8 +12,7 @@
 
 #include "qemu/qcsched/hcall.h"
 #include "qemu/qcsched/qcsched.h"
-
-struct qcsched sched;
+#include "qemu/qcsched/vmi.h"
 
 static bool qcsched_entry_used(struct qcsched_entry *entry)
 {
@@ -120,7 +119,8 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
     __u64 *args = run->hypercall.args;
     __u64 cmd = args[0];
     int order;
-    target_ulong addr, hcall_ret;
+    target_ulong addr, subcmd;
+    target_ulong hcall_ret;
 
     qemu_mutex_lock_iothread();
     switch (cmd) {
@@ -137,6 +137,22 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
         break;
     case HCALL_CLEAR_BP:
         hcall_ret = qcsched_clear_breakpoint(cpu);
+        break;
+    case HCALL_VMI_FUNC_ADDR:
+        addr = args[1];
+        subcmd = args[2];
+        hcall_ret = 0;
+        switch (subcmd) {
+        case VMI_TRAMPOLINE:
+            qcsched_vmi_set_trampoline(cpu, addr);
+            break;
+        case VMI_HOOK:
+            qcsched_vmi_set_hook(cpu, addr);
+            break;
+        default:
+            hcall_ret = -EINVAL;
+            break;
+        }
         break;
     default:
         hcall_ret = -EINVAL;

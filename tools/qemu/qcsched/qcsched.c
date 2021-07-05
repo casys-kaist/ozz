@@ -7,6 +7,8 @@
 
 #include "qemu/qcsched/qcsched.h"
 
+struct qcsched sched;
+
 void qcsched_pre_run(CPUState *cpu) {}
 
 void qcsched_post_run(CPUState *cpu) { kvm_read_registers(cpu, &cpu->regs); }
