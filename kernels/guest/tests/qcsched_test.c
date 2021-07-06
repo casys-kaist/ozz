@@ -64,21 +64,41 @@ unsigned long sys_test_addr(void) {
 #define SYS_pso_writer 501
 #define gettid() syscall(SYS_gettid)
 
-int main(int argc, char *argv[])
-{
+void *thr(void *arg) {
+	int cpu = (int)(intptr_t)arg;
 	cpu_set_t set;
-
 	CPU_ZERO(&set);
-	CPU_SET(0, &set);
-
+	CPU_SET(cpu, &set);
 	if (sched_setaffinity(gettid(), sizeof(set), &set))
 		perror("sched_setaffinity");
-
-	hypercall(HCALL_INSTALL_BP, sys_test_addr(), 0, 0);
+	hypercall(HCALL_INSTALL_BP, sys_test_addr(), cpu, 0);
+	sleep(1);
 	hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
 	syscall(SYS_pso_writer);
 	hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
 	hypercall(HCALL_CLEAR_BP, 0, 0, 0);
+}
 
+void test_single_thread(void) {
+	fprintf(stderr, "%s\n", __func__);
+	thr((void *)0);
+}
+
+void test_two_threads(void) {
+	pthread_t pth1, pth2;
+
+	fprintf(stderr, "%s\n", __func__);
+
+	pthread_create(&pth1, NULL, thr, (void *)0);
+	pthread_create(&pth2, NULL, thr, (void *)1);
+
+	pthread_join(pth1, NULL);
+	pthread_join(pth2, NULL);
+}
+
+int main(int argc, char *argv[])
+{
+	test_single_thread();
+	test_two_threads();
 	return 0;
 }
