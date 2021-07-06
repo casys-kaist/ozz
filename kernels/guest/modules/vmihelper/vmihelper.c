@@ -16,6 +16,7 @@ static int __init vmihelper_init(void) {
 	char *hook_name = "qcsched_hook_entry";
 	unsigned long addr = kallsyms_lookup_name(hook_name);
 	unsigned long ret;
+	int i;
 
 	pr_info("Installing vmihelper\n");
 	pr_info("hook addr: %lx\n", addr);
@@ -27,7 +28,14 @@ static int __init vmihelper_init(void) {
 		pr_info("return: %lx\n", ret);
 	}
 
-	return 0;
+	pr_info("current_task: %lx\n", &current_task);
+	hypercall(HCALL_VMI_FUNC_ADDR, VMI_CURRENT_TASK, (unsigned long)&current_task, 0);
+    for (i = 0; i < 64; i++) {
+		pr_info("__per_cpu_offset[%d]: %lx\n", i, __per_cpu_offset[i]);
+        hypercall(HCALL_VMI_FUNC_ADDR, VMI__PER_CPU_OFFSET0 + i, __per_cpu_offset[i], 0);
+	}
+
+    return 0;
 }
 
 static void __exit vmihelper_exit(void) {
