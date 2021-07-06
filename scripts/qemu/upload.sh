@@ -10,8 +10,9 @@ if [ "$ARCH" = "x86_64" ]; then
 	KEY_OPTS="-i $KERNELS_DIR/guest/images/x86_64/stretch.id_rsa"
 fi
 
-FN=$(basename $1)
-
-echo "Uploading $1 into /root/$FN"
-
-scp -P $PORT $KEY_OPTS $1 root@localhost:/root/$FN
+for _FN in "$@"
+do
+	echo "Uploading $_FN into /root/$FN"
+	FN=$(basename $_FN);
+	scp -P $PORT $KEY_OPTS $_FN root@localhost:/root/$FN
+done
