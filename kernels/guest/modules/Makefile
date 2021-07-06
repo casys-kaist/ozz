@@ -7,5 +7,10 @@ all: $(MODULES)
 $(MODULES):
 	(cd $@; $(MAKE))
 
-.PHONY: all $(MODULES)
+UPLOAD_SCRIPT = $(SCRIPTS_DIR)/qemu/upload.sh
+upload:
+	find . -name "*.ko" | xargs $(UPLOAD_SCRIPT)
+
+
+.PHONY: all $(MODULES) upload
 
