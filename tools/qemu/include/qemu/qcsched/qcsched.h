@@ -50,4 +50,12 @@ extern struct qcsched sched;
 #define DRPRINTF(cpu, fmt, ...) do { } while(0)
 #endif
 
+#define ASSERT(cond, fmt, ...)                          \
+    do {                                                \
+        if (!(cond)) {                                  \
+            fprintf(stderr, fmt "\n", ##__VA_ARGS__);   \
+            exit(1);                                    \
+        }                                               \
+    } while(0);
+
 #endif

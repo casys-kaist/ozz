@@ -12,7 +12,7 @@ struct qcsched_vmi_info {
 };
 
 struct qcsched_vmi_task {
-    target_ulong stack;
+    target_ulong task_struct;
 };
 
 extern struct qcsched_vmi_info vmi_info;

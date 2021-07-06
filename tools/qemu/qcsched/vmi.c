@@ -21,7 +21,8 @@ void qcsched_vmi_set_hook(CPUState *cpu, target_ulong addr)
     vmi_info.hook_addr = addr;
 }
 
-void qcsched_vmi_set__per_cpu_offset(CPUState *cpu, int index, target_ulong addr)
+void qcsched_vmi_set__per_cpu_offset(CPUState *cpu, int index,
+                                     target_ulong addr)
 {
     DRPRINTF(cpu, "__per_cpu_offset[%d]: %lx\n", index, addr);
     vmi_info.__per_cpu_offset[index] = addr;
@@ -33,19 +34,37 @@ void qcsched_vmi_set_current_task(CPUState *cpu, target_ulong addr)
     vmi_info.current_task = addr;
 }
 
+static target_ulong current_task(CPUState *cpu)
+{
+    // TODO: This only works for x86_64
+    uint8_t buf[128];
+    target_ulong task, pcpu_ptr,
+        __per_cpu_offset = vmi_info.__per_cpu_offset[cpu->cpu_index];
+
+    if (__per_cpu_offset == 0)
+        return 0;
+
+    pcpu_ptr = __per_cpu_offset + vmi_info.current_task;
+
+    ASSERT(!cpu_memory_rw_debug(cpu, pcpu_ptr, buf, TARGET_LONG_SIZE, 0),
+           "Can't read pcpu section");
+
+    task = *(target_ulong *)buf;
+    return task;
+}
+
 void qcsched_vmi_task(CPUState *cpu, struct qcsched_vmi_task *t)
 {
-    // In x86_64, every task has a its own stack, and each CPU has
-    // additional one stack for serving IRQs.
-    // Let's use the frame pointer as a task id until we have a better
-    // option.
-    t->stack = cpu->regs.rbp;
+    // Use the current pointer in x86_64 until we have a better
+    // option. It is stored in the per-cpu pointer called
+    // current_task.
+    t->task_struct = current_task(cpu);
 }
 
 static bool __vmi_same_task(struct qcsched_vmi_task *t0,
                             struct qcsched_vmi_task *t1)
 {
-    return t0->stack == t1->stack;
+    return t0->task_struct == t1->task_struct;
 }
 
 bool qcsched_vmi_can_progress(CPUState *cpu)
