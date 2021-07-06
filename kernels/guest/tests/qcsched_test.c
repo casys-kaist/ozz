@@ -27,12 +27,23 @@ unsigned long hypercall(unsigned long cmd, unsigned long arg,
 	asm volatile(
 				 // rbx is a callee-saved register
 				 "pushq %%rbx\n\t"
-				 "movq %1, %%rax\n\t"
-				 "movq %2, %%rbx\n\t"
-				 "movq %3, %%rcx\n\t"
-				 "movq %4, %%rdx\n\t"
-				 "movq %5, %%rsi\n\t"
+				 // Save values to the stack, so below movqs always
+				 // see consistent values.
+				 "pushq %1\n\t"
+				 "pushq %2\n\t"
+				 "pushq %3\n\t"
+				 "pushq %4\n\t"
+				 "pushq %5\n\t"
+				 // Setup registers
+				 "movq 32(%%rsp), %%rax\n\t"
+				 "movq 24(%%rsp), %%rbx\n\t"
+				 "movq 16(%%rsp), %%rcx\n\t"
+				 "movq 8(%%rsp), %%rdx\n\t"
+				 "movq (%%rsp), %%rsi\n\t"
+				 // then vmcall
 				 "vmcall\n\t"
+				 // clear the stack
+				 "addq $40, %%rsp\n\t"
 				 "popq %%rbx\n\t"
 				 : "=r"(ret)
 				 : "r"(id), "r"(cmd), "r"(arg), "r"(subarg), "r"(subarg2));
