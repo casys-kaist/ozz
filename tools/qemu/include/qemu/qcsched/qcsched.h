@@ -45,9 +45,9 @@ int qcsched_handle_breakpoint(CPUState *cpu);
 extern struct qcsched sched;
 
 #ifdef _DEBUG
-#define DRPRINTF(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
+#define DRPRINTF(cpu, fmt, ...) fprintf(stderr, "[CPU #%d] " fmt, cpu->cpu_index, ## __VA_ARGS__)
 #else
-#define DRPRINTF(fmt, ...) do { } while(0)
+#define DRPRINTF(cpu, fmt, ...) do { } while(0)
 #endif
 
 #endif

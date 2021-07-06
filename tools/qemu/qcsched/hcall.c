@@ -34,25 +34,25 @@ static target_ulong qcsched_install_breakpoint(CPUState *cpu, target_ulong addr,
 {
     struct qcsched_entry *entry = &sched.entries[order];
 
-    DRPRINTF("%s\n", __func__);
+    DRPRINTF(cpu, "%s\n", __func__);
 
     if (qcsched_entry_used(entry))
         return -EBUSY;
 
-    DRPRINTF("Sched: addr: %lx, order: %d\n", addr, order);
+    DRPRINTF(cpu, "Sched: addr: %lx, order: %d\n", addr, order);
     entry->schedpoint = (struct qcschedpoint){.addr = addr, .order = order};
     entry->cpu = cpu->cpu_index;
     sched.total++;
     return 0;
 }
 
-static target_ulong qcsched_activate_breakpoint(CPUState *unused)
+static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
 {
     int total, i;
     CPUState *cpu;
     struct qcsched_entry *entry;
 
-    DRPRINTF("%s\n", __func__);
+    DRPRINTF(cpu0, "%s\n", __func__);
 
     if (sched.activated)
         return -EBUSY;
@@ -67,7 +67,7 @@ static target_ulong qcsched_activate_breakpoint(CPUState *unused)
         for (i = 0; i < total; i++) {
             entry = &sched.entries[i];
             if (entry->cpu == cpu->cpu_index) {
-                DRPRINTF("Installing a breakpoint on cpu#%d\n", entry->cpu);
+                DRPRINTF(cpu0, "Installing a breakpoint on cpu#%d\n", entry->cpu);
                 kvm_insert_breakpoint_cpu(cpu, entry->schedpoint.addr, 1,
                                           GDB_BREAKPOINT_HW);
             }
@@ -77,13 +77,13 @@ static target_ulong qcsched_activate_breakpoint(CPUState *unused)
     return 0;
 }
 
-static target_ulong qcsched_deactivate_breakpoint(CPUState *unused)
+static target_ulong qcsched_deactivate_breakpoint(CPUState *cpu0)
 {
     int total, i;
     CPUState *cpu;
     struct qcsched_entry *entry;
 
-    DRPRINTF("%s\n", __func__);
+    DRPRINTF(cpu0, "%s\n", __func__);
 
     if (!sched.activated)
         return -EINVAL;
@@ -103,11 +103,11 @@ static target_ulong qcsched_deactivate_breakpoint(CPUState *unused)
     return 0;
 }
 
-static target_ulong qcsched_clear_breakpoint(CPUState *unused)
+static target_ulong qcsched_clear_breakpoint(CPUState *cpu0)
 {
     CPUState *cpu;
 
-    DRPRINTF("%s\n", __func__);
+    DRPRINTF(cpu0, "%s\n", __func__);
 
     CPU_FOREACH(cpu) { kvm_remove_all_breakpoints_cpu(cpu); }
     memset(&sched, 0, sizeof(struct qcsched));

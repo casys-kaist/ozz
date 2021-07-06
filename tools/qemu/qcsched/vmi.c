@@ -11,11 +11,13 @@ struct qcsched_vmi_info vmi_info;
 
 void qcsched_vmi_set_trampoline(CPUState *cpu, target_ulong addr)
 {
+    DRPRINTF(cpu, "Trampoline addr: %lx\n", addr);
     vmi_info.trampoline_addr = addr;
 }
 
 void qcsched_vmi_set_hook(CPUState *cpu, target_ulong addr)
 {
+    DRPRINTF(cpu, "Hook addr: %lx\n", addr);
     vmi_info.hook_addr = addr;
 }
 
