@@ -21,6 +21,18 @@ void qcsched_vmi_set_hook(CPUState *cpu, target_ulong addr)
     vmi_info.hook_addr = addr;
 }
 
+void qcsched_vmi_set__per_cpu_offset(CPUState *cpu, int index, target_ulong addr)
+{
+    DRPRINTF(cpu, "__per_cpu_offset[%d]: %lx\n", index, addr);
+    vmi_info.__per_cpu_offset[index] = addr;
+}
+
+void qcsched_vmi_set_current_task(CPUState *cpu, target_ulong addr)
+{
+    DRPRINTF(cpu, "current_task: %lx\n", addr);
+    vmi_info.current_task = addr;
+}
+
 void qcsched_vmi_task(CPUState *cpu, struct qcsched_vmi_task *t)
 {
     // In x86_64, every task has a its own stack, and each CPU has

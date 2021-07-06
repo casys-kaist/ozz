@@ -22,5 +22,7 @@
 // Subcommands for HCALL_VMI_FUN_ADDR (saved in kvm_run->hypercall.args[1])
 #define VMI_TRAMPOLINE 0x939aef52
 #define VMI_HOOK 0x30f4b16
+#define VMI_CURRENT_TASK 0xfb40de5
+#define VMI__PER_CPU_OFFSET0 0x4a157131
 
 #endif /* __HCALL_CONSTANT_H */

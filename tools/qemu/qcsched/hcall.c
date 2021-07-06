@@ -118,7 +118,7 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
 {
     __u64 *args = run->hypercall.args;
     __u64 cmd = args[0];
-    int order;
+    int order, index;
     target_ulong addr, subcmd;
     target_ulong hcall_ret;
 
@@ -149,6 +149,13 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
         case VMI_HOOK:
             qcsched_vmi_set_hook(cpu, addr);
             break;
+        case VMI__PER_CPU_OFFSET0 ... VMI__PER_CPU_OFFSET0 + 63:
+            index = subcmd - VMI__PER_CPU_OFFSET0;
+            qcsched_vmi_set__per_cpu_offset(cpu, index, addr);
+            break;
+        case VMI_CURRENT_TASK:
+            qcsched_vmi_set_current_task(cpu, addr);
+            break;
         default:
             hcall_ret = -EINVAL;
             break;
@@ -158,6 +165,7 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
         hcall_ret = -EINVAL;
         break;
     }
+    DRPRINTF(cpu, "ret: %lx\n", hcall_ret);
     qemu_mutex_unlock_iothread();
 
     qcsched_commit_state(cpu, hcall_ret);
