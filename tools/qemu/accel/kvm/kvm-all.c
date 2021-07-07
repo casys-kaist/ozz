@@ -2453,6 +2453,10 @@ int kvm_cpu_exec(CPUState *cpu)
             cpu->vcpu_dirty = false;
         }
 
+#ifdef CONFIG_QCSCHED
+        qcsched_pre_run(cpu);
+#endif
+
         kvm_arch_pre_run(cpu, run);
         if (qatomic_read(&cpu->exit_request)) {
             DPRINTF("interrupt exit requested\n");
