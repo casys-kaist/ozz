@@ -26,5 +26,7 @@ void qcsched_vmi_set__per_cpu_offset(CPUState *cpu, int index, target_ulong addr
 
 void qcsched_vmi_task(CPUState *cpu, struct qcsched_vmi_task *t);
 bool qcsched_vmi_can_progress(CPUState *cpu);
+bool vmi_same_task(struct qcsched_vmi_task *t0,
+                   struct qcsched_vmi_task *t1);
 
 #endif

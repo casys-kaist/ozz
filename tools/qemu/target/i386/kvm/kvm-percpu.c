@@ -8,8 +8,6 @@
 #include "sysemu/kvm.h"
 #include "sysemu/sysemu.h"
 
-#define MAX_NR_CPUS 32
-
 // NOTE: I don't embed hardware breakpoints in CPUState because cpu.h
 // is used files that are not target-specific. This seems a bit dirty.
 // Whatever.

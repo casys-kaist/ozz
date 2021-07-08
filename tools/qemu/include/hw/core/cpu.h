@@ -276,6 +276,10 @@ struct qemu_work_item;
 #define CPU_UNSET_NUMA_NODE_ID -1
 #define CPU_TRACE_DSTATE_MAX_EVENTS 32
 
+#ifdef CONFIG_QCSCHED
+#define MAX_NR_CPUS 32
+#endif
+
 /**
  * CPUState:
  * @cpu_index: CPU index (informative).
@@ -439,6 +443,7 @@ struct CPUState {
 
 #ifdef CONFIG_QCSCHED
     struct kvm_regs regs;
+    bool qcsched_dirty;
 #endif
 };
 

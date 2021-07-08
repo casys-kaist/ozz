@@ -18,7 +18,7 @@ void qcsched_vmi_set_trampoline(CPUState *cpu, target_ulong addr, int index)
 
 void qcsched_vmi_set_hook(CPUState *cpu, target_ulong addr)
 {
-    DRPRINTF(cpu, "Hook addr: %lx\n", addr);
+    DRPRINTF(cpu, "hook addr: %lx\n", addr);
     vmi_info.hook_addr = addr;
 }
 
@@ -62,15 +62,27 @@ void qcsched_vmi_task(CPUState *cpu, struct qcsched_vmi_task *t)
     t->task_struct = current_task(cpu);
 }
 
-static bool __vmi_same_task(struct qcsched_vmi_task *t0,
-                            struct qcsched_vmi_task *t1)
+bool vmi_same_task(struct qcsched_vmi_task *t0, struct qcsched_vmi_task *t1)
 {
     return t0->task_struct == t1->task_struct;
 }
 
+static bool __vmi_scheduling_subject(struct qcsched_vmi_task *t)
+{
+    // We don't have that many entries. Just iterating is fast enough.
+    int i;
+    for (i = 0; i < sched.total; i++) {
+        if (vmi_same_task(t, &sched.entries[i].t))
+            return true;
+    }
+    return false;
+}
+
 bool qcsched_vmi_can_progress(CPUState *cpu)
 {
+    struct qcsched_entry *entry = &sched.entries[sched.current];
     struct qcsched_vmi_task running;
     qcsched_vmi_task(cpu, &running);
-    return __vmi_same_task(&running, &(sched.current->t));
+    return !__vmi_scheduling_subject(&running) ||
+           vmi_same_task(&running, &entry->t) || sched.total == sched.current;
 }

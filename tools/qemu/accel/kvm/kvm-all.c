@@ -2453,10 +2453,6 @@ int kvm_cpu_exec(CPUState *cpu)
             cpu->vcpu_dirty = false;
         }
 
-#ifdef CONFIG_QCSCHED
-        qcsched_pre_run(cpu);
-#endif
-
         kvm_arch_pre_run(cpu, run);
         if (qatomic_read(&cpu->exit_request)) {
             DPRINTF("interrupt exit requested\n");
@@ -2473,13 +2469,15 @@ int kvm_cpu_exec(CPUState *cpu)
          */
         smp_rmb();
 
+#ifdef CONFIG_QCSCHED
+        qcsched_pre_run(cpu);
+#endif
         run_ret = kvm_vcpu_ioctl(cpu, KVM_RUN, 0);
-
-        attrs = kvm_arch_post_run(cpu, run);
 
 #ifdef CONFIG_QCSCHED
         qcsched_post_run(cpu);
 #endif
+        attrs = kvm_arch_post_run(cpu, run);
 
 #ifdef KVM_HAVE_MCE_INJECTION
         if (unlikely(have_sigbus_pending)) {

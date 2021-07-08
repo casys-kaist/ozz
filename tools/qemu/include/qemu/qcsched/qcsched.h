@@ -30,8 +30,7 @@ struct qcsched_entry {
 
 struct qcsched {
     struct qcsched_entry entries[MAX_SCHEDPOINTS];
-    struct qcsched_entry *current;
-    int total;
+    int total, current;
     bool activated;
 };
 

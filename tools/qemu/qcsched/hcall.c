@@ -35,13 +35,14 @@ static target_ulong qcsched_install_breakpoint(CPUState *cpu, target_ulong addr,
     struct qcsched_entry *entry = &sched.entries[order];
 
     DRPRINTF(cpu, "%s\n", __func__);
+    DRPRINTF(cpu, "addr: %lx, order: %d\n", addr, order);
 
     if (qcsched_entry_used(entry))
         return -EBUSY;
 
-    DRPRINTF(cpu, "Sched: addr: %lx, order: %d\n", addr, order);
     entry->schedpoint = (struct qcschedpoint){.addr = addr, .order = order};
     entry->cpu = cpu->cpu_index;
+    qcsched_vmi_task(cpu, &entry->t);
     sched.total++;
     return 0;
 }
@@ -49,6 +50,7 @@ static target_ulong qcsched_install_breakpoint(CPUState *cpu, target_ulong addr,
 static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
 {
     int total, i;
+    bool need_hook;
     CPUState *cpu;
     struct qcsched_entry *entry;
 
@@ -57,6 +59,9 @@ static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
     if (sched.activated)
         return -EBUSY;
 
+    if (!vmi_info.hook_addr)
+        return -EINVAL;
+
     if (!sanitize_breakpoint(&sched))
         return -EINVAL;
 
@@ -64,16 +69,24 @@ static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
 
     CPU_FOREACH(cpu)
     {
+        need_hook = false;
         for (i = 0; i < total; i++) {
             entry = &sched.entries[i];
             if (entry->cpu == cpu->cpu_index) {
-                DRPRINTF(cpu0, "Installing a breakpoint on cpu#%d\n",
-                         entry->cpu);
-                kvm_insert_breakpoint_cpu(cpu, entry->schedpoint.addr, 1,
-                                          GDB_BREAKPOINT_HW);
+                DRPRINTF(cpu, "Installing a breakpoint at %lx on cpu#%d\n",
+                         entry->schedpoint.addr, entry->cpu);
+                ASSERT(!kvm_insert_breakpoint_cpu(cpu, entry->schedpoint.addr,
+                                                  1, GDB_BREAKPOINT_HW),
+                       "failed to insert a breakpiont at a scheduling point\n");
             }
         }
+        if (!need_hook)
+            continue;
+        ASSERT(!kvm_insert_breakpoint_cpu(cpu, vmi_info.hook_addr, 1,
+                                          GDB_BREAKPOINT_HW),
+               "failed to insert a breakpoint at the hook\n");
     }
+    sched.current = 0;
     sched.activated = true;
     return 0;
 }
@@ -134,9 +147,11 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
         hcall_ret = qcsched_activate_breakpoint(cpu);
         break;
     case HCALL_DEACTIVATE_BP:
+        hcall_ret = 0;
         hcall_ret = qcsched_deactivate_breakpoint(cpu);
         break;
     case HCALL_CLEAR_BP:
+        hcall_ret = 0;
         hcall_ret = qcsched_clear_breakpoint(cpu);
         break;
     case HCALL_VMI_FUNC_ADDR:
