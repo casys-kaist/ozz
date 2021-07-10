@@ -132,7 +132,7 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
 {
     __u64 *args = run->hypercall.args;
     __u64 cmd = args[0];
-    int order, index;
+    int order;
     target_ulong addr, subcmd;
     target_ulong hcall_ret;
 
@@ -151,33 +151,12 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
         hcall_ret = qcsched_deactivate_breakpoint(cpu);
         break;
     case HCALL_CLEAR_BP:
-        hcall_ret = 0;
         hcall_ret = qcsched_clear_breakpoint(cpu);
         break;
-    case HCALL_VMI_FUNC_ADDR:
+    case HCALL_VMI_HINT:
         subcmd = args[1];
         addr = args[2];
-        hcall_ret = 0;
-        switch (subcmd) {
-        case VMI_TRAMPOLINE ... VMI_TRAMPOLINE + 1:
-            index = subcmd - VMI_TRAMPOLINE;
-            qcsched_vmi_set_trampoline(cpu, addr, index);
-            break;
-        case VMI_HOOK:
-            qcsched_vmi_set_hook(cpu, addr);
-            break;
-        case VMI__PER_CPU_OFFSET0 ... VMI__PER_CPU_OFFSET0 + 63:
-            index = subcmd - VMI__PER_CPU_OFFSET0;
-            qcsched_vmi_set__per_cpu_offset(cpu, index, addr);
-            break;
-        case VMI_CURRENT_TASK:
-            qcsched_vmi_set_current_task(cpu, addr);
-            break;
-        default:
-            DRPRINTF(cpu, "Unknown VMI type: %lx\n", subcmd);
-            hcall_ret = -EINVAL;
-            break;
-        }
+        hcall_ret = qcsched_vmi_hint(cpu, subcmd, addr);
         break;
     default:
         hcall_ret = -EINVAL;

@@ -19,10 +19,7 @@ struct qcsched_vmi_task {
 
 extern struct qcsched_vmi_info vmi_info;
 
-void qcsched_vmi_set_trampoline(CPUState *cpu, target_ulong addr, int index);
-void qcsched_vmi_set_hook(CPUState *cpu, target_ulong addr);
-void qcsched_vmi_set_current_task(CPUState *cpu, target_ulong addr);
-void qcsched_vmi_set__per_cpu_offset(CPUState *cpu, int index, target_ulong addr);
+target_ulong qcsched_vmi_hint(CPUState *cpu, target_ulong type, target_ulong addr);
 
 void qcsched_vmi_task(CPUState *cpu, struct qcsched_vmi_task *t);
 bool qcsched_vmi_can_progress(CPUState *cpu);

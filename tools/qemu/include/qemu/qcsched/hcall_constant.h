@@ -17,9 +17,9 @@
 #define HCALL_ACTIVATE_BP 0x40ab903
 #define HCALL_DEACTIVATE_BP 0xf327524f
 #define HCALL_CLEAR_BP 0xba220681
-#define HCALL_VMI_FUNC_ADDR 0x7ca889f0
+#define HCALL_VMI_HINT 0x7ca889f0
 
-// Subcommands for HCALL_VMI_FUN_ADDR (saved in kvm_run->hypercall.args[1])
+// Subcommands for HCALL_VMI_HINT (saved in kvm_run->hypercall.args[1])
 #define VMI_TRAMPOLINE 0x939aef52
 #define VMI_HOOK 0x30f4b16
 #define VMI_CURRENT_TASK 0xfb40de5

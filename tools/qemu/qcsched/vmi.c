@@ -4,35 +4,63 @@
 
 #include "cpu.h"
 
+#include "qemu/qcsched/hcall_constant.h"
 #include "qemu/qcsched/qcsched.h"
 #include "qemu/qcsched/vmi.h"
 
 struct qcsched_vmi_info vmi_info;
 
-void qcsched_vmi_set_trampoline(CPUState *cpu, target_ulong addr, int index)
+static void qcsched_vmi_hint_trampoline(CPUState *cpu, target_ulong addr,
+                                        int index)
 {
     DRPRINTF(cpu, "trampoline %s addr : %lx\n", (!index ? "entry" : "exit"),
              addr);
     vmi_info.trampoline_addr[index] = addr;
 }
 
-void qcsched_vmi_set_hook(CPUState *cpu, target_ulong addr)
+static void qcsched_vmi_hint_hook(CPUState *cpu, target_ulong addr)
 {
     DRPRINTF(cpu, "hook addr: %lx\n", addr);
     vmi_info.hook_addr = addr;
 }
 
-void qcsched_vmi_set__per_cpu_offset(CPUState *cpu, int index,
-                                     target_ulong addr)
+static void qcsched_vmi_hint__per_cpu_offset(CPUState *cpu, int index,
+                                             target_ulong addr)
 {
     DRPRINTF(cpu, "__per_cpu_offset[%d]: %lx\n", index, addr);
     vmi_info.__per_cpu_offset[index] = addr;
 }
 
-void qcsched_vmi_set_current_task(CPUState *cpu, target_ulong addr)
+static void qcsched_vmi_hint_current_task(CPUState *cpu, target_ulong addr)
 {
     DRPRINTF(cpu, "current_task: %lx\n", addr);
     vmi_info.current_task = addr;
+}
+
+target_ulong qcsched_vmi_hint(CPUState *cpu, target_ulong type,
+                              target_ulong addr)
+{
+    int index;
+    switch (type) {
+    case VMI_TRAMPOLINE ... VMI_TRAMPOLINE + 1:
+        index = type - VMI_TRAMPOLINE;
+        qcsched_vmi_hint_trampoline(cpu, addr, index);
+        break;
+    case VMI_HOOK:
+        qcsched_vmi_hint_hook(cpu, addr);
+        break;
+    case VMI__PER_CPU_OFFSET0 ... VMI__PER_CPU_OFFSET0 + 63:
+        index = type - VMI__PER_CPU_OFFSET0;
+        qcsched_vmi_hint__per_cpu_offset(cpu, index, addr);
+        break;
+    case VMI_CURRENT_TASK:
+        qcsched_vmi_hint_current_task(cpu, addr);
+        break;
+    default:
+        DRPRINTF(cpu, "Unknown VMI type: %lx\n", type);
+        return -EINVAL;
+    }
+    return 0;
 }
 
 static target_ulong current_task(CPUState *cpu)
