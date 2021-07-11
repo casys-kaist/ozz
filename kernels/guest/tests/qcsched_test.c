@@ -20,8 +20,6 @@ unsigned long hypercall(unsigned long cmd, unsigned long arg,
 						unsigned long subarg, unsigned long subarg2)
 {
 	unsigned long ret = -1;
-	printf("Calling hypercall: %lx\n", cmd);
-	fflush(stdout);
 #ifdef __amd64__
 	unsigned long id = HCALL_RAX_ID;
 	asm volatile(
@@ -43,13 +41,11 @@ unsigned long hypercall(unsigned long cmd, unsigned long arg,
 				 // then vmcall
 				 "vmcall\n\t"
 				 // clear the stack
-				 "addq $40, %%rsp\n\t"
+				 "addq $40,%%rsp\n\t"
 				 "popq %%rbx\n\t"
 				 : "=r"(ret)
 				 : "r"(id), "r"(cmd), "r"(arg), "r"(subarg), "r"(subarg2));
 #endif
-	printf("Return: %lx\n", ret);
-	fflush(stdout);
 	return ret;
 }
 
@@ -64,15 +60,21 @@ unsigned long sys_test_addr(void) {
 #define SYS_pso_writer 501
 #define gettid() syscall(SYS_gettid)
 
-void *thr(void *arg) {
-	int cpu = (int)(intptr_t)arg;
+struct arg_t {
+	int cpu;
+	bool *go;
+};
+
+void *thr(void *_arg) {
+	struct arg_t *arg = (struct arg_t *)_arg;
+	int cpu = arg->cpu;
 	cpu_set_t set;
 	CPU_ZERO(&set);
 	CPU_SET(cpu, &set);
 	if (sched_setaffinity(gettid(), sizeof(set), &set))
 		perror("sched_setaffinity");
 	hypercall(HCALL_INSTALL_BP, sys_test_addr(), cpu, 0);
-	sleep(1);
+	while(!*arg->go);
 	hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
 	syscall(SYS_pso_writer);
 	hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
@@ -80,17 +82,25 @@ void *thr(void *arg) {
 }
 
 void test_single_thread(void) {
+	bool go = true;
+	struct arg_t arg = {.cpu = 0, .go = &go};
 	fprintf(stderr, "%s\n", __func__);
-	thr((void *)0);
+	thr(&arg);
 }
 
 void test_two_threads(void) {
+	bool go = false;
 	pthread_t pth1, pth2;
+	struct arg_t arg0 = {.cpu = 0, .go = &go};
+	struct arg_t arg1 = {.cpu = 1, .go = &go};;
 
 	fprintf(stderr, "%s\n", __func__);
 
-	pthread_create(&pth1, NULL, thr, (void *)0);
-	pthread_create(&pth2, NULL, thr, (void *)1);
+	pthread_create(&pth1, NULL, thr, &arg0);
+	pthread_create(&pth2, NULL, thr, &arg1);
+
+	sleep(2);
+	go = true;
 
 	pthread_join(pth1, NULL);
 	pthread_join(pth2, NULL);
