@@ -59,7 +59,7 @@ static void resume_task(CPUState *cpu)
     DRPRINTF(cpu, "resumming\n");
     __copy_registers(&cpu->regs, &trampoline->orig_regs);
     cpu->qcsched_dirty = true;
-    trampoline->trampoled = false;
+    memset(trampoline, 0, sizeof(*trampoline));
 }
 
 static void hand_over_baton(CPUState *cpu)
@@ -67,6 +67,16 @@ static void hand_over_baton(CPUState *cpu)
     sched.current = sched.current + 1;
     DRPRINTF(cpu, "Next scheduling point: %d, %lx\n", sched.current,
              sched.entries[sched.current].schedpoint.addr);
+}
+
+static void wake_cpu_up(CPUState *cpu, CPUState *wakeup)
+{
+    // Installing a breakpoint on the trampoline so each CPU can
+    // wake up on its own.
+    DRPRINTF(cpu, "waking cpu #%d\n", wakeup->cpu_index);
+    ASSERT(!kvm_insert_breakpoint_cpu(wakeup, vmi_info.trampoline_exit_addr, 1,
+                                      GDB_BREAKPOINT_HW),
+           "failing to wake cpu #%d up", wakeup->cpu_index);
 }
 
 static void wake_others_up(CPUState *cpu0)
@@ -81,12 +91,7 @@ static void wake_others_up(CPUState *cpu0)
         trampoline = &trampolines[index];
         if (!trampoline->trampoled || index == cpu0->cpu_index)
             continue;
-        DRPRINTF(cpu0, "waking cpu #%d\n", cpu->cpu_index);
-        // Installing a breakpoint on the trampoline so each CPU can
-        // wake up on its own.
-        ASSERT(!kvm_insert_breakpoint_cpu(cpu, vmi_info.trampoline_exit_addr, 1,
-                                          GDB_BREAKPOINT_HW),
-               "failing to wake cpu #%d up", cpu->cpu_index);
+        wake_cpu_up(cpu0, cpu);
     }
 }
 
@@ -165,4 +170,11 @@ int qcsched_handle_breakpoint(CPUState *cpu)
     qemu_mutex_unlock_iothread();
 
     return 0;
+}
+
+void qcsched_escape_if_trampoled(CPUState *cpu, CPUState *wakeup)
+{
+    struct qcsched_trampoline_info *trampoline = &trampolines[wakeup->cpu_index];
+    if (trampoline->trampoled)
+        wake_cpu_up(cpu, wakeup);
 }

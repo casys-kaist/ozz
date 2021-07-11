@@ -131,7 +131,11 @@ static target_ulong qcsched_clear_breakpoint(CPUState *cpu0)
 
     DRPRINTF(cpu0, "%s\n", __func__);
 
-    CPU_FOREACH(cpu) { kvm_remove_all_breakpoints_cpu(cpu); }
+    CPU_FOREACH(cpu)
+    {
+        kvm_remove_all_breakpoints_cpu(cpu);
+        qcsched_escape_if_trampoled(cpu0, cpu);
+    }
     memset(&sched, 0, sizeof(struct qcsched));
     return 0;
 }
@@ -155,7 +159,6 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
         hcall_ret = qcsched_activate_breakpoint(cpu);
         break;
     case HCALL_DEACTIVATE_BP:
-        hcall_ret = 0;
         hcall_ret = qcsched_deactivate_breakpoint(cpu);
         break;
     case HCALL_CLEAR_BP:

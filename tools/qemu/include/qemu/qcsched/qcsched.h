@@ -43,6 +43,8 @@ int qcsched_handle_breakpoint(CPUState *cpu);
 
 extern struct qcsched sched;
 
+void qcsched_escape_if_trampoled(CPUState *cpu, CPUState *wakeup);
+
 #ifdef _DEBUG
 #define DRPRINTF(cpu, fmt, ...) fprintf(stderr, "[CPU #%d] " fmt, cpu->cpu_index, ## __VA_ARGS__)
 #else
