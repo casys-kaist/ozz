@@ -67,6 +67,15 @@ static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
 
     total = sched.total;
 
+    // NOTE: kvm_insert_breakpoint_cpu() releases qemu_global_mutex
+    // during run_on_cpu() and another CPU may acquire the mutex,
+    // resulting in more than one CPU being in this function. To
+    // prevent breakpoints from being installed multiple times, set
+    // sched.activated true before installing breakpoints so the
+    // latter CPU returns early.
+    sched.activated = true;
+    sched.current = 0;
+
     CPU_FOREACH(cpu)
     {
         need_hook = false;
@@ -87,8 +96,6 @@ static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
                                           GDB_BREAKPOINT_HW),
                "failed to insert a breakpoint at the hook\n");
     }
-    sched.current = 0;
-    sched.activated = true;
     return 0;
 }
 
