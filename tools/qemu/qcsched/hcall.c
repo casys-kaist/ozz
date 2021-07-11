@@ -78,6 +78,7 @@ static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
                 ASSERT(!kvm_insert_breakpoint_cpu(cpu, entry->schedpoint.addr,
                                                   1, GDB_BREAKPOINT_HW),
                        "failed to insert a breakpiont at a scheduling point\n");
+                need_hook = true;
             }
         }
         if (!need_hook)
