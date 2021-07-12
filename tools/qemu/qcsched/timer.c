@@ -18,7 +18,8 @@
 static void __init_itimerspec(struct itimerspec *its)
 {
     memset(&its->it_interval, 0, sizeof(its->it_interval));
-    its->it_value = (struct timespec){.tv_sec = 1, .tv_nsec = 100};
+    its->it_value = (struct timespec){
+        .tv_sec = 0, .tv_nsec = 500 * 1000 /* ns */ * 1000 /* ms */};
 }
 
 void qcsched_arm_selfescape_timer(CPUState *cpu)
@@ -29,4 +30,28 @@ void qcsched_arm_selfescape_timer(CPUState *cpu)
     __init_itimerspec(&its);
 
     ASSERT(!timer_settime(trampoline->timerid, 0, &its, NULL), "timer_settime");
+}
+
+static void qcsched_handle_kick_locked(CPUState *cpu)
+{
+    struct qcsched_trampoline_info *trampoline = get_trampoline_info(cpu);
+
+    ASSERT(cpu == current_cpu, "something wrong: cpu != current_cpu");
+
+    if (!trampoline->kicked)
+        return;
+
+    trampoline->kicked = false;
+
+    if (!trampoline->trampoled)
+        return;
+
+    wake_cpu_up(cpu, cpu);
+}
+
+void qcsched_handle_kick(CPUState *cpu)
+{
+    qemu_mutex_lock_iothread();
+    qcsched_handle_kick_locked(cpu);
+    qemu_mutex_unlock_iothread();
 }

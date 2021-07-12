@@ -49,12 +49,18 @@ struct qcsched_trampoline_info {
     struct qcsched_vmi_task t;
     struct kvm_regs orig_regs;
     bool trampoled;
+    bool kicked;
+    // timerid should be the last member because of resume_task().
     timer_t timerid;
 };
+
+void wake_cpu_up(CPUState *cpu, CPUState *wakeup);
+void wake_others_up(CPUState *cpu);
 
 void qcsched_arm_selfescape_timer(CPUState *cpu);
 void qcsched_escape_if_trampoled(CPUState *cpu, CPUState *wakeup);
 struct qcsched_trampoline_info *get_trampoline_info(CPUState *cpu);
+void qcsched_handle_kick(CPUState *cpu);
 
 #ifdef _DEBUG
 #define DRPRINTF(cpu, fmt, ...) fprintf(stderr, "[CPU #%d] " fmt, cpu->cpu_index, ## __VA_ARGS__)

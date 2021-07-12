@@ -56,6 +56,10 @@ static void resume_task(CPUState *cpu)
     struct qcsched_trampoline_info *trampoline = get_trampoline_info(cpu);
 
     ASSERT(trampoline->trampoled, "nothing has been kidnapped");
+    // These two asserts should be enforced to safely run with
+    // qcsched_handle_kick().
+    ASSERT(qemu_mutex_iothread_locked(), "iothread mutex is not locked");
+    ASSERT(cpu == current_cpu, "something wrong: cpu != current_cpu");
 
     DRPRINTF(cpu, "resumming\n");
     __copy_registers(&cpu->regs, &trampoline->orig_regs);
@@ -70,7 +74,7 @@ static void hand_over_baton(CPUState *cpu)
              sched.entries[sched.current].schedpoint.addr);
 }
 
-static void wake_cpu_up(CPUState *cpu, CPUState *wakeup)
+void wake_cpu_up(CPUState *cpu, CPUState *wakeup)
 {
     // Installing a breakpoint on the trampoline so each CPU can
     // wake up on its own.
@@ -80,7 +84,7 @@ static void wake_cpu_up(CPUState *cpu, CPUState *wakeup)
            "failing to wake cpu #%d up", wakeup->cpu_index);
 }
 
-static void wake_others_up(CPUState *cpu0)
+void wake_others_up(CPUState *cpu0)
 {
     CPUState *cpu;
     struct qcsched_trampoline_info *trampoline;

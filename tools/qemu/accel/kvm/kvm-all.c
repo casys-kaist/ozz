@@ -2498,6 +2498,9 @@ int kvm_cpu_exec(CPUState *cpu)
             if (run_ret == -EINTR || run_ret == -EAGAIN) {
                 DPRINTF("io window exit\n");
                 kvm_eat_signals(cpu);
+#ifdef CONFIG_QCSCHED
+                qcsched_handle_kick(cpu);
+#endif
                 ret = EXCP_INTERRUPT;
                 break;
             }
@@ -2977,11 +2980,16 @@ static int kvm_set_signal_mask(CPUState *cpu, const sigset_t *sigset)
 
 static void kvm_ipi_signal(int sig, siginfo_t *sinfo, void *ucontext)
 {
+#ifdef CONFIG_QCSCHED
+    struct qcsched_trampoline_info *trampoline;
+#endif
     if (current_cpu) {
 #ifdef CONFIG_QCSCHED
         if (sinfo->si_value.sival_int == TRAMPOLINE_ESCAPE_MAGIC) {
+            trampoline = get_trampoline_info(current_cpu);
             // The timer armed when current_cpu is kidnapped is
             // expired.
+            trampoline->kicked = true;
         }
 #endif
         assert(kvm_immediate_exit);

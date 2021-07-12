@@ -5,8 +5,8 @@
 #include <linux/kvm.h>
 
 #include "cpu.h"
-#include "sysemu/kvm.h"
 #include "qemu/main-loop.h"
+#include "sysemu/kvm.h"
 
 #include "qemu/qcsched/qcsched.h"
 
@@ -63,6 +63,6 @@ void qcsched_init_vcpu(CPUState *cpu)
     sevp.sigev_signo = SIG_IPI;
     sevp.sigev_value.sival_int = TRAMPOLINE_ESCAPE_MAGIC;
     sevp.sigev_notify_thread_id = tid;
-
-    ASSERT(!timer_create(CLOCK_MONOTONIC, &sevp, &trampoline->timerid), "timer_create");
+    ASSERT(!timer_create(CLOCK_MONOTONIC, &sevp, &trampoline->timerid),
+           "timer_create");
 }
