@@ -76,12 +76,18 @@ static void hand_over_baton(CPUState *cpu)
 
 void wake_cpu_up(CPUState *cpu, CPUState *wakeup)
 {
+    int r;
     // Installing a breakpoint on the trampoline so each CPU can
     // wake up on its own.
     DRPRINTF(cpu, "waking cpu #%d\n", wakeup->cpu_index);
-    ASSERT(!kvm_insert_breakpoint_cpu(wakeup, vmi_info.trampoline_exit_addr, 1,
-                                      GDB_BREAKPOINT_HW),
-           "failing to wake cpu #%d up", wakeup->cpu_index);
+    r = kvm_insert_breakpoint_cpu(wakeup, vmi_info.trampoline_exit_addr, 1,
+                                  GDB_BREAKPOINT_HW);
+    // The race condition scenario: one cpu is trying to wake another
+    // cpu up, and the one is also trying to wake up on its own. It is
+    // okay in this case because we install the breakpoint anyway. So
+    // ignore -EEXIST.
+    ASSERT(r == 0 || r == -EEXIST, "failing to wake cpu #%d up",
+           wakeup->cpu_index);
 }
 
 void wake_others_up(CPUState *cpu0)
