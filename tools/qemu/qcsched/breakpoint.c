@@ -11,14 +11,14 @@
 
 #define RIP(cpu) (cpu->regs.rip)
 
-struct qcsched_trampoline_info {
-    struct qcsched_vmi_task t;
-    struct kvm_regs orig_regs;
-    bool trampoled;
-};
 // For the same reason for percpu_hw_breakpoint, I decide not to embed
 // qcsched_trampoline_info in CPUState.
-struct qcsched_trampoline_info trampolines[MAX_NR_CPUS];
+static struct qcsched_trampoline_info trampolines[MAX_NR_CPUS];
+
+struct qcsched_trampoline_info *get_trampoline_info(CPUState *cpu)
+{
+    return &trampolines[cpu->cpu_index];
+}
 
 static void jump_into_trampoline(CPUState *cpu)
 {
@@ -33,7 +33,7 @@ static void __copy_registers(struct kvm_regs *dst, struct kvm_regs *src)
 
 static void kidnap_task(CPUState *cpu)
 {
-    struct qcsched_trampoline_info *trampoline = &trampolines[cpu->cpu_index];
+    struct qcsched_trampoline_info *trampoline = get_trampoline_info(cpu);
 
     if (sched.current == sched.total)
         // We hit the last breakpoint. TODO: This if statement allows
@@ -52,7 +52,7 @@ static void kidnap_task(CPUState *cpu)
 
 static void resume_task(CPUState *cpu)
 {
-    struct qcsched_trampoline_info *trampoline = &trampolines[cpu->cpu_index];
+    struct qcsched_trampoline_info *trampoline = get_trampoline_info(cpu);
 
     ASSERT(trampoline->trampoled, "nothing has been kidnapped");
 
@@ -81,15 +81,13 @@ static void wake_cpu_up(CPUState *cpu, CPUState *wakeup)
 
 static void wake_others_up(CPUState *cpu0)
 {
-    int index;
     CPUState *cpu;
     struct qcsched_trampoline_info *trampoline;
 
     CPU_FOREACH(cpu)
     {
-        index = cpu->cpu_index;
-        trampoline = &trampolines[index];
-        if (!trampoline->trampoled || index == cpu0->cpu_index)
+        trampoline = get_trampoline_info(cpu);
+        if (!trampoline->trampoled || cpu->cpu_index == cpu0->cpu_index)
             continue;
         wake_cpu_up(cpu0, cpu);
     }
@@ -174,7 +172,7 @@ int qcsched_handle_breakpoint(CPUState *cpu)
 
 void qcsched_escape_if_trampoled(CPUState *cpu, CPUState *wakeup)
 {
-    struct qcsched_trampoline_info *trampoline = &trampolines[wakeup->cpu_index];
+    struct qcsched_trampoline_info *trampoline = get_trampoline_info(wakeup);
     if (trampoline->trampoled)
         wake_cpu_up(cpu, wakeup);
 }

@@ -43,7 +43,15 @@ int qcsched_handle_breakpoint(CPUState *cpu);
 
 extern struct qcsched sched;
 
+struct qcsched_trampoline_info {
+    struct qcsched_vmi_task t;
+    struct kvm_regs orig_regs;
+    bool trampoled;
+    timer_t timerid;
+};
+
 void qcsched_escape_if_trampoled(CPUState *cpu, CPUState *wakeup);
+struct qcsched_trampoline_info *get_trampoline_info(CPUState *cpu);
 
 #ifdef _DEBUG
 #define DRPRINTF(cpu, fmt, ...) fprintf(stderr, "[CPU #%d] " fmt, cpu->cpu_index, ## __VA_ARGS__)
