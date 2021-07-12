@@ -472,6 +472,11 @@ int kvm_init_vcpu(CPUState *cpu, Error **errp)
                          "kvm_init_vcpu: kvm_arch_init_vcpu failed (%lu)",
                          kvm_arch_vcpu_id(cpu));
     }
+
+#ifdef CONFIG_QCSCHED
+    qcsched_init_vcpu(cpu);
+#endif
+
 err:
     return ret;
 }
@@ -2973,6 +2978,12 @@ static int kvm_set_signal_mask(CPUState *cpu, const sigset_t *sigset)
 static void kvm_ipi_signal(int sig, siginfo_t *sinfo, void *ucontext)
 {
     if (current_cpu) {
+#ifdef CONFIG_QCSCHED
+        if (sinfo->si_value.sival_int == TRAMPOLINE_ESCAPE_MAGIC) {
+            // The timer armed when current_cpu is kidnapped is
+            // expired.
+        }
+#endif
         assert(kvm_immediate_exit);
         kvm_cpu_kick(current_cpu);
     }

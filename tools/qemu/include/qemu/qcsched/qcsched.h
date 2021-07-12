@@ -34,6 +34,8 @@ struct qcsched {
     bool activated;
 };
 
+void qcsched_init_vcpu(CPUState *cpu);
+
 void qcsched_pre_run(CPUState *cpu);
 void qcsched_post_run(CPUState *cpu);
 void qcsched_commit_state(CPUState *cpu, target_ulong hcall_ret);
@@ -50,6 +52,7 @@ struct qcsched_trampoline_info {
     timer_t timerid;
 };
 
+void qcsched_arm_selfescape_timer(CPUState *cpu);
 void qcsched_escape_if_trampoled(CPUState *cpu, CPUState *wakeup);
 struct qcsched_trampoline_info *get_trampoline_info(CPUState *cpu);
 
@@ -66,5 +69,7 @@ struct qcsched_trampoline_info *get_trampoline_info(CPUState *cpu);
             exit(1);                                    \
         }                                               \
     } while(0);
+
+#define TRAMPOLINE_ESCAPE_MAGIC 0x75da1791
 
 #endif

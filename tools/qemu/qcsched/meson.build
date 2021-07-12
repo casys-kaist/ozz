@@ -3,4 +3,5 @@ specific_ss.add(when: 'CONFIG_QCSCHED', if_true: files(
   'breakpoint.c',
   'qcsched.c',
   'vmi.c',
+  'timer.c',
 ))

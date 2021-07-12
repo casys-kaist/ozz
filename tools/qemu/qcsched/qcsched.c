@@ -6,8 +6,14 @@
 
 #include "cpu.h"
 #include "sysemu/kvm.h"
+#include "qemu/main-loop.h"
 
 #include "qemu/qcsched/qcsched.h"
+
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
 
 struct qcsched sched;
 
@@ -36,4 +42,27 @@ void qcsched_commit_state(CPUState *cpu, target_ulong hcall_ret)
     qcsched_skip_executed_vmcall(&cpu->regs);
     cpu->regs.rax = hcall_ret;
     cpu->qcsched_dirty = true;
+}
+
+// NOTE: The man page for sigevent clearly specifies that struct
+// sigevent has a member field 'sigev_notify_thread_id'. Indeed, the
+// struct does not have the member field and, instead, it is defined
+// as the macro below (see include/uapi/asm-generic/siginfo.h in the
+// Linux repo). For some reasons, the macro in the header file does
+// not work, so I copied it here as a workaround.
+#define sigev_notify_thread_id _sigev_un._tid
+
+#define gettid() syscall(SYS_gettid)
+
+void qcsched_init_vcpu(CPUState *cpu)
+{
+    struct qcsched_trampoline_info *trampoline = get_trampoline_info(cpu);
+    struct sigevent sevp;
+    pid_t tid = gettid();
+    sevp.sigev_notify = SIGEV_THREAD_ID;
+    sevp.sigev_signo = SIG_IPI;
+    sevp.sigev_value.sival_int = TRAMPOLINE_ESCAPE_MAGIC;
+    sevp.sigev_notify_thread_id = tid;
+
+    ASSERT(!timer_create(CLOCK_MONOTONIC, &sevp, &trampoline->timerid), "timer_create");
 }

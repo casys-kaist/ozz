@@ -47,6 +47,7 @@ static void kidnap_task(CPUState *cpu)
     DRPRINTF(cpu, "kidnapping\n");
     __copy_registers(&trampoline->orig_regs, &cpu->regs);
     jump_into_trampoline(cpu);
+    qcsched_arm_selfescape_timer(cpu);
     trampoline->trampoled = true;
 }
 
@@ -59,7 +60,7 @@ static void resume_task(CPUState *cpu)
     DRPRINTF(cpu, "resumming\n");
     __copy_registers(&cpu->regs, &trampoline->orig_regs);
     cpu->qcsched_dirty = true;
-    memset(trampoline, 0, sizeof(*trampoline));
+    memset(trampoline, 0, sizeof(*trampoline) - sizeof(timer_t));
 }
 
 static void hand_over_baton(CPUState *cpu)
