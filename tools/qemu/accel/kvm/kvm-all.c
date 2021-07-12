@@ -2970,7 +2970,7 @@ static int kvm_set_signal_mask(CPUState *cpu, const sigset_t *sigset)
     return r;
 }
 
-static void kvm_ipi_signal(int sig)
+static void kvm_ipi_signal(int sig, siginfo_t *sinfo, void *ucontext)
 {
     if (current_cpu) {
         assert(kvm_immediate_exit);
@@ -2985,7 +2985,8 @@ void kvm_init_cpu_signals(CPUState *cpu)
     struct sigaction sigact;
 
     memset(&sigact, 0, sizeof(sigact));
-    sigact.sa_handler = kvm_ipi_signal;
+    sigact.sa_sigaction = kvm_ipi_signal;
+    sigact.sa_flags = SA_SIGINFO;
     sigaction(SIG_IPI, &sigact, NULL);
 
     pthread_sigmask(SIG_BLOCK, NULL, &set);
