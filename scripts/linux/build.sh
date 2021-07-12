@@ -14,7 +14,7 @@ if [ -n "$CONFIG" ]; then
 fi
 
 if [ -z "$NPROC" ]; then
-	NPROC=`nproc`
+	NPROC=$(expr `nproc` / 2)
 fi
 
 (cd $LINUXDIR; make O=$OUTDIR oldconfig; make O=$OUTDIR -j"$NPROC" "$@")
