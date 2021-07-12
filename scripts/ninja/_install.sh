@@ -12,7 +12,7 @@ _download() {
 _build() {
 	CMAKE=${CMAKE:-cmake}
 	__make_dir_and_exec_cmd "$NINJA_BUILD" \
-							"$CMAKE -DCMAKE_INSTALL_PREFIX=$NINJA_INSTALL ../" \
+							"$CMAKE -DCMAKE_INSTALL_PREFIX=$NINJA_INSTALL -G 'Unix Makefiles' ../" \
 							"make -j`nproc`"
 }
 
