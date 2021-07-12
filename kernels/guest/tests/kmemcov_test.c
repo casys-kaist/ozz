@@ -34,12 +34,12 @@ struct kmemcov_access *cover;
 
 void run_writer(void)
 {
-	syscall(SYS_PSO_WRITER);
+	syscall(SYS_PSO_WRITER, 1);
 }
 
 void run_reader(void)
 {
-	syscall(SYS_PSO_READER);
+	syscall(SYS_PSO_READER, 1);
 }
 
 void run(void (*fn)(void))

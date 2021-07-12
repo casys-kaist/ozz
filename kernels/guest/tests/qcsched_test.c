@@ -76,7 +76,7 @@ void *thr(void *_arg) {
 	hypercall(HCALL_INSTALL_BP, sys_test_addr(), cpu, 0);
 	while(!*arg->go);
 	hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
-	syscall(SYS_pso_writer);
+	syscall(SYS_pso_writer, 1);
 	hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
 	hypercall(HCALL_CLEAR_BP, 0, 0, 0);
 }

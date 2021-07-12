@@ -15,7 +15,7 @@ void *th1(void *_arg)
 {
 	int go = (int)(intptr_t)_arg;
 	while(!go);
-	syscall(SYS_PSO_WRITER);
+	syscall(SYS_PSO_WRITER, 1);
 	return NULL;
 }
 
@@ -23,7 +23,7 @@ void *th2(void *_arg)
 {
 	int go = (int)(intptr_t)_arg;
 	while(!go);
-	syscall(SYS_PSO_READER);
+	syscall(SYS_PSO_READER, 1);
 	return NULL;
 }
 
