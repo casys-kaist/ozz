@@ -120,6 +120,7 @@ static target_ulong qcsched_deactivate_breakpoint(CPUState *cpu0)
                 kvm_remove_breakpoint_cpu(cpu, entry->schedpoint.addr, 1,
                                           GDB_BREAKPOINT_HW);
         }
+        qcsched_escape_if_trampoled(cpu0, cpu);
     }
     sched.activated = false;
     return 0;
@@ -131,11 +132,7 @@ static target_ulong qcsched_clear_breakpoint(CPUState *cpu0)
 
     DRPRINTF(cpu0, "%s\n", __func__);
 
-    CPU_FOREACH(cpu)
-    {
-        kvm_remove_all_breakpoints_cpu(cpu);
-        qcsched_escape_if_trampoled(cpu0, cpu);
-    }
+    CPU_FOREACH(cpu) { kvm_remove_all_breakpoints_cpu(cpu); }
     memset(&sched, 0, sizeof(struct qcsched));
     return 0;
 }
