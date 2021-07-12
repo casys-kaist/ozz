@@ -2141,7 +2141,7 @@ foreach target : target_dirs
   target_name = config_target['TARGET_NAME']
   arch = config_target['TARGET_BASE_ARCH']
   arch_srcs = [config_target_h[target]]
-  arch_deps = []
+  arch_deps = [rt]
   c_args = ['-DNEED_CPU_H',
             '-DCONFIG_TARGET="@0@-config-target.h"'.format(target),
             '-DCONFIG_DEVICES="@0@-config-devices.h"'.format(target)]
