@@ -47,8 +47,8 @@ static void kidnap_task(CPUState *cpu)
     DRPRINTF(cpu, "kidnapping\n");
     __copy_registers(&trampoline->orig_regs, &cpu->regs);
     jump_into_trampoline(cpu);
-    qcsched_arm_selfescape_timer(cpu);
     trampoline->trampoled = true;
+    qcsched_arm_selfescape_timer(cpu);
 }
 
 static void resume_task(CPUState *cpu)
@@ -134,7 +134,7 @@ static bool breakpoint_on_schedpoint(CPUState *cpu)
 
 static void __handle_breakpoint_hook(CPUState *cpu)
 {
-    DRPRINTF(cpu, "%s\n", __func__);
+    DRPRINTF(cpu, "%s %llx\n", __func__, cpu->regs.rbx);
     // If the task can make a progress, we don't need to do something.
     if (!qcsched_vmi_can_progress(cpu))
         kidnap_task(cpu);

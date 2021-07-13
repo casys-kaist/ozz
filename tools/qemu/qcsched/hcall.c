@@ -82,7 +82,7 @@ static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
         for (i = 0; i < total; i++) {
             entry = &sched.entries[i];
             if (entry->cpu == cpu->cpu_index) {
-                DRPRINTF(cpu, "Installing a breakpoint at %lx on cpu#%d\n",
+                DRPRINTF(cpu0, "Installing a breakpoint at %lx on cpu#%d\n",
                          entry->schedpoint.addr, entry->cpu);
                 ASSERT(!kvm_insert_breakpoint_cpu(cpu, entry->schedpoint.addr,
                                                   1, GDB_BREAKPOINT_HW),
