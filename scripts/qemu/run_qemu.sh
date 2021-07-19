@@ -2,8 +2,9 @@
 
 MEMORY=2048
 PORT=5555
-HMP="-monitor unix:/tmp/monitor.sock,server,nowait -serial mon:stdio"
-QMP="-qmp unix:/tmp/qmp.sock,server,nowait"
+
+HMP="-monitor unix:$TMP_DIR/monitor.sock,server,nowait -serial mon:stdio"
+QMP="-qmp unix:$TMP_DIR/qmp.sock,server,nowait"
 
 if [ -z $NO_SNAPSHOT ]; then
 	SNAPSHOT="-snapshot"
