@@ -444,6 +444,7 @@ struct CPUState {
 #ifdef CONFIG_QCSCHED
     struct kvm_regs regs;
     bool qcsched_dirty;
+    bool qcsched_force_wakeup;
 #endif
 };
 

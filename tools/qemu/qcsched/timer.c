@@ -45,6 +45,8 @@ static void qcsched_handle_kick_locked(CPUState *cpu)
     if (!trampoline->trampoled)
         return;
 
+    cpu->qcsched_force_wakeup = true;
+
     wake_cpu_up(cpu, cpu);
 }
 

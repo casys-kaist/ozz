@@ -61,9 +61,10 @@ static void resume_task(CPUState *cpu)
     ASSERT(qemu_mutex_iothread_locked(), "iothread mutex is not locked");
     ASSERT(cpu == current_cpu, "something wrong: cpu != current_cpu");
 
-    DRPRINTF(cpu, "resumming\n");
+    DRPRINTF(cpu, "resumming (force: %d)\n", cpu->qcsched_force_wakeup);
     __copy_registers(&cpu->regs, &trampoline->orig_regs);
     cpu->qcsched_dirty = true;
+    cpu->qcsched_force_wakeup = false;
     memset(trampoline, 0, sizeof(*trampoline) - sizeof(timer_t));
 }
 
