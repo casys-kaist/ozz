@@ -6,12 +6,14 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/MDBuilder.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/ProfileData/InstrProf.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 
 #include "pass/SSBPass.h"
@@ -76,6 +78,7 @@ private:
   FunctionCallee SSBLoad[kNumberOfAccessSizes];
   FunctionCallee SSBStore[kNumberOfAccessSizes];
   FunctionCallee SSBFlush;
+  Constant *SSBDoEmulate;
   enum Architecture { X86_64, Aarch64, kNumberOfArchitectures };
   Architecture TargetArchitecture;
 };
@@ -272,12 +275,15 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
                     << " ===\n");
 
   if (IRQEntry || SyscallEntry) {
-    instrumentFlush(F.getEntryBlock().getTerminator());
+    SmallVector<Instruction *, 8> NeedInstrument;
+    NeedInstrument.push_back(F.getEntryBlock().getTerminator());
     for (auto &BB : F) {
       for (auto &I : BB)
         if (isa<ReturnInst>(I))
-          instrumentFlush(BB.getFirstNonPHI());
+          NeedInstrument.push_back(BB.getFirstNonPHI());
     }
+    for (auto Inst : NeedInstrument)
+      instrumentFlush(Inst);
     // We do not instrument other instructions in entry functions.
     return true;
   }
@@ -334,6 +340,7 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
   Value *Addr = IsWrite ? cast<StoreInst>(I)->getPointerOperand()
                         : cast<LoadInst>(I)->getPointerOperand();
   FunctionCallee OnAccessFunc = nullptr;
+  Type *Ty = I->getType();
 
   // swifterror memory addresses are mem2reg promoted by instruction selection.
   // As such they cannot have regular uses like an instrumentation function and
@@ -344,40 +351,80 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
   int Idx = getMemoryAccessFuncIndex(Addr, DL);
   if (Idx < 0)
     return false;
+  OnAccessFunc = IsWrite ? SSBStore[Idx] : SSBLoad[Idx];
 
   LLVM_DEBUG(dbgs() << "Instrumenting a " << (IsWrite ? "store" : "load")
                     << " callback at " << *I << "\n");
 
-  // TODO: Alignment / Volatile
-  // Ref:toolchains/llvm/llvm/lib/Transforms/Instrumentation/ThreadSanitizer.cpp#597
-  OnAccessFunc = IsWrite ? SSBStore[Idx] : SSBLoad[Idx];
-  auto Args = SmallVector<Value *, 8>();
-  Args.push_back(IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()));
-  if (IsWrite) {
-    // Store requires one more argument
-    Args.push_back(
-        IRB.CreatePointerCast(I->getOperand(0) /* == SI->getValueOperand() */,
-                              IRB.getIntNTy((1U << Idx) * 8)));
-  }
-  auto *CI = IRB.CreateCall(OnAccessFunc, Args);
-  // A call to a callback function is instrumented
-  if (!IsWrite)
-    // Now we may need to replace Uses of LoadInst with CI.
-    I->replaceAllUsesWith(IRB.CreateIntToPtr(CI, I->getType()));
-  // We replaced all I's Uses so we can remove it.
-  I->eraseFromParent();
   if (IsWrite)
     NumInstrumentedWrites++;
   else
     NumInstrumentedReads++;
+
+  // Check we can use the fastpath
+  Value *DoEmulate = IRB.CreateLoad(SSBDoEmulate);
+  // If __do_emulate != 1
+  Value *CmpInst = IRB.CreateICmpNE(DoEmulate, IRB.getInt8(1));
+  Instruction *ThenTerm, *ElseTerm;
+  MDBuilder MDB(I->getContext());
+  MDNode *BranchWeights =
+      MDB.createBranchWeights(10 /*ThenBlock*/, 1 /*ElseBlock*/);
+  SplitBlockAndInsertIfThenElse(CmpInst, I, &ThenTerm, &ElseTerm,
+                                BranchWeights);
+
+  // ThenBlock -- fastpath
+  BasicBlock *NewTail = I->getParent();
+  I->removeFromParent();
+  IRBuilder<> IRBThen(ThenTerm);
+  IRBThen.Insert(I);
+
+  // ElseBlock -- slowpath (store buffer emulation)
+  IRBuilder<> IRBElse(ElseTerm);
+  auto Args = SmallVector<Value *, 8>();
+  Args.push_back(IRBElse.CreatePointerCast(Addr, IRBElse.getInt8PtrTy()));
+  if (IsWrite) {
+    // Store requires one more argument
+    Args.push_back(IRBElse.CreatePointerCast(
+        I->getOperand(0) /* == SI->getValueOperand() */,
+        IRBElse.getIntNTy((1U << Idx) * 8)));
+  }
+  auto *CI = IRBElse.CreateCall(OnAccessFunc, Args);
+  auto *Res = IRBElse.CreateIntToPtr(CI, Ty);
+
+  // PHI instruction to select the result
+  if (!IsWrite) {
+    IRBuilder<> IRBTail(NewTail->getFirstNonPHI());
+    auto *phi = IRBTail.CreatePHI(Ty, 2);
+    phi->addIncoming(I, ThenTerm->getParent());
+    phi->addIncoming(Res, ElseTerm->getParent());
+    I->replaceUsesWithIf(phi, [phi](Use &U) {
+      auto *I = U.getUser();
+      // Don't replace if it's an instruction in the BB basic block.
+      return I != phi;
+    });
+  }
+
   return true;
 }
 
 bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
   IRBuilder<> IRB(I);
   LLVM_DEBUG(dbgs() << "Instrumenting a membarrier callback at " << *I << "\n");
-  IRB.CreateCall(SSBFlush, ConstantPointerNull::get(IRB.getInt8PtrTy()));
+
   NumInstrumentedFlushes++;
+
+  Value *DoEmulate = IRB.CreateLoad(SSBDoEmulate);
+  // If __do_emulate == 1
+  Value *CmpInst = IRB.CreateICmpEQ(DoEmulate, IRB.getInt8(1));
+  MDBuilder MDB(I->getContext());
+  MDNode *BranchWeights =
+      MDB.createBranchWeights(1 /*ThenBlock*/, 10 /*ElseBlock*/);
+  Instruction *CheckTerm =
+      SplitBlockAndInsertIfThen(CmpInst, I, false, BranchWeights);
+  BasicBlock *ThenBlock = CheckTerm->getParent();
+  // ThenBlock -- slowpath (store buffer emulation)
+  IRBuilder<> IRBThen(ThenBlock->getFirstNonPHI());
+  IRBThen.CreateCall(SSBFlush, ConstantPointerNull::get(IRB.getInt8PtrTy()));
   return true;
 }
 
@@ -411,6 +458,7 @@ void SoftStoreBuffer::initialize(Module &M) {
     SmallString<32> FlushName("__ssb_" + TargetMemoryModelStr + "_flush");
     SSBFlush = M.getOrInsertFunction(FlushName, Attr, IRB.getVoidTy(),
                                      IRB.getInt8PtrTy());
+    SSBDoEmulate = M.getOrInsertGlobal("__ssb_do_emulate", IRB.getInt8Ty());
   }
 }
 
