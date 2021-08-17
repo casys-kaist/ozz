@@ -149,11 +149,14 @@ bool InstrumentedFunctionListPass::runOnModule(Module &M) {
     ifl.insert(s);
   }
   free(line);
+  fclose(fp);
 
   return false;
 }
 
-void InstrumentedFunctionListPass::getAnalysisUsage(AnalysisUsage &AU) const {}
+void InstrumentedFunctionListPass::getAnalysisUsage(AnalysisUsage &AU) const {
+  AU.setPreservesAll();
+}
 
 static RegisterPass<InstrumentedFunctionListPass>
     XX("tfl", "Summarize to-be-instrumented functions", true, true);
