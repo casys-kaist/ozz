@@ -115,6 +115,8 @@ int main(void)
 	int go = 0;
 	int flush_vector[] = {1, 0};
 
+	syscall(SYS_PSO_CLEAR);
+
 	CPU_ZERO(&set);
 	CPU_SET(cpu, &set);
 	if (sched_setaffinity(gettid(), sizeof(set), &set))
@@ -131,8 +133,6 @@ int main(void)
 
 	pthread_join(pth1, NULL);
 	pthread_join(pth2, NULL);
-
-	syscall(SYS_PSO_CLEAR);
 
 	return 0;
 }

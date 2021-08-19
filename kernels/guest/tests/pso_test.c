@@ -33,6 +33,8 @@ int main(void)
 	int go = 0;
 	int flush_vector[] = {1, 0};
 
+	syscall(SYS_PSO_CLEAR);
+
 	syscall(SYS_SSB_FEEDINPUT, flush_vector, 2);
 
 	pthread_create(&pth1, NULL, th1, (void *)&go);

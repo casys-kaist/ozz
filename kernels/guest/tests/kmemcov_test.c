@@ -29,6 +29,7 @@ struct kmemcov_access {
 
 #define SYS_PSO_WRITER 501
 #define SYS_PSO_READER 502
+#define SYS_PSO_CLEAR 504
 
 struct kmemcov_access *cover;
 
@@ -60,6 +61,8 @@ void run(void (*fn)(void))
 int main(int argc, char **argv)
 {
 	int fd;
+
+	syscall(SYS_PSO_CLEAR);
 
 	/* A single fd descriptor allows coverage collection on a single
      * thread.
