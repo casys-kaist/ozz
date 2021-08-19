@@ -1,7 +1,10 @@
 #!/bin/sh -e
 
+UID=$(id -u)
+
 MEMORY=2048
-PORT=5555
+PORT=$(echo "5555 + $UID" | bc -l)
+GDBPORT=$(echo "1234 + $UID" | bc -l)
 
 HMP="-monitor unix:$TMP_DIR/monitor.sock,server,nowait -serial mon:stdio"
 QMP="-qmp unix:$TMP_DIR/qmp.sock,server,nowait"
@@ -55,5 +58,5 @@ $QEMU -smp cpus=$NUM_CPUS \
 	  $QMP\
 	  $SNAPSHOT \
 	  $MACHINE \
-      -s \
+      -gdb tcp::"$GDBPORT" \
 	  $KVM 2>&1 | tee $VM_LOGFILE
