@@ -14,9 +14,12 @@ else
 	TARGET_ARCH="aarch64"
 fi
 
+UID=$(id -u)
+GDBPORT=$(echo "1234 + $UID" | bc -l)
+
 cat <<EOF > $BATCHCMD_DEFAULT
 set architecture $TARGET_ARCH
-target remote :1234
+target remote :$GDBPORT
 set disassemble-next-line on
 EOF
 
