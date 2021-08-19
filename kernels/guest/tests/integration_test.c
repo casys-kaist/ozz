@@ -9,51 +9,14 @@
 #include <syscall.h>
 #include <stdlib.h>
 
+#include "hypercall.h"
+
 #define SYS_SSB_FEEDINPUT 500
 #define SYS_PSO_WRITER 501
 #define SYS_PSO_READER 502
 #define SYS_PSO_CLEAR 504
 
-#define HCALL_RAX_ID 0x1d08aa3e
-#define HCALL_INSTALL_BP 0xf477909a
-#define HCALL_ACTIVATE_BP 0x40ab903
-#define HCALL_DEACTIVATE_BP 0xf327524f
-#define HCALL_CLEAR_BP 0xba220681
-
 #define gettid() syscall(SYS_gettid)
-
-unsigned long hypercall(unsigned long cmd, unsigned long arg,
-						unsigned long subarg, unsigned long subarg2)
-{
-	unsigned long ret = -1;
-#ifdef __amd64__
-	unsigned long id = HCALL_RAX_ID;
-	asm volatile(
-				 // rbx is a callee-saved register
-				 "pushq %%rbx\n\t"
-				 // Save values to the stack, so below movqs always
-				 // see consistent values.
-				 "pushq %1\n\t"
-				 "pushq %2\n\t"
-				 "pushq %3\n\t"
-				 "pushq %4\n\t"
-				 "pushq %5\n\t"
-				 // Setup registers
-				 "movq 32(%%rsp), %%rax\n\t"
-				 "movq 24(%%rsp), %%rbx\n\t"
-				 "movq 16(%%rsp), %%rcx\n\t"
-				 "movq 8(%%rsp), %%rdx\n\t"
-				 "movq (%%rsp), %%rsi\n\t"
-				 // then vmcall
-				 "vmcall\n\t"
-				 // clear the stack
-				 "addq $40,%%rsp\n\t"
-				 "popq %%rbx\n\t"
-				 : "=r"(ret)
-				 : "r"(id), "r"(cmd), "r"(arg), "r"(subarg), "r"(subarg2));
-#endif
-	return ret;
-}
 
 unsigned long breakpoint_addr(void) {
 	char buf[128];
@@ -107,7 +70,7 @@ void *th2(void *_arg)
 	return NULL;
 }
 
-int main(void)
+void do_test(void)
 {
 	int cpu = 0;
 	cpu_set_t set;
@@ -133,6 +96,14 @@ int main(void)
 
 	pthread_join(pth1, NULL);
 	pthread_join(pth2, NULL);
+}
 
+int main(void)
+{
+	do_test();
+	fprintf(stderr, "The kernel should not panic.\n");
+	hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
+	do_test();
+	fprintf(stderr, "The kernel should panic here.\n");
 	return 0;
 }

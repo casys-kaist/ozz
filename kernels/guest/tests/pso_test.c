@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <pthread.h>
 
+#include "hypercall.h"
+
 #define SYS_SSB_FEEDINPUT 500
 #define SYS_PSO_WRITER 501
 #define SYS_PSO_READER 502
@@ -27,7 +29,7 @@ void *th2(void *_arg)
 	return NULL;
 }
 
-int main(void)
+void do_test(void)
 {
 	pthread_t pth1, pth2;
 	int go = 0;
@@ -44,8 +46,14 @@ int main(void)
 
 	pthread_join(pth1, NULL);
 	pthread_join(pth2, NULL);
+}
 
-	syscall(SYS_PSO_CLEAR);
-
+int main(void)
+{
+	do_test();
+	fprintf(stderr, "The kernel should not panic.\n");
+	hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
+	do_test();
+	fprintf(stderr, "The kernel should panic here.\n");
 	return 0;
 }
