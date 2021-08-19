@@ -199,10 +199,10 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
         hcall_ret = qcsched_vmi_hint(cpu, subcmd, addr);
         break;
     case HCALL_ENABLE_KSSB:
-        qcsched_enable_kssb(cpu);
+        hcall_ret = qcsched_enable_kssb(cpu);
         break;
     case HCALL_DISABLE_KSSB:
-        qcsched_disable_kssb(cpu);
+        hcall_ret = qcsched_disable_kssb(cpu);
         break;
     default:
         hcall_ret = -EINVAL;

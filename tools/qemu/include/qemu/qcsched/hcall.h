@@ -5,8 +5,8 @@
 
 #include "hcall_constant.h"
 
-bool qcsched_enable_kssb(CPUState *cpu);
-bool qcsched_disable_kssb(CPUState *cpu);
+target_ulong qcsched_enable_kssb(CPUState *cpu);
+target_ulong qcsched_disable_kssb(CPUState *cpu);
 
 #endif /* CONFIG_QCSCHED */
 
