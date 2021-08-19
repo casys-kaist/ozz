@@ -37,6 +37,12 @@ static void qcsched_vmi_hint_current_task(CPUState *cpu, target_ulong addr)
     vmi_info.current_task = addr;
 }
 
+static void qcsched_vmi_hint__ssb_do_emulate(CPUState *cpu, target_ulong addr)
+{
+    DRPRINTF(cpu, "__ssb_do_dmulate: %lx\n", addr);
+    vmi_info.__ssb_do_emulate = addr;
+}
+
 target_ulong qcsched_vmi_hint(CPUState *cpu, target_ulong type,
                               target_ulong addr)
 {
@@ -55,6 +61,9 @@ target_ulong qcsched_vmi_hint(CPUState *cpu, target_ulong type,
         break;
     case VMI_CURRENT_TASK:
         qcsched_vmi_hint_current_task(cpu, addr);
+        break;
+    case VMI__SSB_DO_EMULATE:
+        qcsched_vmi_hint__ssb_do_emulate(cpu, addr);
         break;
     default:
         DRPRINTF(cpu, "Unknown VMI type: %lx\n", type);

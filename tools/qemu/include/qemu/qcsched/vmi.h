@@ -11,6 +11,7 @@ struct qcsched_vmi_info {
     target_ulong hook_addr;
     target_ulong __per_cpu_offset[64];
     target_ulong current_task;
+    target_ulong __ssb_do_emulate;
 };
 
 struct qcsched_vmi_task {

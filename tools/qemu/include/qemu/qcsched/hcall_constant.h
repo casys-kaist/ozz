@@ -24,5 +24,6 @@
 #define VMI_HOOK 0x30f4b16
 #define VMI_CURRENT_TASK 0xfb40de5
 #define VMI__PER_CPU_OFFSET0 0x4a157131
+#define VMI__SSB_DO_EMULATE 0xdb17901
 
 #endif /* __HCALL_CONSTANT_H */
