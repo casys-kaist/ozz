@@ -1,4 +1,4 @@
-#!/bin/bash -e
+#!/bin/sh -e
 
 [ -n "$PROJECT_HOME" ] || exit 1
 
