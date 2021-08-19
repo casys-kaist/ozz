@@ -74,6 +74,15 @@ void test_two_threads(void) {
 	pthread_join(pth2, NULL);
 }
 
+void test_kssb_turn_on_off(void) {
+	for (int i = 0; i < 10; i++) {
+		hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
+		sleep(1);
+		hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
+		sleep(1);
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	sys_test_addr = get_sys_test_addr();
