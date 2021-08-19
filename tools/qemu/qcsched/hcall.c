@@ -22,6 +22,10 @@ static bool qcsched_entry_used(struct qcsched_entry *entry)
 static bool sanitize_breakpoint(struct qcsched *sched)
 {
     int i;
+
+    if (!sched->total)
+        return false;
+
     for (i = 0; i < sched->total; i++) {
         if (!qcsched_entry_used(&sched->entries[i]))
             return false;
@@ -29,13 +33,37 @@ static bool sanitize_breakpoint(struct qcsched *sched)
     return true;
 }
 
+static target_ulong qcsched_prepare_breakpoint(CPUState *cpu, unsigned int num)
+{
+    DRPRINTF(cpu, "%s\n", __func__);
+    DRPRINTF(cpu, "nr_bps: %u\n", num);
+
+    if (sched.total != 0)
+        return -EBUSY;
+
+    if (num >= MAX_SCHEDPOINTS)
+        return -EINVAL;
+
+    sched.total = num;
+
+    return 0;
+}
+
 static target_ulong qcsched_install_breakpoint(CPUState *cpu, target_ulong addr,
                                                int order)
 {
-    struct qcsched_entry *entry = &sched.entries[order];
+    struct qcsched_entry *entry;
 
     DRPRINTF(cpu, "%s\n", __func__);
     DRPRINTF(cpu, "addr: %lx, order: %d\n", addr, order);
+
+    if (!sched.total)
+        return -EINVAL;
+
+    if (sched.total <= order)
+        return -EINVAL;
+
+    entry = &sched.entries[order];
 
     if (qcsched_entry_used(entry))
         return -EBUSY;
@@ -43,7 +71,6 @@ static target_ulong qcsched_install_breakpoint(CPUState *cpu, target_ulong addr,
     entry->schedpoint = (struct qcschedpoint){.addr = addr, .order = order};
     entry->cpu = cpu->cpu_index;
     qcsched_vmi_task(cpu, &entry->t);
-    sched.total++;
     return 0;
 }
 
@@ -142,11 +169,16 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
     __u64 *args = run->hypercall.args;
     __u64 cmd = args[0];
     int order;
+    unsigned int num;
     target_ulong addr, subcmd;
     target_ulong hcall_ret = 0;
 
     qemu_mutex_lock_iothread();
     switch (cmd) {
+    case HCALL_PREPARE_BP:
+        num = args[1];
+        hcall_ret = qcsched_prepare_breakpoint(cpu, num);
+        break;
     case HCALL_INSTALL_BP:
         addr = args[1];
         order = args[2];
