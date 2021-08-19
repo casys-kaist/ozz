@@ -7,6 +7,7 @@
 #define HCALL_DEACTIVATE_BP 0xf327524f
 #define HCALL_CLEAR_BP 0xba220681
 #define HCALL_ENABLE_KSSB 0x3dcb4536
+#define HCALL_PREPARE_BP 0x23564d5a
 
 unsigned long hypercall(unsigned long cmd, unsigned long arg,
 						unsigned long subarg, unsigned long subarg2)

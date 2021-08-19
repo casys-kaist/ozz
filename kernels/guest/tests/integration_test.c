@@ -16,9 +16,12 @@
 #define SYS_PSO_READER 502
 #define SYS_PSO_CLEAR 504
 
+#define EINVAL 22
+
 #define gettid() syscall(SYS_gettid)
 
-unsigned long breakpoint_addr(void) {
+unsigned long breakpoint_addr;
+unsigned long get_breakpoint_addr(void) {
 	char buf[128];
 	FILE *fp = popen("grep 'pso_test_breakpoint' /proc/kallsyms | head -n 1 | cut -d' ' -f1", "r");
 	fgets(buf, sizeof(buf), fp);
@@ -38,7 +41,7 @@ void *th1(void *_arg)
 	if (sched_setaffinity(gettid(), sizeof(set), &set))
 		perror("sched_setaffinity");
 
-	hypercall(HCALL_INSTALL_BP, breakpoint_addr(), cpu-1, 0);
+	hypercall(HCALL_INSTALL_BP, breakpoint_addr, cpu-1, 0);
 
 	while(!*go);
 
@@ -72,11 +75,11 @@ void *th2(void *_arg)
 
 void do_test(void)
 {
-	int cpu = 0;
+	int cpu = 0, go = 0, cnt = 5;
 	cpu_set_t set;
 	pthread_t pth1, pth2;
-	int go = 0;
 	int flush_vector[] = {1, 0};
+	unsigned long hcall_ret;
 
 	syscall(SYS_PSO_CLEAR);
 
@@ -85,13 +88,18 @@ void do_test(void)
 	if (sched_setaffinity(gettid(), sizeof(set), &set))
 		perror("sched_setaffinity");
 
+	hypercall(HCALL_PREPARE_BP, 2, 0, 0);
+
 	syscall(SYS_SSB_FEEDINPUT, flush_vector, 2);
 
 	pthread_create(&pth1, NULL, th1, (void *)&go);
 	pthread_create(&pth2, NULL, th2, (void *)&go);
 
-	sleep(3);
-	hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
+	do {
+		hcall_ret = hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
+		usleep(100 * 1000);
+	} while(hcall_ret == -EINVAL && --cnt);
+
 	go = 1;
 
 	pthread_join(pth1, NULL);
@@ -100,10 +108,11 @@ void do_test(void)
 
 int main(void)
 {
+	breakpoint_addr = get_breakpoint_addr();
 	do_test();
 	fprintf(stderr, "The kernel should not panic.\n");
 	hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
 	do_test();
-	fprintf(stderr, "The kernel should panic here.\n");
+	fprintf(stderr, "The kernel should panic.\n");
 	return 0;
 }
