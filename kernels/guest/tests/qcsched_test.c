@@ -88,5 +88,6 @@ int main(int argc, char *argv[])
 	sys_test_addr = get_sys_test_addr();
 	test_single_thread();
 	test_two_threads();
+	test_kssb_turn_on_off();
 	return 0;
 }
