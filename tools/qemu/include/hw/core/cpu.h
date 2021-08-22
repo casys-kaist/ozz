@@ -445,6 +445,9 @@ struct CPUState {
     struct kvm_regs regs;
     bool qcsched_dirty;
     bool qcsched_force_wakeup;
+    bool qcsched_disable_irq;
+    bool qcsched_restore_irq;
+    bool qcsched_orig_irq_enabled;
 #endif
 };
 

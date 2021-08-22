@@ -31,6 +31,10 @@ static void __copy_registers(struct kvm_regs *dst, struct kvm_regs *src)
     *dst = *src;
 }
 
+static void __disable_irq(CPUState *cpu) { cpu->qcsched_disable_irq = true; }
+
+static void __restore_irq(CPUState *cpu) { cpu->qcsched_restore_irq = true; }
+
 static void kidnap_task(CPUState *cpu)
 {
     struct qcsched_trampoline_info *trampoline = get_trampoline_info(cpu);
@@ -46,6 +50,7 @@ static void kidnap_task(CPUState *cpu)
 
     DRPRINTF(cpu, "kidnapping\n");
     __copy_registers(&trampoline->orig_regs, &cpu->regs);
+    __disable_irq(cpu);
     jump_into_trampoline(cpu);
     trampoline->trampoled = true;
     qcsched_arm_selfescape_timer(cpu);
@@ -63,6 +68,7 @@ static void resume_task(CPUState *cpu)
 
     DRPRINTF(cpu, "resumming (force: %d)\n", cpu->qcsched_force_wakeup);
     __copy_registers(&cpu->regs, &trampoline->orig_regs);
+    __restore_irq(cpu);
     cpu->qcsched_dirty = true;
     cpu->qcsched_force_wakeup = false;
     memset(trampoline, 0, sizeof(*trampoline) - sizeof(timer_t));
