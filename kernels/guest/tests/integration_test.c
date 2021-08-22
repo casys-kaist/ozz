@@ -45,7 +45,7 @@ void *th1(void *_arg)
 
 	while(!*go);
 
-	syscall(SYS_PSO_WRITER, 0);
+	syscall(SYS_PSO_WRITER, 0, 0);
 	hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
 	hypercall(HCALL_CLEAR_BP, 0, 0, 0);
 	return NULL;
@@ -67,7 +67,7 @@ void *th2(void *_arg)
 
 	while(!*go);
 
-	syscall(SYS_PSO_READER, 0);
+	syscall(SYS_PSO_READER, 0, 0);
 	hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
 	hypercall(HCALL_CLEAR_BP, 0, 0, 0);
 	return NULL;
