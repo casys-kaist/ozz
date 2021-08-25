@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/syzkaller/dashboard/dashapi"
+	"github.com/google/syzkaller/pkg/auth"
 	"github.com/google/syzkaller/pkg/email"
 	"github.com/google/syzkaller/pkg/vcs"
 )
@@ -31,6 +32,7 @@ type GlobalConfig struct {
 	// syz-ci can upload these reports to GCS.
 	CoverPath string
 	// Global API clients that work across namespaces (e.g. external reporting).
+	// The keys are client identities (names), the values are their passwords.
 	Clients map[string]string
 	// List of emails blocked from issuing test requests.
 	EmailBlocklist []string
@@ -67,8 +69,10 @@ type Config struct {
 	// Similar bugs are shown only across namespaces with the same value of SimilarityDomain.
 	SimilarityDomain string
 	// Per-namespace clients that act only on a particular namespace.
+	// The keys are client identities (names), the values are their passwords.
 	Clients map[string]string
-	// A unique key for hashing, can be anything.
+	// A random string used for hashing, can be anything, but once fixed it can't
+	// be changed as it becomes a part of persistent bug identifiers.
 	Key string
 	// Mail bugs without reports (e.g. "no output").
 	MailWithoutReport bool
@@ -199,7 +203,7 @@ type KcidbConfig struct {
 var (
 	namespaceNameRe = regexp.MustCompile("^[a-zA-Z0-9-_.]{4,32}$")
 	clientNameRe    = regexp.MustCompile("^[a-zA-Z0-9-_.]{4,100}$")
-	clientKeyRe     = regexp.MustCompile("^[a-zA-Z0-9]{16,128}$")
+	clientKeyRe     = regexp.MustCompile("^([a-zA-Z0-9]{16,128})|(" + regexp.QuoteMeta(auth.OauthMagic) + ".*)$")
 )
 
 type (

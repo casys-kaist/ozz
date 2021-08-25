@@ -208,6 +208,12 @@ kconf:
 bisect: descriptions
 	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GOHOSTFLAGS) -o ./bin/syz-bisect github.com/google/syzkaller/tools/syz-bisect
 
+verifier: descriptions
+	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GOHOSTFLAGS) -o ./bin/syz-verifier github.com/google/syzkaller/syz-verifier
+
+runner:  descriptions
+	GOOS=$(TARGETGOOS) GOARCH=$(TARGETGOARCH) $(GO) build $(GOTARGETFLAGS) -o ./bin/$(TARGETOS)_$(TARGETVMARCH)/syz-runner$(EXE) github.com/google/syzkaller/syz-runner
+
 # `extract` extracts const files from various kernel sources, and may only
 # re-generate parts of files.
 extract: bin/syz-extract
@@ -342,7 +348,8 @@ test: descriptions
 	$(GO) test -short -coverprofile=.coverage.txt ./...
 
 clean:
-	rm -rf ./bin .descriptions sys/*/gen executor/defs.h executor/syscalls.h
+	rm -rf ./bin .descriptions executor/defs.h executor/syscalls.h
+	find sys/*/gen -type f -not -name empty.go -delete
 
 # For a tupical Ubuntu/Debian distribution.
 # We use "|| true" for apt-get install because packages are all different on different distros.

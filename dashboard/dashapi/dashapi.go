@@ -18,6 +18,8 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/google/syzkaller/pkg/auth"
 )
 
 type Dashboard struct {
@@ -30,7 +32,7 @@ type Dashboard struct {
 	errorHandler func(error)
 }
 
-func New(client, addr, key string) *Dashboard {
+func New(client, addr, key string) (*Dashboard, error) {
 	return NewCustom(client, addr, key, http.NewRequest, http.DefaultClient.Do, nil, nil)
 }
 
@@ -40,17 +42,34 @@ type (
 	RequestLogger func(msg string, args ...interface{})
 )
 
+// key == "" indicates that the ambient GCE service account authority
+// should be used as a bearer token.
 func NewCustom(client, addr, key string, ctor RequestCtor, doer RequestDoer,
-	logger RequestLogger, errorHandler func(error)) *Dashboard {
+	logger RequestLogger, errorHandler func(error)) (*Dashboard, error) {
+	wrappedDoer := doer
+	if key == "" {
+		tokenCache, err := auth.MakeCache(ctor, doer)
+		if err != nil {
+			return nil, err
+		}
+		wrappedDoer = func(req *http.Request) (*http.Response, error) {
+			token, err := tokenCache.Get(time.Now())
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Add("Authorization", token)
+			return doer(req)
+		}
+	}
 	return &Dashboard{
 		Client:       client,
 		Addr:         addr,
 		Key:          key,
 		ctor:         ctor,
-		doer:         doer,
+		doer:         wrappedDoer,
 		logger:       logger,
 		errorHandler: errorHandler,
-	}
+	}, nil
 }
 
 // Build describes all aspects of a kernel build.

@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/syzkaller/dashboard/dashapi"
+	"github.com/google/syzkaller/pkg/auth"
 	"github.com/google/syzkaller/pkg/email"
 	"github.com/google/syzkaller/pkg/hash"
 	"github.com/google/syzkaller/sys/targets"
@@ -104,7 +105,13 @@ func handleAPI(c context.Context, r *http.Request) (reply interface{}, err error
 	client := r.PostFormValue("client")
 	method := r.PostFormValue("method")
 	log.Infof(c, "api %q from %q", method, client)
-	ns, err := checkClient(c, client, r.PostFormValue("key"))
+	auth := auth.MakeEndpoint(auth.GoogleTokenInfoEndpoint)
+	subj, err := auth.DetermineAuthSubj(timeNow(c), r.Header["Authorization"])
+	if err != nil {
+		return nil, err
+	}
+	// Somewhat confusingly the "key" parameter is the password.
+	ns, err := checkClient(config, client, r.PostFormValue("key"), subj)
 	if err != nil {
 		if client != "" {
 			log.Errorf(c, "%v", err)
@@ -140,28 +147,6 @@ func handleAPI(c context.Context, r *http.Request) (reply interface{}, err error
 		return nil, fmt.Errorf("method %q must be called within a namespace", method)
 	}
 	return nsHandler(c, ns, r, payload)
-}
-
-func checkClient(c context.Context, name0, key0 string) (string, error) {
-	for name, key := range config.Clients {
-		if name == name0 {
-			if key != key0 {
-				return "", ErrAccess
-			}
-			return "", nil
-		}
-	}
-	for ns, cfg := range config.Namespaces {
-		for name, key := range cfg.Clients {
-			if name == name0 {
-				if key != key0 {
-					return "", ErrAccess
-				}
-				return ns, nil
-			}
-		}
-	}
-	return "", ErrAccess
 }
 
 func apiLogError(c context.Context, r *http.Request, payload []byte) (interface{}, error) {
@@ -1361,4 +1346,31 @@ func GetEmails(r dashapi.Recipients, filter dashapi.RecipientType) []string {
 	}
 	sort.Strings(emails)
 	return emails
+}
+
+// Verifies that the given credentials are acceptable and returns the
+// corresponding namespace.
+func checkClient(conf *GlobalConfig, name0, secretPassword, oauthSubject string) (string, error) {
+	checkAuth := func(ns, a string) (string, error) {
+		if strings.HasPrefix(a, auth.OauthMagic) && a == oauthSubject {
+			return ns, nil
+		}
+		if a != secretPassword {
+			return ns, ErrAccess
+		}
+		return ns, nil
+	}
+	for name, authenticator := range conf.Clients {
+		if name == name0 {
+			return checkAuth("", authenticator)
+		}
+	}
+	for ns, cfg := range conf.Namespaces {
+		for name, authenticator := range cfg.Clients {
+			if name == name0 {
+				return checkAuth(ns, authenticator)
+			}
+		}
+	}
+	return "", ErrAccess
 }

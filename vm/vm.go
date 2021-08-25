@@ -179,7 +179,7 @@ const (
 // Exit says which exit modes should be considered as errors/OK.
 // Returns a non-symbolized crash report, or nil if no error happens.
 func (inst *Instance) MonitorExecution(outc <-chan []byte, errc <-chan error,
-	reporter report.Reporter, exit ExitCondition) (rep *report.Report) {
+	reporter *report.Reporter, exit ExitCondition) (rep *report.Report) {
 	mon := &monitor{
 		inst:     inst,
 		outc:     outc,
@@ -266,7 +266,7 @@ type monitor struct {
 	inst     *Instance
 	outc     <-chan []byte
 	errc     <-chan error
-	reporter report.Reporter
+	reporter *report.Reporter
 	exit     ExitCondition
 	output   []byte
 	matchPos int
@@ -304,7 +304,7 @@ func (mon *monitor) extractError(defaultError string) *report.Report {
 }
 
 func (mon *monitor) createReport(defaultError string) *report.Report {
-	rep := mon.reporter.Parse(mon.output[mon.matchPos:])
+	rep := mon.reporter.ParseFrom(mon.output, mon.matchPos)
 	if rep == nil {
 		if defaultError == "" {
 			return nil
@@ -315,17 +315,17 @@ func (mon *monitor) createReport(defaultError string) *report.Report {
 			Suppressed: report.IsSuppressed(mon.reporter, mon.output),
 		}
 	}
-	start := mon.matchPos + rep.StartPos - beforeContext
+	start := rep.StartPos - beforeContext
 	if start < 0 {
 		start = 0
 	}
-	end := mon.matchPos + rep.EndPos + afterContext
-	if end > len(mon.output) {
-		end = len(mon.output)
+	end := rep.EndPos + afterContext
+	if end > len(rep.Output) {
+		end = len(rep.Output)
 	}
-	rep.Output = mon.output[start:end]
-	rep.StartPos += mon.matchPos - start
-	rep.EndPos += mon.matchPos - start
+	rep.Output = rep.Output[start:end]
+	rep.StartPos -= start
+	rep.EndPos -= start
 	return rep
 }
 

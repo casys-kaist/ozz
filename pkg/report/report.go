@@ -17,7 +17,7 @@ import (
 	"github.com/google/syzkaller/sys/targets"
 )
 
-type Reporter interface {
+type reporterImpl interface {
 	// ContainsCrash searches kernel console output for oops messages.
 	ContainsCrash(output []byte) bool
 
@@ -27,6 +27,12 @@ type Reporter interface {
 
 	// Symbolize symbolizes rep.Report and fills in Maintainers.
 	Symbolize(rep *Report) error
+}
+
+type Reporter struct {
+	impl         reporterImpl
+	suppressions []*regexp.Regexp
+	typ          string
 }
 
 type Report struct {
@@ -90,7 +96,7 @@ func (t Type) String() string {
 }
 
 // NewReporter creates reporter for the specified OS/Type.
-func NewReporter(cfg *mgrconfig.Config) (Reporter, error) {
+func NewReporter(cfg *mgrconfig.Config) (*Reporter, error) {
 	typ := cfg.TargetOS
 	if cfg.Type == "gvisor" {
 		typ = cfg.Type
@@ -118,7 +124,7 @@ func NewReporter(cfg *mgrconfig.Config) (Reporter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &reporterWrapper{rep, supps, typ}, nil
+	return &Reporter{rep, supps, typ}, nil
 }
 
 const (
@@ -148,7 +154,7 @@ type config struct {
 	ignores        []*regexp.Regexp
 }
 
-type fn func(cfg *config) (Reporter, []string, error)
+type fn func(cfg *config) (reporterImpl, []string, error)
 
 func compileRegexps(list []string) ([]*regexp.Regexp, error) {
 	compiled := make([]*regexp.Regexp, len(list))
@@ -162,22 +168,23 @@ func compileRegexps(list []string) ([]*regexp.Regexp, error) {
 	return compiled, nil
 }
 
-type reporterWrapper struct {
-	Reporter
-	suppressions []*regexp.Regexp
-	typ          string
+func (reporter *Reporter) Parse(output []byte) *Report {
+	return reporter.ParseFrom(output, 0)
 }
 
-func (wrap *reporterWrapper) Parse(output []byte) *Report {
-	rep := wrap.Reporter.Parse(output)
+func (reporter *Reporter) ParseFrom(output []byte, minReportPos int) *Report {
+	rep := reporter.impl.Parse(output[minReportPos:])
 	if rep == nil {
 		return nil
 	}
+	rep.Output = output
+	rep.StartPos += minReportPos
+	rep.EndPos += minReportPos
 	rep.Title = sanitizeTitle(replaceTable(dynamicTitleReplacement, rep.Title))
 	for i, title := range rep.AltTitles {
 		rep.AltTitles[i] = sanitizeTitle(replaceTable(dynamicTitleReplacement, title))
 	}
-	rep.Suppressed = matchesAny(rep.Output, wrap.suppressions)
+	rep.Suppressed = matchesAny(rep.Output, reporter.suppressions)
 	if bytes.Contains(rep.Output, gceConsoleHangup) {
 		rep.Corrupted = true
 	}
@@ -186,7 +193,7 @@ func (wrap *reporterWrapper) Parse(output []byte) *Report {
 		rep.Frame = match[1]
 	}
 	rep.SkipPos = len(output)
-	if pos := bytes.IndexByte(output[rep.StartPos:], '\n'); pos != -1 {
+	if pos := bytes.IndexByte(rep.Output[rep.StartPos:], '\n'); pos != -1 {
 		rep.SkipPos = rep.StartPos + pos
 	}
 	if rep.EndPos < rep.SkipPos {
@@ -195,6 +202,14 @@ func (wrap *reporterWrapper) Parse(output []byte) *Report {
 		rep.EndPos = rep.SkipPos
 	}
 	return rep
+}
+
+func (reporter *Reporter) ContainsCrash(output []byte) bool {
+	return reporter.impl.ContainsCrash(output)
+}
+
+func (reporter *Reporter) Symbolize(rep *Report) error {
+	return reporter.impl.Symbolize(rep)
 }
 
 func extractReportType(rep *Report) Type {
@@ -219,20 +234,21 @@ func extractReportType(rep *Report) Type {
 	return Unknown
 }
 
-func IsSuppressed(reporter Reporter, output []byte) bool {
-	return matchesAny(output, reporter.(*reporterWrapper).suppressions) ||
+func IsSuppressed(reporter *Reporter, output []byte) bool {
+	return matchesAny(output, reporter.suppressions) ||
 		bytes.Contains(output, gceConsoleHangup)
 }
 
 // ParseAll returns all successive reports in output.
-func ParseAll(reporter Reporter, output []byte) (reports []*Report) {
+func ParseAll(reporter *Reporter, output []byte) (reports []*Report) {
+	skipPos := 0
 	for {
-		rep := reporter.Parse(output)
+		rep := reporter.ParseFrom(output, skipPos)
 		if rep == nil {
 			return
 		}
 		reports = append(reports, rep)
-		output = output[rep.SkipPos:]
+		skipPos = rep.SkipPos
 	}
 }
 
@@ -251,7 +267,11 @@ type replacement struct {
 
 func replaceTable(replacements []replacement, str string) string {
 	for _, repl := range replacements {
-		str = repl.match.ReplaceAllString(str, repl.replacement)
+		for stop := false; !stop; {
+			newStr := repl.match.ReplaceAllString(str, repl.replacement)
+			stop = newStr == str
+			str = newStr
+		}
 	}
 	return str
 }
@@ -274,19 +294,14 @@ var dynamicTitleReplacement = []replacement{
 		"${1}ADDR",
 	},
 	{
-		// Replace that everything looks like a decimal number with "NUM".
-		regexp.MustCompile(`([^a-zA-Z0-9])[0-9]{5,}`),
-		"${1}NUM",
-	},
-	{
 		// Replace IP addresses.
 		regexp.MustCompile(`([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})`),
 		"IP",
 	},
 	{
 		// Replace that everything looks like a file line number with "LINE".
-		regexp.MustCompile(`(:[0-9]+)+`),
-		":LINE",
+		regexp.MustCompile(`(\.\w+)(:[0-9]+)+`),
+		"${1}:LINE",
 	},
 	{
 		// Replace all raw references to runctions (e.g. "ip6_fragment+0x1052/0x2d80")
@@ -298,6 +313,13 @@ var dynamicTitleReplacement = []replacement{
 		// CPU numbers are not interesting.
 		regexp.MustCompile(`CPU#[0-9]+`),
 		"CPU",
+	},
+	{
+		// Replace with "NUM" everything that looks like a decimal number and has not
+		// been replaced yet. It might require multiple replacement executions as the
+		// matching substrings may overlap (e.g. "0,1,2").
+		regexp.MustCompile(`(\W)(\d+)(\W|$)`),
+		"${1}NUM${3}",
 	},
 }
 

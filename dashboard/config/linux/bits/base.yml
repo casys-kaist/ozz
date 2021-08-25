@@ -97,7 +97,9 @@ config:
  - DEBUG_KOBJECT: n
 
  - DEBUG_INFO
- - DEBUG_INFO_BTF
+ # CONFIG_DEBUG_INFO_BTF breaks the build since 5.14 merge window:
+ #    https://lkml.kernel.org/r/YOLzFecogWmdZ5Hc@infradead.org
+ - DEBUG_INFO_BTF: [-v5.13]
  - DEBUG_INFO_REDUCED: n
 
  # This should make behavior more deterministic.
@@ -118,6 +120,9 @@ config:
  # Print thread and CPU ids.
  - PRINTK_CALLER
  - PRINTK_TIME
+ # Some kernel oops'es are large. Largest observed for a stack overflow is ~42KB.
+ # There are 2 such buffers per CPU (safe and nmi), so this adds 128KB per CPU.
+ - PRINTK_SAFE_LOG_BUF_SHIFT: 16
 
  # Fault injection.
  - FAULT_INJECTION
