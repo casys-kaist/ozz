@@ -6,6 +6,7 @@ package report
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 	"github.com/google/syzkaller/pkg/osutil"
 	"github.com/google/syzkaller/pkg/symbolizer"
 	"github.com/google/syzkaller/pkg/vcs"
+	"github.com/google/syzkaller/sys/targets"
 )
 
 type linux struct {
@@ -33,7 +35,7 @@ type linux struct {
 	eoi                   []byte
 }
 
-func ctorLinux(cfg *config) (Reporter, []string, error) {
+func ctorLinux(cfg *config) (reporterImpl, []string, error) {
 	var symbols map[string][]symbolizer.Symbol
 	vmlinux := ""
 	if cfg.kernelObj != "" {
@@ -347,6 +349,9 @@ func (ctx *linux) Symbolize(rep *Report) error {
 			return err
 		}
 	}
+
+	rep.Report = ctx.decompileReportOpcodes(rep.Report)
+
 	// We still do this even if we did not symbolize,
 	// because tests pass in already symbolized input.
 	rep.guiltyFile = ctx.extractGuiltyFile(rep)
@@ -431,6 +436,229 @@ func symbolizeLine(symbFunc func(bin string, pc uint64) ([]symbolizer.Frame, err
 		symbolized = append(symbolized, modified...)
 	}
 	return symbolized
+}
+
+type parsedOpcodes struct {
+	rawBytes       []byte
+	decompileFlags DecompilerFlagMask
+	offset         int
+}
+
+type decompiledOpcodes struct {
+	opcodes           []DecompiledOpcode
+	trappingOpcodeIdx int
+	leftBytesCut      int
+}
+
+// processOpcodes converts a string representation of opcodes used by the Linux kernel into
+// a sequence of the machine instructions, that surround the one that crashed the kernel.
+// If the input does not start on a boundary of an instruction, it is attempted to adjust the
+// strting position.
+// The method returns an error if it did not manage to correctly decompile the opcodes or
+// of the decompiled code is not of interest to the reader (e.g. it is a user-space code).
+func (ctx *linux) processOpcodes(codeSlice string) (*decompiledOpcodes, error) {
+	parsed, err := ctx.parseOpcodes(codeSlice)
+	if err != nil {
+		return nil, err
+	}
+
+	decompiled, err := ctx.decompileWithOffset(parsed)
+	if err != nil {
+		return nil, err
+	}
+
+	if linuxSkipTrapInstrRe.MatchString(decompiled.opcodes[decompiled.trappingOpcodeIdx].Instruction) {
+		// For some reports (like WARNINGs) the trapping instruction is an intentionally
+		// invalid instruction. Decompilation of such code only allows to see the
+		// mechanism, through which the kernel implements such assertions and does not
+		// aid in finding the real issue.
+		return nil, fmt.Errorf("these opcodes are not of interest")
+	}
+
+	return decompiled, nil
+}
+
+func (ctx *linux) decompileWithOffset(parsed parsedOpcodes) (*decompiledOpcodes, error) {
+	// It is not guaranteed that the fragment of opcodes starts exactly at the boundary
+	// of a machine instruction. In order to simplify debugging process, we are trying
+	// to find the right starting position.
+	//
+	// We iterate over a fixed number of left boundaries. The exact number of iterations
+	// should strike a balance between the potential usefulness and the extra time needed
+	// to invoke the decompiler.
+	const opcodeAdjustmentLimit = 8
+
+	var bestResult *decompiledOpcodes
+
+	for leftCut := 0; leftCut <= parsed.offset && leftCut < opcodeAdjustmentLimit; leftCut++ {
+		newBytes := parsed.rawBytes[leftCut:]
+		newOffset := parsed.offset - leftCut
+		instructions, err := DecompileOpcodes(newBytes, parsed.decompileFlags, ctx.target)
+		if err != nil {
+			return nil, err
+		}
+
+		// We only want to return the response, where there exists a decoded instruction that
+		// perfectly aligns with the trapping instruction offset.
+		// At the same time, we'll do out best to find a code listing that does not contain
+		// unrecognized (bad) instuctions - this serves as an indicator of a valid result.
+
+		hasBad := false
+		trappingIdx := -1
+		for idx, instruction := range instructions {
+			if instruction.Offset == newOffset {
+				trappingIdx = idx
+			}
+			if instruction.Offset >= newOffset {
+				// Do not take into account instructions after the target offset. Once
+				// decompiler begins to find the right boundary, we cannot improve them.
+				break
+			}
+			hasBad = hasBad || instruction.IsBad
+		}
+
+		if trappingIdx < 0 {
+			continue
+		}
+
+		if !hasBad || bestResult == nil {
+			bestResult = &decompiledOpcodes{
+				opcodes:           instructions,
+				trappingOpcodeIdx: trappingIdx,
+				leftBytesCut:      leftCut,
+			}
+			if !hasBad {
+				// The best offset is already found.
+				break
+			}
+		}
+	}
+	if bestResult == nil {
+		return nil, fmt.Errorf("unable to align decompiled code and the trapping instruction offset")
+	}
+	return bestResult, nil
+}
+
+func (ctx *linux) parseOpcodes(codeSlice string) (parsedOpcodes, error) {
+	binaryOps := binary.ByteOrder(binary.BigEndian)
+	if ctx.target.LittleEndian {
+		binaryOps = binary.LittleEndian
+	}
+
+	width := 0
+	bytes := []byte{}
+	trapOffset := -1
+	for _, part := range strings.Split(strings.TrimSpace(codeSlice), " ") {
+		if part == "" || len(part)%2 != 0 {
+			return parsedOpcodes{}, fmt.Errorf("invalid opcodes string %#v", part)
+		}
+
+		// Check if this is a marker of a trapping instruction.
+		if part[0] == '(' || part[0] == '<' {
+			if trapOffset >= 0 {
+				return parsedOpcodes{}, fmt.Errorf("invalid opcodes string: multiple trap intructions")
+			}
+			trapOffset = len(bytes)
+
+			if len(part) < 3 {
+				return parsedOpcodes{}, fmt.Errorf("invalid opcodes string: invalid trap opcode")
+			}
+			part = part[1 : len(part)-1]
+		}
+
+		if width == 0 {
+			width = len(part) / 2
+		}
+
+		number, err := strconv.ParseUint(part, 16, 64)
+		if err != nil {
+			return parsedOpcodes{}, fmt.Errorf("invalid opcodes string: failed to parse %#v", part)
+		}
+
+		extraBytes := make([]byte, width)
+		switch len(extraBytes) {
+		case 1:
+			extraBytes[0] = byte(number)
+		case 2:
+			binaryOps.PutUint16(extraBytes, uint16(number))
+		case 4:
+			binaryOps.PutUint32(extraBytes, uint32(number))
+		case 8:
+			binaryOps.PutUint64(extraBytes, number)
+		default:
+			return parsedOpcodes{}, fmt.Errorf("invalid opcodes string: invalid width %v", width)
+		}
+		bytes = append(bytes, extraBytes...)
+	}
+
+	if trapOffset < 0 {
+		return parsedOpcodes{}, fmt.Errorf("invalid opcodes string: no trapping instructions")
+	}
+
+	var flags DecompilerFlagMask
+	if ctx.target.Arch == targets.ARM && width == 2 {
+		flags |= FlagForceArmThumbMode
+	}
+	return parsedOpcodes{
+		rawBytes:       bytes,
+		decompileFlags: flags,
+		offset:         trapOffset,
+	}, nil
+}
+
+// decompileReportOpcodes detects the most meaningful "Code: " lines from the report, decompiles
+// them and appends a human-readable listing to the end of the report.
+func (ctx *linux) decompileReportOpcodes(report []byte) []byte {
+	// Iterate over all "Code: " lines and pick the first that could be decompiled
+	// that might be of interest to the user.
+	var decompiled *decompiledOpcodes
+	var prevLine []byte
+	for s := bufio.NewScanner(bytes.NewReader(report)); s.Scan(); prevLine = append([]byte{}, s.Bytes()...) {
+		// We want to avoid decompiling code from user-space as it is not of big interest during
+		// debugging kernel problems.
+		// For now this check only works for x86/amd64, but Linux on other architectures supported
+		// by syzkaller does not seem to include user-space code in its oops messages.
+		if linuxUserSegmentRe.Match(prevLine) {
+			continue
+		}
+		match := linuxCodeRe.FindSubmatch(s.Bytes())
+		if match == nil {
+			continue
+		}
+		decompiledLine, err := ctx.processOpcodes(string(match[1]))
+		if err != nil {
+			continue
+		}
+		decompiled = decompiledLine
+		break
+	}
+
+	if decompiled == nil {
+		return report
+	}
+
+	skipInfo := ""
+	if decompiled.leftBytesCut > 0 {
+		skipInfo = fmt.Sprintf(", %v bytes skipped", decompiled.leftBytesCut)
+	}
+
+	// The decompiled instructions are intentionally put to the bottom of the report instead
+	// being inlined below the corresponding "Code:" line. The intent is to continue to keep
+	// the most important information at the top of the report, so that it is visible from
+	// the syzbot dashboard without scrolling.
+	headLine := fmt.Sprintf("----------------\nCode disassembly (best guess)%v:\n", skipInfo)
+	report = append(report, headLine...)
+
+	for idx, opcode := range decompiled.opcodes {
+		line := opcode.FullDescription
+		if idx == decompiled.trappingOpcodeIdx {
+			line = fmt.Sprintf("*%s <-- trapping instruction\n", line[1:])
+		} else {
+			line += "\n"
+		}
+		report = append(report, line...)
+	}
+	return report
 }
 
 func (ctx *linux) extractGuiltyFile(rep *Report) string {
@@ -714,9 +942,12 @@ var linuxStallAnchorFrames = []*regexp.Regexp{
 
 // nolint: lll
 var (
-	linuxSymbolizeRe = regexp.MustCompile(`(?:\[\<(?:(?:0x)?[0-9a-f]+)\>\])?[ \t]+\(?(?:[0-9]+:)?([a-zA-Z0-9_.]+)\+0x([0-9a-f]+)/0x([0-9a-f]+)\)?`)
-	linuxRipFrame    = compile(`(?:IP|NIP|pc |PC is at):? (?:(?:[0-9]+:)?(?:{{PC}} +){0,2}{{FUNC}}|(?:[0-9]+:)?0x[0-9a-f]+|(?:[0-9]+:)?{{PC}} +\[< *\(null\)>\] +\(null\)|[0-9]+: +\(null\))`)
-	linuxCallTrace   = compile(`(?:Call (?:T|t)race:)|(?:Backtrace:)`)
+	linuxSymbolizeRe     = regexp.MustCompile(`(?:\[\<(?:(?:0x)?[0-9a-f]+)\>\])?[ \t]+\(?(?:[0-9]+:)?([a-zA-Z0-9_.]+)\+0x([0-9a-f]+)/0x([0-9a-f]+)\)?`)
+	linuxRipFrame        = compile(`(?:IP|NIP|pc |PC is at):? (?:(?:[0-9]+:)?(?:{{PC}} +){0,2}{{FUNC}}|(?:[0-9]+:)?0x[0-9a-f]+|(?:[0-9]+:)?{{PC}} +\[< *\(null\)>\] +\(null\)|[0-9]+: +\(null\))`)
+	linuxCallTrace       = compile(`(?:Call (?:T|t)race:)|(?:Backtrace:)`)
+	linuxCodeRe          = regexp.MustCompile(`(?m)^\s*Code\:\s+((?:[A-Fa-f0-9\(\)\<\>]{2,8}\s*)*)\s*$`)
+	linuxSkipTrapInstrRe = regexp.MustCompile(`^ud2|brk\s+#0x800$`)
+	linuxUserSegmentRe   = regexp.MustCompile(`^RIP:\s+0033:`)
 )
 
 var linuxCorruptedTitles = []*regexp.Regexp{
@@ -974,7 +1205,7 @@ var linuxOopses = append([]*oops{
 						parseStackTrace,
 					},
 					// These frames are present in KASAN_HW_TAGS reports.
-					skip: []string{"kernel_fault", "tag_check", "mem_abort", "el1_abort", "el1_sync"},
+					skip: []string{"kernel_fault", "tag_check", "mem_abort", "^el1_", "^el1h_"},
 				},
 			},
 			{
@@ -1239,9 +1470,11 @@ var linuxOopses = append([]*oops{
 				stack: &stackFmt{
 					parts: []*regexp.Regexp{
 						linuxRipFrame,
+						linuxCallTrace,
+						parseStackTrace,
 					},
+					extractor: linuxStallFrameExtractor,
 				},
-				noStackTrace: true,
 			},
 			{
 				title: compile("BUG: Invalid wait context"),

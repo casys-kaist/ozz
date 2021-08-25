@@ -1,6 +1,7 @@
 // Copyright 2019 syzkaller project authors. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 
+//go:build linux
 // +build linux
 
 package build
@@ -19,6 +20,23 @@ import (
 func TestElfBinarySignature(t *testing.T) {
 	t.Parallel()
 	enumerateFlags(t, nil, []string{"-g", "-O1", "-O2", "-no-pie", "-static"})
+}
+
+func TestQueryLinuxCompiler(t *testing.T) {
+	const goodDir = "./testdata/linux_compiler_ok"
+	const expectedCompiler = "gcc (Debian 10.2.1-6+build2) 10.2.1 20210110, GNU ld (GNU Binutils for Debian) 2.35.2"
+	ret, err := queryLinuxCompiler(goodDir)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if ret != expectedCompiler {
+		t.Fatalf("got: %T, expected: %T", ret, expectedCompiler)
+	}
+	const badDir = "./testingData/non_existing_folder"
+	_, err = queryLinuxCompiler(badDir)
+	if err == nil {
+		t.Fatalf("Expected an error, got none")
+	}
 }
 
 func enumerateFlags(t *testing.T, flags, allFlags []string) {

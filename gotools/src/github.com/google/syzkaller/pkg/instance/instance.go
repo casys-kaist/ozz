@@ -29,7 +29,7 @@ import (
 
 type Env interface {
 	BuildSyzkaller(string, string) error
-	BuildKernel(string, string, string, string, string, []byte) (string, string, error)
+	BuildKernel(string, string, string, string, string, []byte) (string, build.ImageDetails, error)
 	Test(numVMs int, reproSyz, reproOpts, reproC []byte) ([]error, error)
 }
 
@@ -106,9 +106,9 @@ func (env *env) BuildSyzkaller(repoURL, commit string) error {
 }
 
 func (env *env) BuildKernel(compilerBin, ccacheBin, userspaceDir, cmdlineFile, sysctlFile string, kernelConfig []byte) (
-	string, string, error) {
+	string, build.ImageDetails, error) {
 	imageDir := filepath.Join(env.cfg.Workdir, "image")
-	params := &build.Params{
+	params := build.Params{
 		TargetOS:     env.cfg.TargetOS,
 		TargetArch:   env.cfg.TargetVMArch,
 		VMType:       env.cfg.Type,
@@ -121,18 +121,18 @@ func (env *env) BuildKernel(compilerBin, ccacheBin, userspaceDir, cmdlineFile, s
 		SysctlFile:   sysctlFile,
 		Config:       kernelConfig,
 	}
-	kernelSign, err := build.Image(params)
+	details, err := build.Image(params)
 	if err != nil {
-		return "", "", err
+		return "", details, err
 	}
 	if err := SetConfigImage(env.cfg, imageDir, true); err != nil {
-		return "", "", err
+		return "", details, err
 	}
 	kernelConfigFile := filepath.Join(imageDir, "kernel.config")
 	if !osutil.IsExist(kernelConfigFile) {
 		kernelConfigFile = ""
 	}
-	return kernelConfigFile, kernelSign, nil
+	return kernelConfigFile, details, nil
 }
 
 func SetConfigImage(cfg *mgrconfig.Config, imageDir string, reliable bool) error {
@@ -243,7 +243,7 @@ func (env *env) Test(numVMs int, reproSyz, reproOpts, reproC []byte) ([]error, e
 type inst struct {
 	cfg           *mgrconfig.Config
 	optionalFlags bool
-	reporter      report.Reporter
+	reporter      *report.Reporter
 	vmPool        *vm.Pool
 	vm            *vm.Instance
 	vmIndex       int
@@ -264,7 +264,7 @@ func (inst *inst) test() error {
 			rep := inst.reporter.Parse(testErr.Output)
 			if rep != nil && rep.Type == report.UnexpectedReboot {
 				// Avoid detecting any boot crash as "unexpected kernel reboot".
-				rep = inst.reporter.Parse(testErr.Output[rep.SkipPos:])
+				rep = inst.reporter.ParseFrom(testErr.Output, rep.SkipPos)
 			}
 			if rep == nil {
 				rep = &report.Report{
@@ -499,3 +499,8 @@ var MakeBin = func() string {
 	}
 	return "make"
 }()
+
+func RunnerCmd(prog, fwdAddr, os, arch string, poolIdx, vmIdx int, collide, threaded, newEnv bool) string {
+	return fmt.Sprintf("%s -addr=%s -os=%s -arch=%s -pool=%d -vm=%d "+
+		"-collide=%t -threaded=%t -new-env=%t", prog, fwdAddr, os, arch, poolIdx, vmIdx, collide, threaded, newEnv)
+}

@@ -42,7 +42,7 @@ type ParseTest struct {
 	Report     []byte
 }
 
-func testParseFile(t *testing.T, reporter Reporter, fn string) {
+func testParseFile(t *testing.T, reporter *Reporter, fn string) {
 	data, err := ioutil.ReadFile(fn)
 	if err != nil {
 		t.Fatal(err)
@@ -151,7 +151,7 @@ func parseHeaderLine(t *testing.T, test *ParseTest, ln string) {
 	}
 }
 
-func testParseImpl(t *testing.T, reporter Reporter, test *ParseTest) {
+func testParseImpl(t *testing.T, reporter *Reporter, test *ParseTest) {
 	rep := reporter.Parse(test.Log)
 	containsCrash := reporter.ContainsCrash(test.Log)
 	expectCrash := (test.Title != "")
@@ -203,7 +203,7 @@ func testParseImpl(t *testing.T, reporter Reporter, test *ParseTest) {
 	checkReport(t, reporter, rep, test)
 }
 
-func checkReport(t *testing.T, reporter Reporter, rep *Report, test *ParseTest) {
+func checkReport(t *testing.T, reporter *Reporter, rep *Report, test *ParseTest) {
 	if test.HasReport && !bytes.Equal(rep.Report, test.Report) {
 		t.Fatalf("extracted wrong report:\n%s\nwant:\n%s", rep.Report, test.Report)
 	}
@@ -233,12 +233,12 @@ func checkReport(t *testing.T, reporter Reporter, rep *Report, test *ParseTest) 
 	}
 	if rep.StartPos != 0 {
 		// If we parse from StartPos, we must find the same report.
-		rep1 := reporter.Parse(test.Log[rep.StartPos:])
-		if rep1 == nil || rep1.Title != rep.Title || rep1.StartPos != 0 {
+		rep1 := reporter.ParseFrom(test.Log, rep.StartPos)
+		if rep1 == nil || rep1.Title != rep.Title || rep1.StartPos != rep.StartPos {
 			t.Fatalf("did not find the same report from rep.StartPos=%v", rep.StartPos)
 		}
 		// If we parse from EndPos, we must not find the same report.
-		rep2 := reporter.Parse(test.Log[rep.EndPos:])
+		rep2 := reporter.ParseFrom(test.Log, rep.EndPos)
 		if rep2 != nil && rep2.Title == rep.Title {
 			t.Fatalf("found the same report after rep.EndPos=%v", rep.EndPos)
 		}
@@ -277,7 +277,7 @@ func TestGuiltyFile(t *testing.T) {
 	forEachFile(t, "guilty", testGuiltyFile)
 }
 
-func testGuiltyFile(t *testing.T, reporter Reporter, fn string) {
+func testGuiltyFile(t *testing.T, reporter *Reporter, fn string) {
 	data, err := ioutil.ReadFile(fn)
 	if err != nil {
 		t.Fatal(err)
@@ -322,7 +322,7 @@ func testGuiltyFile(t *testing.T, reporter Reporter, fn string) {
 	}
 }
 
-func forEachFile(t *testing.T, dir string, fn func(t *testing.T, reporter Reporter, fn string)) {
+func forEachFile(t *testing.T, dir string, fn func(t *testing.T, reporter *Reporter, fn string)) {
 	for os := range ctors {
 		if os == targets.Windows {
 			continue // not implemented
@@ -331,6 +331,7 @@ func forEachFile(t *testing.T, dir string, fn func(t *testing.T, reporter Report
 			Derived: mgrconfig.Derived{
 				TargetOS:   os,
 				TargetArch: targets.AMD64,
+				SysTarget:  targets.Get(os, targets.AMD64),
 			},
 		}
 		reporter, err := NewReporter(cfg)

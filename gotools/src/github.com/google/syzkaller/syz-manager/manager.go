@@ -49,7 +49,7 @@ type Manager struct {
 	vmPool         *vm.Pool
 	target         *prog.Target
 	sysTarget      *targets.Target
-	reporter       report.Reporter
+	reporter       *report.Reporter
 	crashdir       string
 	serv           *RPCServer
 	corpusDB       *db.DB
@@ -187,7 +187,10 @@ func RunManager(cfg *mgrconfig.Config) {
 	}
 
 	if cfg.DashboardAddr != "" {
-		mgr.dash = dashapi.New(cfg.DashboardClient, cfg.DashboardAddr, cfg.DashboardKey)
+		mgr.dash, err = dashapi.New(cfg.DashboardClient, cfg.DashboardAddr, cfg.DashboardKey)
+		if err != nil {
+			log.Fatalf("failed to create dashapi connection: %v", err)
+		}
 	}
 
 	go func() {
@@ -1089,6 +1092,7 @@ func (mgr *Manager) machineChecked(a *rpctype.CheckArgs, enabledSyscalls map[*pr
 	defer mgr.mu.Unlock()
 	mgr.checkResult = a
 	mgr.targetEnabledSyscalls = enabledSyscalls
+	mgr.target.UpdateGlobs(a.GlobFiles)
 	mgr.loadCorpus()
 	mgr.firstConnect = time.Now()
 }
@@ -1134,7 +1138,7 @@ func (mgr *Manager) candidateBatch(size int) []rpctype.RPCCandidate {
 		if mgr.phase == phaseLoadedCorpus {
 			if mgr.cfg.HubClient != "" {
 				mgr.phase = phaseTriagedCorpus
-				go mgr.hubSyncLoop()
+				go mgr.hubSyncLoop(pickGetter(mgr.cfg.HubKey))
 			} else {
 				mgr.phase = phaseTriagedHub
 			}

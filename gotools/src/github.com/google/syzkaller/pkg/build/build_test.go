@@ -19,7 +19,7 @@ func TestCompilerIdentity(t *testing.T) {
 			if _, err := exec.LookPath(compiler); err != nil {
 				t.Skipf("compiler '%v' is not found: %v", compiler, err)
 			}
-			id, err := CompilerIdentity(compiler)
+			id, err := compilerIdentity(compiler)
 			if err != nil {
 				t.Fatalf("failed: %v", err)
 			}
@@ -517,4 +517,19 @@ make: *** [Makefile:1292: vmlinux] Error 255
 		"FAILED unresolved symbol dctcp_update_alpha",
 		"",
 		"",
-	}}
+	},
+	{`
+scripts/kconfig/conf  --syncconfig Kconfig
+
+*** Error during update of the configuration.
+
+make[2]: *** [scripts/kconfig/Makefile:41: syncconfig] Error 1
+make[1]: *** [Makefile:545: syncconfig] Error 2
+make: *** No rule to make target 'include/config/auto.conf', needed by 'include/config/kernel.release'.  Stop.
+make: *** Waiting for unfinished jobs....
+`,
+		"make: *** No rule to make target 'include/config/auto.conf', needed by 'include/config/kernel.release'.  Stop.",
+		"",
+		"",
+	},
+}

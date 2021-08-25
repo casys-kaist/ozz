@@ -34,6 +34,12 @@ type Params struct {
 	Config       []byte
 }
 
+// Information that is returned from the Image function.
+type ImageDetails struct {
+	Signature  string
+	CompilerID string
+}
+
 // Image creates a disk image for the specified OS/ARCH/VM.
 // Kernel is taken from KernelDir, userspace system is taken from UserspaceDir.
 // If CmdlineFile is not empty, contents of the file are appended to the kernel command line.
@@ -46,42 +52,46 @@ type Params struct {
 //  - kernel.config: actual kernel config used during build
 //  - obj/: directory with kernel object files (this should match KernelObject
 //    specified in sys/targets, e.g. vmlinux for linux)
-// The returned string is a kernel ID that will be the same for kernels with the
-// same runtime behavior, and different for kernels with different runtime
+// The returned structure contains a kernel ID that will be the same for kernels
+// with the same runtime behavior, and different for kernels with different runtime
 // behavior. Binary equal builds, or builds that differ only in e.g. debug info,
 // have the same ID. The ID may be empty if OS implementation does not have
 // a way to calculate such IDs.
-func Image(params *Params) (string, error) {
+// Also that structure provides a compiler ID field that contains the name and
+// the version of the compiler/toolchain that was used to build the kernel.
+// The CompilerID field is not guaranteed to be non-empty.
+func Image(params Params) (details ImageDetails, err error) {
 	builder, err := getBuilder(params.TargetOS, params.TargetArch, params.VMType)
 	if err != nil {
-		return "", err
+		return
 	}
-	if err := osutil.MkdirAll(filepath.Join(params.OutputDir, "obj")); err != nil {
-		return "", err
+	if err = osutil.MkdirAll(filepath.Join(params.OutputDir, "obj")); err != nil {
+		return
 	}
 	if len(params.Config) != 0 {
 		// Write kernel config early, so that it's captured on build failures.
-		if err := osutil.WriteFile(filepath.Join(params.OutputDir, "kernel.config"), params.Config); err != nil {
-			return "", fmt.Errorf("failed to write config file: %v", err)
+		if err = osutil.WriteFile(filepath.Join(params.OutputDir, "kernel.config"), params.Config); err != nil {
+			err = fmt.Errorf("failed to write config file: %v", err)
+			return
 		}
 	}
-	err = builder.build(params)
+	details, err = builder.build(params)
 	if err != nil {
-		return "", extractRootCause(err, params.TargetOS, params.KernelDir)
+		err = extractRootCause(err, params.TargetOS, params.KernelDir)
+		return
 	}
 	if key := filepath.Join(params.OutputDir, "key"); osutil.IsExist(key) {
 		if err := os.Chmod(key, 0600); err != nil {
-			return "", fmt.Errorf("failed to chmod 0600 %v: %v", key, err)
+			return details, fmt.Errorf("failed to chmod 0600 %v: %v", key, err)
 		}
 	}
-	sign := ""
-	if signer, ok := builder.(signer); ok {
-		sign, err = signer.sign(params)
+	if details.CompilerID == "" {
+		details.CompilerID, err = compilerIdentity(params.Compiler)
 		if err != nil {
-			return "", err
+			return
 		}
 	}
-	return sign, nil
+	return
 }
 
 func Clean(targetOS, targetArch, vmType, kernelDir string) error {
@@ -104,12 +114,8 @@ func (err *KernelError) Error() string {
 }
 
 type builder interface {
-	build(params *Params) error
+	build(params Params) (ImageDetails, error)
 	clean(kernelDir, targetArch string) error
-}
-
-type signer interface {
-	sign(params *Params) (string, error)
 }
 
 func getBuilder(targetOS, targetArch, vmType string) (builder, error) {
@@ -147,7 +153,7 @@ func getBuilder(targetOS, targetArch, vmType string) (builder, error) {
 	return nil, fmt.Errorf("unsupported image type %v/%v/%v", targetOS, targetArch, vmType)
 }
 
-func CompilerIdentity(compiler string) (string, error) {
+func compilerIdentity(compiler string) (string, error) {
 	if compiler == "" {
 		return "", nil
 	}
@@ -297,6 +303,7 @@ var buildFailureCauses = [...]buildFailureCause{
 	{pattern: regexp.MustCompile(`: not found`)},
 	{pattern: regexp.MustCompile(`^([a-zA-Z0-9_\-/.]+):[0-9]+:([0-9]+:)?.*(error|invalid|fatal|wrong)`)},
 	{pattern: regexp.MustCompile(`FAILED unresolved symbol`)},
+	{pattern: regexp.MustCompile(`No rule to make target`)},
 	{weak: true, pattern: regexp.MustCompile(`: final link failed: `)},
 	{weak: true, pattern: regexp.MustCompile(`collect2: error: `)},
 	{weak: true, pattern: regexp.MustCompile(`FAILED: Build did NOT complete`)},

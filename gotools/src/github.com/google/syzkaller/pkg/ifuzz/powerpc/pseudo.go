@@ -9,6 +9,11 @@ import (
 	"github.com/google/syzkaller/pkg/ifuzz/iset"
 )
 
+const (
+	// Valid hcall humbers at the momemt are: 4..0x450.
+	MaxHcall = 0x450 // MAX_HCALL
+)
+
 // nolint:dupl
 func (insnset *InsnSet) initPseudo() {
 	insnset.Insns = append(insnset.Insns, &Insn{
@@ -41,11 +46,21 @@ func (insnset *InsnSet) initPseudo() {
 			return gen.text
 		},
 	})
+	insnset.Insns = append(insnset.Insns, &Insn{
+		Name:   "PSEUDO_rtas",
+		Priv:   true,
+		Pseudo: true,
+		generator: func(cfg *iset.Config, r *rand.Rand) []byte {
+			gen := makeGen(insnset, cfg, r)
+			gen.rtas()
+			return gen.text
+		},
+	})
 }
 
 type generator struct {
-	imap map[string]*Insn
-	mode iset.Mode
+	imap insnSetMap
+	cfg  *iset.Config
 	r    *rand.Rand
 	text []byte
 }
@@ -53,7 +68,7 @@ type generator struct {
 func makeGen(insnset *InsnSet, cfg *iset.Config, r *rand.Rand) *generator {
 	return &generator{
 		imap: insnset.insnMap,
-		mode: cfg.Mode,
+		cfg:  cfg,
 		r:    r,
 	}
 }
@@ -62,48 +77,31 @@ func (gen *generator) byte(v []byte) {
 	gen.text = append(gen.text, v...)
 }
 
-func (gen *generator) ld64(reg uint, v uint64) {
-	// This is a widely used macro to load immediate on ppc64
-	// #define LOAD64(rn,name)
-	//	addis   rn,0,name##@highest \ lis     rn,name##@highest
-	//	ori     rn,rn,name##@higher
-	//	rldicr  rn,rn,32,31
-	//	oris    rn,rn,name##@h
-	//	ori     rn,rn,name##@l
-	gen.byte(gen.imap["addis"].EncodeParam(map[string]uint{
-		"RT": reg,
-		"RA": 0, // In "addis", '0' means 0, not GPR0 .
-		"SI": uint((v >> 48) & 0xffff)},
-		nil))
-	gen.byte(gen.imap["ori"].EncodeParam(map[string]uint{
-		"RA": reg,
-		"RS": reg,
-		"UI": uint((v >> 32) & 0xffff)},
-		nil))
-	gen.byte(gen.imap["rldicr"].EncodeParam(map[string]uint{
-		"RA": reg,
-		"RS": reg,
-		"SH": 32,
-		"ME": 31},
-		nil))
-	gen.byte(gen.imap["oris"].EncodeParam(map[string]uint{
-		"RA": reg,
-		"RS": reg,
-		"UI": uint((v >> 16) & 0xffff)},
-		nil))
-	gen.byte(gen.imap["ori"].EncodeParam(map[string]uint{
-		"RA": reg,
-		"RS": reg,
-		"UI": uint(v & 0xffff)},
-		nil))
+func (gen *generator) sc(lev uint) {
+	imap := gen.imap
+
+	n := gen.r.Intn(9)
+	gen.byte(imap.ld64(3, uint64(gen.r.Intn(4+(MaxHcall-4)/4))))
+	for i := 4; i < n+4; i++ {
+		gen.byte(imap.ld64(uint(i), gen.r.Uint64()))
+	}
+	gen.byte(imap.sc(lev))
 }
 
-func (gen *generator) sc(lev uint) {
-	n := gen.r.Intn(9)
-	// Valid hcall humbers at the momemt are: 4..0x450
-	gen.ld64(3, uint64(gen.r.Intn(4+(0x450-4)/4)))
-	for i := 4; i < n+4; i++ {
-		gen.ld64(uint(i), gen.r.Uint64())
+func (gen *generator) rtas() {
+	imap := gen.imap
+
+	addr := iset.GenerateInt(gen.cfg, gen.r, 8)
+	token := uint32(gen.r.Intn(8) << 24) // There are only 4 tokens handled by KVM and it is BigEndian.
+	reg := uint(iset.GenerateInt(gen.cfg, gen.r, 4))
+
+	gen.byte(imap.ldgpr32(reg, reg+uint(1), addr, token))
+	for i := 0; i < gen.r.Intn(4)+1; i++ {
+		gen.byte(imap.ldgpr32(reg, reg+uint(1), addr+uint64(i*4),
+			uint32(iset.GenerateInt(gen.cfg, gen.r, 4))))
 	}
-	gen.byte(gen.imap["sc"].EncodeParam(map[string]uint{"LEV": lev}, nil))
+	gen.byte(imap.ld64(3, 0xF000)) // 0xF000 is a custom H_RTAS hypercall
+	gen.byte(imap.ld64(4, addr))
+
+	gen.byte(imap.sc(1))
 }

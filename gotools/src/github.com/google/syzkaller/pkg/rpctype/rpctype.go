@@ -24,6 +24,12 @@ type RPCCandidate struct {
 	Smashed   bool
 }
 
+type RPCProg struct {
+	Prog    []byte
+	ProgIdx int
+	RunIdx  int
+}
+
 type ConnectArgs struct {
 	Name        string
 	MachineInfo []byte
@@ -47,6 +53,7 @@ type CheckArgs struct {
 	EnabledCalls  map[string][]int
 	DisabledCalls map[string][]SyscallReason
 	Features      *host.Features
+	GlobFiles     map[string][]string
 }
 
 type SyscallReason struct {
@@ -72,10 +79,57 @@ type PollRes struct {
 	MaxSignal  signal.Serial
 }
 
+type RunnerConnectArgs struct {
+	Pool, VM int
+}
+
+type RunnerConnectRes struct {
+	// CheckUnsupportedCalls is set to true if the Runner needs to query the kernel
+	// for unsupported system calls and report them back to the server.
+	CheckUnsupportedCalls bool
+}
+
+// UpdateUnsupportedArgs contains the data passed from client to server in an
+// UpdateSupported call, namely the system calls not supported by the client's
+// kernel.
+type UpdateUnsupportedArgs struct {
+	// Pool is used to identify the checked kernel.
+	Pool int
+	// UnsupportedCalls contains the ID's of system calls not supported by the
+	// client and the reason for this.
+	UnsupportedCalls []SyscallReason
+}
+
+// NextExchangeArgs contains the data passed from client to server namely
+// identification information of the VM and program execution results.
+type NextExchangeArgs struct {
+	// Pool/VM are used to identify the instance on which the client is running.
+	Pool, VM int
+	// ProgIdx is used to uniquely identify the program for which the client is
+	// sending results.
+	ProgIdx int
+	// Hanged is set to true if the program for which we are sending results
+	// was killed due to hanging.
+	Hanged bool
+	// Info contains information about the execution of each system call in the
+	// program.
+	Info ipc.ProgInfo
+	// RunIdx is the number of times this program has been run on the kernel.
+	RunIdx int
+}
+
+// NextExchaneRes contains the data passed from server to client namely
+// programs  to execute on the VM.
+type NextExchangeRes struct {
+	// RPCProg contains the serialized program that will be sent to the client.
+	RPCProg
+}
+
 type HubConnectArgs struct {
 	// Client/Key are used for authentication.
 	Client string
-	Key    string
+	// The key may be a secret password or the oauth token prefixed by "Bearer ".
+	Key string
 	// Manager name, must start with Client.
 	Manager string
 	// See pkg/mgrconfig.Config.HubDomain.

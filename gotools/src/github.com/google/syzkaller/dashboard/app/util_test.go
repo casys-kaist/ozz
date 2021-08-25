@@ -72,8 +72,8 @@ func NewCtx(t *testing.T) *Ctx {
 		mockedTime: time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC),
 		emailSink:  make(chan *aemail.Message, 100),
 	}
-	c.client = c.makeClient(client1, key1, true)
-	c.client2 = c.makeClient(client2, key2, true)
+	c.client = c.makeClient(client1, password1, true)
+	c.client2 = c.makeClient(client2, password2, true)
 	registerContext(r, c)
 	return c
 }
@@ -333,15 +333,10 @@ func (c *Ctx) makeClient(client, key string, failOnErrors bool) *apiClient {
 		registerContext(r, c)
 		w := httptest.NewRecorder()
 		http.DefaultServeMux.ServeHTTP(w, r)
-		// Later versions of Go have a nice w.Result method,
-		// but we stuck on 1.6 on appengine.
-		if w.Body == nil {
-			w.Body = new(bytes.Buffer)
-		}
 		res := &http.Response{
 			StatusCode: w.Code,
 			Status:     http.StatusText(w.Code),
-			Body:       ioutil.NopCloser(bytes.NewReader(w.Body.Bytes())),
+			Body:       ioutil.NopCloser(w.Result().Body),
 		}
 		return res, nil
 	}
@@ -353,9 +348,13 @@ func (c *Ctx) makeClient(client, key string, failOnErrors bool) *apiClient {
 			c.t.Fatalf("\n%v: %v", caller(2), err)
 		}
 	}
+	dash, err := dashapi.NewCustom(client, "", key, c.inst.NewRequest, doer, logger, errorHandler)
+	if err != nil {
+		panic(fmt.Sprintf("Impossible error: %v", err))
+	}
 	return &apiClient{
 		Ctx:       c,
-		Dashboard: dashapi.NewCustom(client, "", key, c.inst.NewRequest, doer, logger, errorHandler),
+		Dashboard: dash,
 	}
 }
 
