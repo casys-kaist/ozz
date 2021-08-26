@@ -3,6 +3,9 @@
 __export_envvar "SYZKALLER" "$GOTOOLS_DIR/src/github.com/google/syzkaller"
 __append_path "$SYZKALLER_PATH/bin"
 
+export SYZKALLER_BUILD=$SYZKALLER_PATH/bin
+export SYZKALLER_INSTALL=$SYZKALLER_BUILD
+
 GUEST_DIR="$KERNELS_DIR/guest/"
 
 # Used in the syzkaller config
