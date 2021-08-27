@@ -23,6 +23,7 @@ func (p *Prog) Clone() *Prog {
 		for ai, arg := range c.Args {
 			c1.Args[ai] = clone(arg, newargs)
 		}
+		c1.Thread, c1.Epoch = c.Thread, c.Epoch
 		p1.Calls[ci] = c1
 	}
 	p1.debugValidate()

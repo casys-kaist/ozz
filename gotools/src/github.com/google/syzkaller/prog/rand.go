@@ -552,8 +552,10 @@ func (r *randGen) generateParticularCall(s *state, meta *Syscall) (calls []*Call
 		panic(fmt.Sprintf("generating disabled call %v", meta.Name))
 	}
 	c := &Call{
-		Meta: meta,
-		Ret:  MakeReturnArg(meta.Ret),
+		Meta:   meta,
+		Ret:    MakeReturnArg(meta.Ret),
+		Thread: ^uint64(0),
+		Epoch:  ^uint64(0),
 	}
 	c.Args, calls = r.generateArgs(s, meta.Args, DirIn)
 	r.target.assignSizesCall(c)

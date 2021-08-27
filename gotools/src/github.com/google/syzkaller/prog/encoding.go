@@ -78,7 +78,11 @@ func (ctx *serializer) call(c *Call) {
 		}
 		ctx.arg(a)
 	}
-	ctx.printf(")\n")
+	ctx.printf(")")
+	if c.Thread != ^uint64(0) || c.Epoch != ^uint64(0) {
+		ctx.printf("<0x%x, 0x%x>", c.Thread, c.Epoch)
+	}
+	ctx.printf("\n")
 }
 
 func (ctx *serializer) arg(arg Arg) {
@@ -266,6 +270,8 @@ func (p *parser) parseProg() (*Prog, error) {
 		c := &Call{
 			Meta:    meta,
 			Ret:     MakeReturnArg(meta.Ret),
+			Thread:  ^uint64(0),
+			Epoch:   ^uint64(0),
 			Comment: p.comment,
 		}
 		prog.Calls = append(prog.Calls, c)
@@ -290,6 +296,21 @@ func (p *parser) parseProg() (*Prog, error) {
 		}
 		p.Parse(')')
 		p.SkipWs()
+
+		if !p.EOF() {
+			if p.Char() == '<' {
+				// Parse our modificaiton of Prog. Syzkaller's Prog does
+				// not have this part
+				p.Parse('<')
+				thread, epoch, err := p.parseConcurrencyInfo()
+				if err != nil {
+					return nil, err
+				}
+				c.Thread, c.Epoch = thread, epoch
+				p.Parse('>')
+				p.SkipWs()
+			}
+		}
 		if !p.EOF() {
 			if p.Char() != '#' {
 				return nil, fmt.Errorf("tailing data (line #%v)", p.l)
@@ -315,6 +336,21 @@ func (p *parser) parseProg() (*Prog, error) {
 		prog.Comments = append(prog.Comments, p.comment)
 	}
 	return prog, nil
+}
+
+func (p *parser) parseConcurrencyInfo() (uint64, uint64, error) {
+	val := p.Ident()
+	thread, err := strconv.ParseUint(val, 0, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	p.Parse(',')
+	val = p.Ident()
+	epoch, err := strconv.ParseUint(val, 0, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	return thread, epoch, nil
 }
 
 func (p *parser) parseArg(typ Type, dir Dir) (Arg, error) {

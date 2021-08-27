@@ -17,6 +17,8 @@ type Call struct {
 	Meta    *Syscall
 	Args    []Arg
 	Ret     *ResultArg
+	Thread  uint64
+	Epoch   uint64
 	Comment string
 }
 
