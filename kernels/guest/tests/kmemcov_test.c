@@ -9,6 +9,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#include "hypercall.h"
+
 enum kmemcov_access_type {
 	KMEMCOV_ACCESS_STORE,
 	KMEMCOV_ACCESS_LOAD,
@@ -63,6 +65,8 @@ int main(int argc, char **argv)
 	int fd;
 
 	syscall(SYS_PSO_CLEAR);
+
+	hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
 
 	/* A single fd descriptor allows coverage collection on a single
      * thread.
