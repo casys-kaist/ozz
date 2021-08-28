@@ -5,11 +5,11 @@ templates of syzkaller's configs, which contain unexpanded environment
 variables. In order to generate real syzkaller's configs, do
 
 ```
-envsubst < x86_64/syzkaller.cfg.template > x86_64/syzkaller.cfg
+envsubst < x86_64/templates/syzkaller.cfg.template > x86_64/syzkaller.cfg
 ```
 
 or
 
 ```
-envsubst < arm64/syzkaller.cfg.template > arm64/syzkaller.cfg
+envsubst < arm64/templates/syzkaller.cfg.template > arm64/syzkaller.cfg
 ```
