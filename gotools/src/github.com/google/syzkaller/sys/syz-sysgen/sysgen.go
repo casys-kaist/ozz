@@ -170,11 +170,11 @@ func main() {
 			Archs: syscallArchs,
 		})
 
-		for what, count := range unsupported {
-			if count == len(jobs) {
-				tool.Failf("%v is unsupported on all arches (typo?)", what)
-			}
-		}
+		// for what, count := range unsupported {
+		// 	if count == len(jobs) {
+		// 		tool.Failf("%v is unsupported on all arches (typo?)", what)
+		// 	}
+		// }
 	}
 
 	attrs := reflect.TypeOf(prog.SyscallAttrs{})
