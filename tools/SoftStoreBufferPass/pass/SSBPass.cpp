@@ -776,6 +776,11 @@ static bool isAssumeLikeIntrinsic(IntrinsicInst *II) {
   return false;
 }
 
+static bool is__kasan_check_read_write(StringRef name) {
+  return name.startswith("__kasan_check_read") ||
+         name.startswith("__kasan_check_write");
+}
+
 bool SoftStoreBuffer::isOutofScopeCall(Instruction *I,
                                        const InstrumentedFunctionList &IFL) {
   assert(isa<CallBase>(I));
@@ -793,6 +798,16 @@ bool SoftStoreBuffer::isOutofScopeCall(Instruction *I,
     // semantics, and do not generate any real code. We don't need to
     // instrument the flush callback in this case.
     return !isAssumeLikeIntrinsic(II);
+
+  auto *F = CB->getCalledFunction();
+  if (F && is__kasan_check_read_write(F->getName())) {
+    // __SANITIZE_ADDRESS__ is defined when building Linux with clang,
+    // and accordingly, __kasan_check_{read, write} is called during
+    // the runtime. As we don't want to flush the store buffer when
+    // KASAN callbacks are called, do not treat the callbacks as
+    // out-of-scope-calls.
+    return false;
+  }
 
   bool ret = isIndirectCall(CB) || isNotInstrumentedCall(CB, IFL);
   if (ret)
