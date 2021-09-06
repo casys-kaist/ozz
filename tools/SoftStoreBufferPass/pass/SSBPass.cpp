@@ -786,7 +786,8 @@ static bool isCallingAnnotatedInlineAsm(CallBase *CB) {
   if (CB->isInlineAsm()) {
     auto *Asm = cast<InlineAsm>(CB->getCalledOperand());
     const std::string &AsmString = Asm->getAsmString();
-    bool annotated = AsmString.find(NO_BARRIER_SEMANTIC) != std::string::npos;
+    bool annotated = AsmString.find(NO_BARRIER_SEMANTIC) != std::string::npos ||
+                     AsmString.length() == 0;
     LLVM_DEBUG(dbgs() << "inline asm: " << AsmString << "\n");
     LLVM_DEBUG(dbgs() << "annotated: " << annotated << "\n");
     return annotated;
