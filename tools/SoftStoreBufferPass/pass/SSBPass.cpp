@@ -781,6 +781,19 @@ static bool is__kasan_check_read_write(StringRef name) {
          name.startswith("__kasan_check_write");
 }
 
+static bool isCallingAnnotatedInlineAsm(CallBase *CB) {
+#define NO_BARRIER_SEMANTIC "no kssb"
+  if (CB->isInlineAsm()) {
+    auto *Asm = cast<InlineAsm>(CB->getCalledOperand());
+    const std::string &AsmString = Asm->getAsmString();
+    bool annotated = AsmString.find(NO_BARRIER_SEMANTIC) != std::string::npos;
+    LLVM_DEBUG(dbgs() << "inline asm: " << AsmString << "\n");
+    LLVM_DEBUG(dbgs() << "annotated: " << annotated << "\n");
+    return annotated;
+  }
+  return false;
+}
+
 bool SoftStoreBuffer::isOutofScopeCall(Instruction *I,
                                        const InstrumentedFunctionList &IFL) {
   assert(isa<CallBase>(I));
@@ -806,6 +819,13 @@ bool SoftStoreBuffer::isOutofScopeCall(Instruction *I,
     // the runtime. As we don't want to flush the store buffer when
     // KASAN callbacks are called, do not treat the callbacks as
     // out-of-scope-calls.
+    return false;
+  }
+
+  if (isCallingAnnotatedInlineAsm(CB)) {
+    // We annotate inline assemblies that does not surely have memory
+    // barrier semantics. We don't need to instrument the flush
+    // callback before those inline assemblies.
     return false;
   }
 
