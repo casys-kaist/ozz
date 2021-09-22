@@ -14,7 +14,15 @@ LINUXDIR="$PROJECT_HOME/kernels/guest/linux"
 
 mkdir -p "$OUTDIR"
 if [ -n "$CONFIG" ]; then
-	cp "$CONFIG" "$OUTDIR/.config"
+	_CONFIG="$CONFIG"
+	COPY_CONFIG=1
+else
+	_CONFIG="$KERNELS_DIR/guest/configs/config.$ARCH"
+fi
+
+if [ -n "$COPY_CONFIG" -o ! -f "$OUTDIR/.config" ]; then
+	echo "copy $_CONFIG to $OUTDIR/.config"
+	cp "$_CONFIG" "$OUTDIR/.config"
 fi
 
 if [ -z "$NPROC" ]; then
