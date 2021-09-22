@@ -25,6 +25,12 @@ if [ -n "$COPY_CONFIG" -o ! -f "$OUTDIR/.config" ]; then
 	cp "$_CONFIG" "$OUTDIR/.config"
 fi
 
+if [ -f "$TMP_DIR/kssb_rebuild" ]; then
+	# TODO: Any better way? -B does not seem to work?
+	find $(readlink -f "$OUTDIR") -name "*.o" -exec rm {} \;
+	rm "$TMP_DIR/kssb_rebuild"
+fi
+
 if [ -z "$NPROC" ]; then
 	NPROC=$(expr `nproc` / 2)
 fi

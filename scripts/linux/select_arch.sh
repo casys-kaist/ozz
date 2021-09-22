@@ -29,4 +29,9 @@ if [ -n "$INSTRUMENT" ]; then
 	else
 		unset _DEDUP
 	fi
+	# NOTE: We want to rebuild the kernel when switching on/off the
+	# first pass. Whatever. Just rebuild the kernel whenever sourcing
+	# this file. Note that we use a temporary file instead of an
+	# environment variable to allow build.sh to stop rebuilding.
+	touch "$TMP_DIR/kssb_rebuild"
 fi
