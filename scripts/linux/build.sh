@@ -5,6 +5,10 @@ if [ -z "$ARCH" ]; then
 	exit 1
 fi
 
+SCRIPTS_LINUX_DIR="$SCRIPTS_DIR/linux/"
+$SCRIPTS_LINUX_DIR/__create_symlinks.sh
+$SCRIPTS_LINUX_DIR/__check_branch.sh
+
 OUTDIR="$PROJECT_HOME/kernels/guest/builds/$ARCH"
 LINUXDIR="$PROJECT_HOME/kernels/guest/linux"
 
