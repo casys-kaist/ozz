@@ -25,5 +25,8 @@ if [ -n "$INSTRUMENT" ]; then
 	export CFLAGS_KSSB_FLUSHONLY="-Xclang -load -Xclang $PASS -mllvm -arch=$ARCH -mllvm -memorymodel=$MEMMODEL -mllvm -ssb-flush-only=true"
 	if [ -n "$FIRSTPASS" ]; then
 		export CFLAGS_KSSB="$CFLAGS_KSSB -mllvm -ssb-second-pass=false"
+		export _DEDUP=1
+	else
+		unset _DEDUP
 	fi
 fi

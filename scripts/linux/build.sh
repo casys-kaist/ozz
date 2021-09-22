@@ -30,3 +30,11 @@ if [ -z "$NPROC" ]; then
 fi
 
 (cd $LINUXDIR; make O=$OUTDIR oldconfig; make O=$OUTDIR -j"$NPROC" "$@")
+
+if [ -n "$_DEDUP" ]; then
+	# TODO: do this inline
+	FN=$(readlink -f "$TMP_DIR/to-be-instrumented-functions.lst")
+	TN="$TMP_DIR/to-be-instrumented-functions.lst__temporary"
+	sort "$FN" | uniq -u > "$TN"
+	mv "$TN" "$FN"
+fi
