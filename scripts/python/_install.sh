@@ -21,11 +21,15 @@ _build() {
 }
 
 _install() {
+	_PIP="$PYTHON_VIRTENV_PATH/bin/pip"
 	__make_dir_and_exec_cmd "$PYTHON_BUILD" \
 							"mkdir -p $PYTHON_INSTALL" \
 							"make install" \
 							"ln -s $PYTHON_INSTALL/bin/python3 $PYTHON_INSTALL/bin/python" \
-							"python -m venv $PYTHON_VIRTENV_PATH"
+							"python -m venv $PYTHON_VIRTENV_PATH" \
+							". $PYTHON_VIRTENV_ACTIVATE" \
+							"$_PIP install --upgrade pip" \
+							"$_PIP install -r $SCRIPTS_DIR/python/requirements.txt"
 }
 
 _target="python-$PYTHON_VERSION"
