@@ -24,7 +24,8 @@ _install() {
 	__make_dir_and_exec_cmd "$PYTHON_BUILD" \
 							"mkdir -p $PYTHON_INSTALL" \
 							"make install" \
-							"ln -s $PYTHON_INSTALL/bin/python3 $PYTHON_INSTALL/bin/python" # Installing Python will create only python3
+							"ln -s $PYTHON_INSTALL/bin/python3 $PYTHON_INSTALL/bin/python" \
+							"python -m venv $PYTHON_VIRTENV_PATH"
 }
 
 _target="python-$PYTHON_VERSION"
