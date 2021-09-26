@@ -49,11 +49,14 @@ class MembarrierAnalyzer(Analyzer):
         comment_insertions = 0
         empty_insertions = 0
         threshold = 0.3
-        for diff in diffs:
-            lines = diff.diff.split(b'\n')
-            membarrier_insertions += sum([1 for line in lines if MembarrierAnalyzer.__is_membarrier_insertion(line.decode())])
-            comment_insertions += sum([1 for line in lines if Analyzer.is_comment(line.decode())])
-            empty_insertions += sum([1 for line in lines if line == '+'])
+        try:
+            for diff in diffs:
+                lines = diff.diff.split(b'\n')
+                membarrier_insertions += sum([1 for line in lines if MembarrierAnalyzer.__is_membarrier_insertion(line.decode())])
+                comment_insertions += sum([1 for line in lines if Analyzer.is_comment(line.decode())])
+                empty_insertions += sum([1 for line in lines if line == '+'])
+        except:
+            return False
         total_insertions -= comment_insertions
         total_insertions -= empty_insertions
         return membarrier_insertions > total_insertions * threshold
