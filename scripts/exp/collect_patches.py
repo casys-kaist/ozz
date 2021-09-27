@@ -16,6 +16,9 @@ class Analyzer:
     def is_merge_commit(commit):
         return len(commit.parents) > 1
 
+    def is_initial_commit(commit):
+        return len(commit.parents) == 0
+
     def get_change(commit):
         message = commit.message
         parent = commit.parents[0]
@@ -63,7 +66,7 @@ class MembarrierAnalyzer(Analyzer):
 
     def is_interesting(self, commit):
         # Skip merge commits as they are unlikely interested
-        if Analyzer.is_merge_commit(commit):
+        if Analyzer.is_merge_commit(commit) or Analyzer.is_initial_commit(commit):
             return False, (False, False)
 
         message, diffs = Analyzer.get_change(commit)
