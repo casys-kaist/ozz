@@ -1,6 +1,10 @@
 #!/bin/sh -e
 
-branch=$(git rev-parse --abbrev-ref HEAD)
+if [ -z $SUFFIX ]; then
+	_SUFFIX=$(git rev-parse --abbrev-ref HEAD)
+else
+	_SUFFIX=$SUFFIX
+fi
 
 __exit() {
 	echo "[-]" $1
@@ -22,14 +26,14 @@ __check_symlink() {
 }
 
 check_to_be_instrumented_functions() {
-	ORIG="$TMP_DIR/to-be-instrumented-functions.lst-$branch"
+	ORIG="$TMP_DIR/to-be-instrumented-functions.lst-$_SUFFIX"
 	LINK="$TMP_DIR/to-be-instrumented-functions.lst"
 	__check_symlink $ORIG $LINK
 }
 
 
 check_builddir() {
-	ORIG="$KERNEL_X86_64""-$branch"
+	ORIG="$KERNEL_X86_64""-$_SUFFIX"
 	LINK="$KERNEL_X86_64"
 	__check_symlink $ORIG $LINK
 }

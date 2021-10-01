@@ -7,7 +7,7 @@ fi
 
 SCRIPTS_LINUX_DIR="$SCRIPTS_DIR/linux/"
 $SCRIPTS_LINUX_DIR/__create_symlinks.sh
-$SCRIPTS_LINUX_DIR/__check_branch.sh
+$SCRIPTS_LINUX_DIR/__check_suffix.sh
 
 OUTDIR="$PROJECT_HOME/kernels/guest/builds/$ARCH"
 LINUXDIR="$PROJECT_HOME/kernels/guest/linux"

@@ -1,6 +1,10 @@
 #!/bin/sh -e
 
-branch=$(git rev-parse --abbrev-ref HEAD)
+if [ -z $SUFFIX ]; then
+	_SUFFIX=$(git rev-parse --abbrev-ref HEAD)
+else
+	_SUFFIX=$SUFFIX
+fi
 
 __exit() {
 	echo "[-]" $1
@@ -9,8 +13,8 @@ __exit() {
 	fi
 }
 
-__append_branch() {
-	echo "$1-$branch"
+__append_suffix() {
+	echo "$1-$_SUFFIX"
 }
 
 __create_symlink() {
@@ -26,7 +30,7 @@ __create_symlink() {
 }
 
 create_builddir_symlink() {
-	SRC="$(__append_branch $KERNEL_X86_64)"
+	SRC="$(__append_suffix $KERNEL_X86_64)"
 
 	mkdir -p "$SRC"
 
@@ -35,7 +39,7 @@ create_builddir_symlink() {
 
 create_to_be_instrumented_functions_symlink() {
 	FILENAME="$TMP_DIR/to-be-instrumented-functions.lst"
-	SRC="$(__append_branch $FILENAME)"
+	SRC="$(__append_suffix $FILENAME)"
 
 	touch $SRC
 
