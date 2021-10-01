@@ -21,6 +21,7 @@ fi
 
 if [ -n "$DEBUG" ]; then
 	_DEBUG="-debug"
+	_TEE=${TEE:="$TMP_DIR/log"}
 fi
 
 OPTS="-config $CONFIG $_DEBUG"
@@ -29,7 +30,12 @@ echo "Run syzkaller"
 echo "    config : $CONFIG"
 echo "    debug  : $DEBUG"
 echo "    options: $OPTS"
+echo "    tee    : $_TEE"
 
 sleep 2
 
-exec $SYZKALLER $OPTS
+if [ -n "$_TEE" ]; then
+	exec $SYZKALLER $OPTS 2>&1 | tee $_TEE
+else
+	exec $SYZKALLER $OPTS
+fi
