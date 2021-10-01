@@ -25,5 +25,13 @@ if [ -n "$INSTRUMENT" ]; then
 	export CFLAGS_KSSB_FLUSHONLY="-Xclang -load -Xclang $PASS -mllvm -arch=$ARCH -mllvm -memorymodel=$MEMMODEL -mllvm -ssb-flush-only=true"
 	if [ -n "$FIRSTPASS" ]; then
 		export CFLAGS_KSSB="$CFLAGS_KSSB -mllvm -ssb-second-pass=false"
+		export _DEDUP=1
+	else
+		unset _DEDUP
 	fi
+	# NOTE: We want to rebuild the kernel when switching on/off the
+	# first pass. Whatever. Just rebuild the kernel whenever sourcing
+	# this file. Note that we use a temporary file instead of an
+	# environment variable to allow build.sh to stop rebuilding.
+	touch "$TMP_DIR/kssb_rebuild"
 fi

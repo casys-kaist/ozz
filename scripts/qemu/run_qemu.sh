@@ -31,7 +31,7 @@ if [ $ARCH = "x86_64" ]; then
 	KERNEL="$KERNELS_DIR/guest/builds/x86_64/arch/x86_64/boot/bzImage"
 	NETWORK="-netdev user,id=vnet0,hostfwd=tcp::$PORT-:22 \
 		-device virtio-net-pci,netdev=vnet0"
-	KERNELCMD='console=ttyS0 root=/dev/sda crashkernel=512M selinux=0'
+	KERNELCMD='console=ttyS0 root=/dev/sda crashkernel=512M selinux=0 null_blk.submit_queues=2'
 	MACHINE=
 else
 	QEMU=$QEMU_ARM
