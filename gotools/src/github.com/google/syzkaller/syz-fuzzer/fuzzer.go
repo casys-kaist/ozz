@@ -6,6 +6,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	golog "log"
 	"math/rand"
 	"os"
 	"runtime"
@@ -130,6 +131,7 @@ func createIPCConfig(features *host.Features, config *ipc.Config) {
 
 // nolint: funlen
 func main() {
+	golog.SetPrefix("[FUZZER] ")
 	debug.SetGCPercent(50)
 
 	var (

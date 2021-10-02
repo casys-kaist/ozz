@@ -90,6 +90,7 @@ static NORETURN void doexit(int status);
 // and is intended mostly for end users. If you need to debug lower-level details, use debug_verbose
 // function and temporary enable it in your build by changing #if 0 below.
 // This function does not add \n at the end of msg as opposed to the previous functions.
+static PRINTF(1, 2) void debug_noprefix(const char* msg, ...);
 static PRINTF(1, 2) void debug(const char* msg, ...);
 void debug_dump_data(const char* data, int length);
 
@@ -1144,10 +1145,10 @@ void execute_call(thread_t* th)
 	      th->id, current_time_ms() - start_time_ms, call->name);
 	for (int i = 0; i < th->num_args; i++) {
 		if (i != 0)
-			debug(", ");
-		debug("0x%llx", (uint64)th->args[i]);
+			debug_noprefix(", ");
+		debug_noprefix("0x%llx", (uint64)th->args[i]);
 	}
-	debug(")\n");
+	debug_noprefix(")\n");
 
 	int fail_fd = -1;
 	th->soft_fail_state = false;
@@ -1186,10 +1187,10 @@ void execute_call(thread_t* th)
 	debug("#%d [%llums] <- %s=0x%llx errno=%d ",
 	      th->id, current_time_ms() - start_time_ms, call->name, (uint64)th->res, th->reserrno);
 	if (flag_coverage)
-		debug("cover=%u ", th->cov.size);
+		debug_noprefix("cover=%u ", th->cov.size);
 	if (flag_fault && th->call_index == flag_fault_call)
-		debug("fault=%d ", th->fault_injected);
-	debug("\n");
+		debug_noprefix("fault=%d ", th->fault_injected);
+	debug_noprefix("\n");
 }
 
 #if SYZ_EXECUTOR_USES_SHMEM
@@ -1579,7 +1580,7 @@ void exitf(const char* msg, ...)
 	doexit(0);
 }
 
-void debug(const char* msg, ...)
+void debug_noprefix(const char* msg, ...)
 {
 	if (!flag_debug)
 		return;
@@ -1592,16 +1593,31 @@ void debug(const char* msg, ...)
 	errno = err;
 }
 
+void debug(const char* msg, ...)
+{
+	if (!flag_debug)
+		return;
+	int err = errno;
+	va_list args;
+	fprintf(stderr, "[EXEC-%02lld] ", procid);
+	va_start(args, msg);
+	vfprintf(stderr, msg, args);
+	va_end(args);
+	fflush(stderr);
+	errno = err;
+}
+
 void debug_dump_data(const char* data, int length)
 {
 	if (!flag_debug)
 		return;
 	int i = 0;
+	fprintf(stderr, "[EXEC-%02lld]\n", procid);
 	for (; i < length; i++) {
-		debug("%02x ", data[i] & 0xff);
+		debug_noprefix("%02x ", data[i] & 0xff);
 		if (i % 16 == 15)
-			debug("\n");
+			debug_noprefix("\n");
 	}
 	if (i % 16 != 0)
-		debug("\n");
+		debug_noprefix("\n");
 }

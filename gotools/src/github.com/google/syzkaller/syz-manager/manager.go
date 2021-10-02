@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	golog "log"
 	"math/rand"
 	"net"
 	"os"
@@ -119,6 +120,7 @@ type Crash struct {
 }
 
 func main() {
+	golog.SetPrefix("[MANAGER] ")
 	if prog.GitRevision == "" {
 		log.Fatalf("bad syz-manager build: build with make, run bin/syz-manager")
 	}
