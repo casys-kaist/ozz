@@ -242,6 +242,7 @@ struct thread_t {
 	int call_num;
 	int num_args;
 	intptr_t args[kMaxArgs];
+	int epoch;
 	intptr_t res;
 	uint32 reserrno;
 	bool fault_injected;
@@ -342,7 +343,7 @@ struct feature_t {
 	void (*setup)();
 };
 
-static thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64* pos);
+static thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64* pos);
 static void handle_completion(thread_t* th);
 static void copyout_call_results(thread_t* th);
 static void write_call_output(thread_t* th, bool finished);
@@ -785,8 +786,10 @@ retry:
 			args[i] = read_arg(&input_pos);
 		for (uint64 i = num_args; i < kMaxArgs; i++)
 			args[i] = 0;
+		uint64 thread = read_input(&input_pos);
+		uint64 epoch = read_input(&input_pos);
 		thread_t* th = schedule_call(call_index++, call_num, colliding, copyout_index,
-					     num_args, args, input_pos);
+					     num_args, args, thread, epoch, input_pos);
 
 		if (colliding && (call_index % 2) == 0) {
 			// Don't wait for every other call.
@@ -869,7 +872,7 @@ retry:
 	}
 }
 
-thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64* pos)
+thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64* pos)
 {
 	// Find a spare thread to execute the call.
 	int i = 0;
@@ -900,6 +903,7 @@ thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 cop
 	th->num_args = num_args;
 	for (int i = 0; i < kMaxArgs; i++)
 		th->args[i] = args[i];
+	th->epoch = epoch;
 	event_set(&th->ready);
 	running++;
 	return th;
@@ -1141,8 +1145,8 @@ void* worker_thread(void* arg)
 void execute_call(thread_t* th)
 {
 	const call_t* call = &syscalls[th->call_num];
-	debug("#%d [%llums] -> %s(",
-	      th->id, current_time_ms() - start_time_ms, call->name);
+	debug("#%d@%d [%llums] -> %s(",
+	      th->id, th->epoch, current_time_ms() - start_time_ms, call->name);
 	for (int i = 0; i < th->num_args; i++) {
 		if (i != 0)
 			debug_noprefix(", ");

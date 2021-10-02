@@ -103,6 +103,7 @@ func (w *execContext) serializeCall(c *Call) {
 	for _, arg := range c.Args {
 		w.writeArg(arg)
 	}
+	w.writeConcurrencyInfo(c.Thread, c.Epoch)
 	// Generate copyout instructions that persist interesting return values.
 	w.writeCopyout(c)
 }
@@ -228,6 +229,11 @@ func (w *execContext) write(v uint64) {
 	}
 	HostEndian.PutUint64(w.buf, v)
 	w.buf = w.buf[8:]
+}
+
+func (w *execContext) writeConcurrencyInfo(thread, epoch uint64) {
+	w.write(thread)
+	w.write(epoch)
 }
 
 func (w *execContext) writeArg(arg Arg) {
