@@ -79,9 +79,7 @@ func (ctx *serializer) call(c *Call) {
 		ctx.arg(a)
 	}
 	ctx.printf(")")
-	if c.Thread != ^uint64(0) || c.Epoch != ^uint64(0) {
-		ctx.printf("<0x%x, 0x%x>", c.Thread, c.Epoch)
-	}
+	ctx.printf(" <0x%x, 0x%x>", c.Thread, c.Epoch)
 	ctx.printf("\n")
 }
 
