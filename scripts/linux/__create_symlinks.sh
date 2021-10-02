@@ -46,5 +46,9 @@ create_to_be_instrumented_functions_symlink() {
 	__create_symlink "$SRC" "$FILENAME"
 }
 
-create_builddir_symlink
-create_to_be_instrumented_functions_symlink
+if [ "$1" = "all" ]; then
+	create_builddir_symlink
+	create_to_be_instrumented_functions_symlink
+elif [ "$1" = "linux" ]; then
+	create_builddir_symlink
+fi

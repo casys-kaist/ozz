@@ -6,8 +6,8 @@ if [ -z "$ARCH" ]; then
 fi
 
 SCRIPTS_LINUX_DIR="$SCRIPTS_DIR/linux/"
-$SCRIPTS_LINUX_DIR/__create_symlinks.sh
-$SCRIPTS_LINUX_DIR/__check_suffix.sh
+$SCRIPTS_LINUX_DIR/__create_symlinks.sh "all"
+$SCRIPTS_LINUX_DIR/__check_suffix.sh "all"
 
 OUTDIR="$PROJECT_HOME/kernels/guest/builds/$ARCH"
 LINUXDIR="$PROJECT_HOME/kernels/guest/linux"

@@ -31,12 +31,15 @@ check_to_be_instrumented_functions() {
 	__check_symlink $ORIG $LINK
 }
 
-
 check_builddir() {
 	ORIG="$KERNEL_X86_64""-$_SUFFIX"
 	LINK="$KERNEL_X86_64"
 	__check_symlink $ORIG $LINK
 }
 
-check_builddir
-check_to_be_instrumented_functions
+if [ "$1" = "all" ]; then
+	check_builddir
+	check_to_be_instrumented_functions
+elif [ "$1" = "linux" ]; then
+	check_builddir
+fi
