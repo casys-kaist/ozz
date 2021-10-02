@@ -13,6 +13,10 @@ if [ ${PWD#$EXP_DIR} = $PWD ]; then
 	done
 fi
 
+SCRIPTS_LINUX_DIR="$SCRIPTS_DIR/linux/"
+$SCRIPTS_LINUX_DIR/__create_symlinks.sh "linux"
+$SCRIPTS_LINUX_DIR/__check_suffix.sh "linux"
+
 SYZKALLER=$SYZKALLER_INSTALL/syz-manager
 
 if [ -z "$CONFIG" ]; then
