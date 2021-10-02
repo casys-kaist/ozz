@@ -6,3 +6,4 @@
 !/src/github.com/google/
 !/src/github.com/google/**/*
 TAGS
+.dir-locals.el
