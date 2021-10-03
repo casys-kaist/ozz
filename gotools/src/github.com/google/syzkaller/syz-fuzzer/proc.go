@@ -328,7 +328,7 @@ func (proc *Proc) logProgram(opts *ipc.ExecOpts, p *prog.Prog) {
 		now := time.Now()
 		proc.fuzzer.logMu.Lock()
 		fmt.Printf("%02v:%02v:%02v executing program (%d calls) %v%v:\n%s\n",
-			len(p.Calls), now.Hour(), now.Minute(), now.Second(),
+			now.Hour(), now.Minute(), now.Second(), len(p.Calls),
 			proc.pid, strOpts, data)
 		proc.fuzzer.logMu.Unlock()
 	case OutputDmesg:
