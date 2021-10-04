@@ -62,6 +62,7 @@ var ErrExecBufferTooSmall = errors.New("encodingexec: provided buffer is too sma
 // Returns number of bytes written to the buffer.
 // If the provided buffer is too small for the program an error is returned.
 func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
+	p.fixupEpoch()
 	p.debugValidate()
 	w := &execContext{
 		target: p.Target,
@@ -70,6 +71,7 @@ func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
 		args:   make(map[Arg]argInfo),
 	}
 	for _, c := range p.Calls {
+		w.writeEpoch(c)
 		w.csumMap, w.csumUses = calcChecksumsCall(c)
 		w.serializeCall(c)
 	}

@@ -32,6 +32,7 @@ func (p *Prog) SerializeVerbose() []byte {
 }
 
 func (p *Prog) serialize(verbose bool) []byte {
+	p.fixupEpoch()
 	p.debugValidate()
 	ctx := &serializer{
 		target:  p.Target,

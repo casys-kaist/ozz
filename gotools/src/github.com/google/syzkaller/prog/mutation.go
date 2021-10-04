@@ -49,6 +49,7 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, corpus []*Pro
 			ok = ctx.removeCall()
 		}
 	}
+	p.fixupEpoch()
 	p.sanitizeFix()
 	p.debugValidate()
 	if got := len(p.Calls); got < 1 || got > ncalls {
