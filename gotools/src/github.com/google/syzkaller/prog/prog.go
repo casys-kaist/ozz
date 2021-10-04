@@ -414,3 +414,62 @@ func (p *Prog) sanitize(fix bool) error {
 	}
 	return nil
 }
+
+type epochContext struct {
+	p      *Prog
+	epoch  uint64
+	thr    []bool
+	maxThr int
+}
+
+func (ctx *epochContext) newEpoch() {
+	ctx.epoch += 1
+	ctx.thr = make([]bool, ctx.maxThr)
+}
+
+func (ctx *epochContext) doneEpoch(c *Call) bool {
+	return c.Epoch < ctx.epoch || c.Epoch == ctx.epoch && ctx.thr[c.Thread]
+}
+
+func (ctx *epochContext) useThread(thr uint64) {
+	ctx.thr[thr] = true
+}
+
+func (ctx *epochContext) assignThread(c *Call) {
+	if c.Thread != ^uint64(0) {
+		// Thread is already assigned
+		return
+	}
+	for t, used := range ctx.thr {
+		if !used {
+			c.Thread = uint64(t)
+			return
+		}
+	}
+	// All threads are used. Start the new epoch and assign thread 0
+	if c.Thread == ^uint64(0) {
+		ctx.newEpoch()
+		c.Thread = 0
+	}
+}
+
+func (p *Prog) fixupEpoch() {
+	// TODO: fix maxThr
+	maxThr := 3
+	ctx := &epochContext{
+		p:      p,
+		epoch:  0,
+		thr:    make([]bool, maxThr),
+		maxThr: maxThr,
+	}
+
+	for _, c := range p.Calls {
+		// TODO: The logic is somewhat non-sense. Need to fix here
+		if ctx.doneEpoch(c) {
+			ctx.newEpoch()
+		}
+		ctx.assignThread(c)
+		c.Epoch = ctx.epoch
+		ctx.useThread(c.Thread)
+	}
+}
