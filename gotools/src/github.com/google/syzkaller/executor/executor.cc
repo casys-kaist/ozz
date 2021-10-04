@@ -173,6 +173,7 @@ const int kMaxCommands = 1000; // prog package knows about this constant (prog.e
 const uint64 instr_eof = -1;
 const uint64 instr_copyin = -2;
 const uint64 instr_copyout = -3;
+const uint64 instr_epoch = -4;
 
 const uint64 arg_const = 0;
 const uint64 arg_result = 1;
@@ -649,6 +650,16 @@ void reply_execute(int status)
 		fail("control pipe write failed");
 }
 
+void start_epoch()
+{
+	// TODO: signal threads
+}
+
+void wait_epoch()
+{
+	// TODO: wait for a signal
+}
+
 // execute_one executes program stored in input_data.
 void execute_one()
 {
@@ -670,10 +681,14 @@ void execute_one()
 	int call_index = 0;
 	uint64 prog_extra_timeout = 0;
 	uint64 prog_extra_cover_timeout = 0;
-	for (;;) {
+	bool stop = false;
+	for (;!stop;) {
 		uint64 call_num = read_input(&input_pos);
-		if (call_num == instr_eof)
-			break;
+		if (call_num == instr_epoch || call_num == instr_eof) {
+			start_epoch();
+			stop = call_num == instr_eof;
+			continue;
+		}
 		if (call_num == instr_copyin) {
 			char* addr = (char*)read_input(&input_pos);
 			uint64 typ = read_input(&input_pos);
@@ -1108,6 +1123,7 @@ void* worker_thread(void* arg)
 	for (;;) {
 		event_wait(&th->ready);
 		event_reset(&th->ready);
+		wait_epoch();
 		execute_call(th);
 		event_set(&th->done);
 	}
