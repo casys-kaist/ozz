@@ -189,6 +189,7 @@ const uint64 binary_format_stroct = 4;
 const uint64 no_copyout = -1;
 
 static int running;
+static bool collide;
 uint32 completed;
 bool is_kernel_64_bit = true;
 
@@ -238,6 +239,7 @@ struct thread_t {
 	event_t done;
 	uint64* copyout_pos;
 	uint64 copyout_index;
+	bool colliding;
 	bool executing;
 	int call_index;
 	int call_num;
@@ -344,7 +346,7 @@ struct feature_t {
 	void (*setup)();
 };
 
-static thread_t* schedule_call(int call_index, int call_num, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64* pos);
+static thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64* pos);
 static void handle_completion(thread_t* th);
 static void copyout_call_results(thread_t* th);
 static void write_call_output(thread_t* th, bool finished);
@@ -663,15 +665,20 @@ void wait_epoch()
 // execute_one executes program stored in input_data.
 void execute_one()
 {
+	// Duplicate global collide variable on stack.
+	// Fuzzer once come up with ioctl(fd, FIONREAD, 0x920000),
+	// where 0x920000 was exactly collide address, so every iteration reset collide to 0.
+	bool colliding = false;
 #if SYZ_EXECUTOR_USES_SHMEM
 	output_pos = output_data;
 	write_output(0); // Number of executed syscalls (updated later).
 #endif
 	uint64 start = current_time_ms();
 
+retry:
 	uint64* input_pos = (uint64*)input_data;
 
-	if (flag_coverage) {
+	if (flag_coverage && !colliding) {
 		if (!flag_threaded)
 			cover_enable(&threads[0].cov, flag_comparisons, false);
 		if (flag_extra_coverage)
@@ -798,28 +805,40 @@ void execute_one()
 			args[i] = 0;
 		uint64 thread = read_input(&input_pos);
 		uint64 epoch = read_input(&input_pos);
-		thread_t* th = schedule_call(call_index++, call_num, copyout_index,
+		thread_t* th = schedule_call(call_index++, call_num, colliding, copyout_index,
 					     num_args, args, thread, epoch, input_pos);
 
-		// Wait for call completion.
-		uint64 timeout_ms = syscall_timeout_ms + call->attrs.timeout * slowdown_scale;
-		// This is because of printing pre/post call. Ideally we print everything in the main thread
-		// and then remove this (would also avoid intermixed output).
-		if (flag_debug && timeout_ms < 1000)
-			timeout_ms = 1000;
-		if (event_timedwait(&th->done, timeout_ms))
-			handle_completion(th);
-
-		// Check if any of previous calls have completed.
-		for (int i = 0; i < kMaxThreads; i++) {
-			th = &threads[i];
-			if (th->executing && event_isset(&th->done))
+		if (colliding && (call_index % 2) == 0) {
+			// Don't wait for every other call.
+			// We already have results from the previous execution.
+		} else if (flag_threaded) {
+			// Wait for call completion.
+			uint64 timeout_ms = syscall_timeout_ms + call->attrs.timeout * slowdown_scale;
+			// This is because of printing pre/post call. Ideally we print everything in the main thread
+			// and then remove this (would also avoid intermixed output).
+			if (flag_debug && timeout_ms < 1000)
+				timeout_ms = 1000;
+			if (event_timedwait(&th->done, timeout_ms))
 				handle_completion(th);
+
+			// Check if any of previous calls have completed.
+			for (int i = 0; i < kMaxThreads; i++) {
+				th = &threads[i];
+				if (th->executing && event_isset(&th->done))
+					handle_completion(th);
+			}
+		} else {
+			// Execute directly.
+			if (th != &threads[0])
+				fail("using non-main thread in non-thread mode");
+			event_reset(&th->ready);
+			execute_call(th);
+			event_set(&th->done);
+			handle_completion(th);
 		}
 	}
 
-	// NOTE: We don't make use of collide anymore
-	if (running > 0) {
+	if (!colliding && !collide && running > 0) {
 		// Give unfinished syscalls some additional time.
 		last_scheduled = 0;
 		uint64 wait_start = current_time_ms();
@@ -851,18 +870,26 @@ void execute_one()
 	close_fds();
 #endif
 
-	write_extra_output();
-	// Check for new extra coverage in small intervals to avoid situation
-	// that we were killed on timeout before we write any.
-	// Check for extra coverage is very cheap, effectively a memory load.
-	const uint64 kSleepMs = 100;
-	for (uint64 i = 0; i < prog_extra_cover_timeout / kSleepMs; i++) {
-		sleep_ms(kSleepMs);
+	if (!colliding && !collide) {
 		write_extra_output();
+		// Check for new extra coverage in small intervals to avoid situation
+		// that we were killed on timeout before we write any.
+		// Check for extra coverage is very cheap, effectively a memory load.
+		const uint64 kSleepMs = 100;
+		for (uint64 i = 0; i < prog_extra_cover_timeout / kSleepMs; i++) {
+			sleep_ms(kSleepMs);
+			write_extra_output();
+		}
+	}
+
+	if (flag_collide && !flag_fault && !colliding && !collide) {
+		debug("enabling collider\n");
+		collide = colliding = true;
+		goto retry;
 	}
 }
 
-thread_t* schedule_call(int call_index, int call_num, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64* pos)
+thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64* pos)
 {
 	// Find a spare thread to execute the call.
 	int i = 0;
@@ -883,6 +910,7 @@ thread_t* schedule_call(int call_index, int call_num, uint64 copyout_index, uint
 		failmsg("bad thread state in schedule", "ready=%d done=%d executing=%d",
 			event_isset(&th->ready), event_isset(&th->done), th->executing);
 	last_scheduled = th;
+	th->colliding = colliding;
 	th->copyout_pos = pos;
 	th->copyout_index = copyout_index;
 	event_reset(&th->done);
@@ -953,19 +981,21 @@ void handle_completion(thread_t* th)
 			event_isset(&th->ready), event_isset(&th->done), th->executing);
 	if (th->res != (intptr_t)-1)
 		copyout_call_results(th);
-	write_call_output(th, true);
-	write_extra_output();
+	if (!collide && !th->colliding) {
+		write_call_output(th, true);
+		write_extra_output();
+	}
 	th->executing = false;
 	running--;
 	if (running < 0) {
 		// This fires periodically for the past 2 years (see issue #502).
-		fprintf(stderr, "running=%d completed=%d flag_threaded=%d flag_collide=%d current=%d\n",
-			running, completed, flag_threaded, flag_collide, th->id);
+		fprintf(stderr, "running=%d collide=%d completed=%d flag_threaded=%d flag_collide=%d current=%d\n",
+			running, collide, completed, flag_threaded, flag_collide, th->id);
 		for (int i = 0; i < kMaxThreads; i++) {
 			thread_t* th1 = &threads[i];
-			fprintf(stderr, "th #%2d: created=%d executing=%d"
+			fprintf(stderr, "th #%2d: created=%d executing=%d colliding=%d"
 					" ready=%d done=%d call_index=%d res=%lld reserrno=%d\n",
-				i, th1->created, th1->executing,
+				i, th1->created, th1->executing, th1->colliding,
 				event_isset(&th1->ready), event_isset(&th1->done),
 				th1->call_index, (uint64)th1->res, th1->reserrno);
 		}
@@ -1145,6 +1175,8 @@ void execute_call(thread_t* th)
 	int fail_fd = -1;
 	th->soft_fail_state = false;
 	if (flag_fault && th->call_index == flag_fault_call) {
+		if (collide)
+			fail("both collide and fault injection are enabled");
 		fail_fd = inject_fault(flag_fault_nth);
 		th->soft_fail_state = true;
 	}
