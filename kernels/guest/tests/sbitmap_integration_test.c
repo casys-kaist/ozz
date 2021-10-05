@@ -24,7 +24,7 @@
 unsigned long breakpoint_addr;
 unsigned long get_breakpoint_addr(void) {
 	char buf[128];
-	FILE *fp = popen("grep 'pso_test_breakpoint' /proc/kallsyms | head -n 1 | cut -d' ' -f1", "r");
+	FILE *fp = popen("grep 'kssb_test_breakpoint' /proc/kallsyms | head -n 1 | cut -d' ' -f1", "r");
 	fgets(buf, sizeof(buf), fp);
 	pclose(fp);
 	return strtoul(buf, NULL, 16);
