@@ -61,6 +61,9 @@ NORETURN void doexit(int status)
     (GOOS_freebsd || GOOS_darwin || GOOS_openbsd || GOOS_netbsd) && SYZ_NET_INJECTION
 static unsigned long long procid;
 #endif
+#if SYZ_EXECUTOR
+static __thread unsigned int threadid = -1;
+#endif
 
 #if !GOOS_fuchsia && !GOOS_windows
 #if SYZ_EXECUTOR || SYZ_HANDLE_SEGV

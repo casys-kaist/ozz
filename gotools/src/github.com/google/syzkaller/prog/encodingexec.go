@@ -29,6 +29,7 @@ const (
 	execInstrEOF = ^uint64(iota)
 	execInstrCopyin
 	execInstrCopyout
+	execInstrEpoch
 )
 
 const (
@@ -69,16 +70,27 @@ func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
 		buf:    buffer,
 		eof:    false,
 		args:   make(map[Arg]argInfo),
+		epoch:  0,
 	}
 	for _, c := range p.Calls {
+		w.writeEpoch(c)
 		w.csumMap, w.csumUses = calcChecksumsCall(c)
 		w.serializeCall(c)
+		w.writeEpoch(c)
 	}
 	w.write(execInstrEOF)
 	if w.eof || w.copyoutSeq > execMaxCommands {
 		return 0, ErrExecBufferTooSmall
 	}
 	return len(buffer) - len(w.buf), nil
+}
+
+func (w *execContext) writeEpoch(c *Call) {
+	if w.epoch == c.Epoch {
+		return
+	}
+	w.write(execInstrEpoch)
+	w.epoch = c.Epoch
 }
 
 func (w *execContext) serializeCall(c *Call) {
@@ -118,6 +130,8 @@ type execContext struct {
 	// Per-call state cached here to not pass it through all functions.
 	csumMap  map[Arg]CsumInfo
 	csumUses map[Arg]struct{}
+	// Current epoch
+	epoch uint64
 }
 
 type argInfo struct {
