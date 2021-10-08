@@ -656,26 +656,38 @@ void reply_execute(int status)
 
 void start_epoch()
 {
+	uint64_t timeout = 0;
 	// Signal threads that are ready to execute. Each thread will
 	// reset th->ready after th->start is set.
 	debug("start epoch %d\n", epoch);
 	for (int i = 0; i < kMaxThreads; i++) {
 		thread_t* th = &threads[i];
-		if (th->created && event_isset(&th->ready))
+		if (th->created && event_isset(&th->ready)) {
 			event_set(&th->start);
+			const call_t* call = &syscalls[th->call_num];
+			if (timeout < call->attrs.timeout)
+				timeout = call->attrs.timeout;
+		}
 	}
+
+	uint64 timeout_ms = syscall_timeout_ms + timeout * slowdown_scale;
+	if (flag_debug && timeout_ms < 1000)
+		timeout_ms = 1000;
 
 	// handle completion for all threads if any
 	for (int i = 0; i < kMaxThreads; i++) {
 		thread_t* th = &threads[i];
 		if (!th->created)
 			continue;
-		// TODO: call->attrs.timeout
-		uint64 timeout_ms = syscall_timeout_ms + 10/* call->attrs.timeout */ * slowdown_scale;
-		if (flag_debug && timeout_ms < 1000)
-			timeout_ms = 1000;
-		if (th->executing && event_timedwait(&th->done, timeout_ms))
-			handle_completion(th);
+		if (th->executing) {
+			if (event_timedwait(&th->done, timeout_ms))
+				handle_completion(th);
+			else
+				// since we waited for this syscall
+				// for a some amount of time, wd don't
+				// need to wait later syscalls long.
+				timeout_ms = 1;
+		}
 	}
 	epoch++;
 }
@@ -831,7 +843,7 @@ retry:
 		uint64 thread = read_input(&input_pos);
 		uint64 epoch = read_input(&input_pos);
 		schedule_call(call_index++, call_num, colliding, copyout_index,
-					     num_args, args, thread, epoch, input_pos);
+			      num_args, args, thread, epoch, input_pos);
 	}
 
 	if (!colliding && !collide && running > 0) {
@@ -893,6 +905,7 @@ thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 cop
 		thread_create(th, thread);
 	if (event_isset(&th->done) && th->executing)
 		handle_completion(th);
+	// TODO: calls can be blocked
 	if (event_isset(&th->ready) || !event_isset(&th->done) || th->executing)
 		failmsg("bad thread state in schedule", "ready=%d done=%d executing=%d",
 			event_isset(&th->ready), event_isset(&th->done), th->executing);
