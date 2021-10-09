@@ -571,6 +571,8 @@ static void execute_one(void);
 static void reply_handshake();
 #endif
 
+// #define __DEBUG_THROUGHPUT
+
 static void loop(void)
 {
 #if SYZ_HAVE_SETUP_LOOP
@@ -636,6 +638,9 @@ static void loop(void)
 #if SYZ_HAVE_CLOSE_FDS && !SYZ_THREADED
 			close_fds();
 #endif
+#ifdef __DEBUG_THROUGHPUT
+			debug("      do_exit: %llx\n", current_time_ms());
+#endif
 			doexit(0);
 #endif
 		}
@@ -694,6 +699,9 @@ static void loop(void)
 			kill_and_wait(pid, &status);
 			break;
 		}
+#ifdef __DEBUG_THROUGHPUT
+		debug("after waitloop: %llx\n", current_time_ms());
+#endif
 #if SYZ_EXECUTOR
 		if (WEXITSTATUS(status) == kFailStatus) {
 			errno = 0;

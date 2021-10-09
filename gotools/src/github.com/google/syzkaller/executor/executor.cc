@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <errno.h>
 #include <limits.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stddef.h>
@@ -72,6 +73,9 @@ const int kInPipeFd = kMaxFd - 1; // remapped from stdin
 const int kOutPipeFd = kMaxFd - 2; // remapped from stdout
 const int kCoverFd = kOutPipeFd - (kMaxThreads * kMaxFallbackThreads);
 const int kMaxArgs = 9;
+const int kMaxCPU = 8;
+const int kCPUMask0 = 1 << 0;
+const int kCPUMaskAll = 0xff;
 const int kCoverSize = 256 << 10;
 const int kFailStatus = 67;
 
@@ -373,6 +377,7 @@ static void copyin(char* addr, uint64 val, uint64 size, uint64 bf, uint64 bf_off
 static bool copyout(char* addr, uint64 size, uint64* res);
 static void setup_control_pipes();
 static void setup_features(char** enable, int n);
+static void setup_affinity_mask(int mask);
 
 #include "syscalls.h"
 
@@ -431,6 +436,7 @@ int main(int argc, char** argv)
 
 	os_init(argc, argv, (char*)SYZ_DATA_OFFSET, SYZ_NUM_PAGES * SYZ_PAGE_SIZE);
 	current_thread = get_thread(0);
+	setup_affinity_mask(kCPUMask0);
 
 #if SYZ_EXECUTOR_USES_SHMEM
 	if (mmap(&input_data[0], kMaxInput, PROT_READ, MAP_PRIVATE | MAP_FIXED, kInFd, 0) != &input_data[0])
@@ -1226,6 +1232,7 @@ void* worker_thread(void* arg)
 	thread_t* th = (thread_t*)arg;
 	threadid = th->id;
 	current_thread = th;
+	setup_affinity_mask(kCPUMaskAll & ~kCPUMask0);
 	if (flag_coverage)
 		cover_enable(&th->cov, flag_comparisons, false);
 	for (;;) {
@@ -1637,6 +1644,17 @@ void setup_features(char** enable, int n)
 		if (!found)
 			failmsg("setup features: unknown feature", "feature=%s", enable[i]);
 	}
+}
+
+void setup_affinity_mask(int mask)
+{
+	cpu_set_t set;
+	CPU_ZERO(&set);
+	for (int i = 0; i < kMaxCPU; i++)
+		if (mask & (1 << i))
+			CPU_SET(i, &set);
+	if (sched_setaffinity(0, sizeof(set), &set))
+		fail("sched_setaffinity failed");
 }
 
 void failmsg(const char* err, const char* msg, ...)
