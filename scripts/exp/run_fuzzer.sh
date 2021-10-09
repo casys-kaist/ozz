@@ -31,6 +31,7 @@ fi
 OPTS="-config $CONFIG $_DEBUG"
 
 echo "Run syzkaller"
+echo "    kernel : (default) $(readlink -f $KERNEL_X86_64)"
 echo "    config : $CONFIG"
 echo "    debug  : $DEBUG"
 echo "    options: $OPTS"
