@@ -218,9 +218,15 @@ struct call_t {
 	syscall_t call;
 };
 
+enum cov_type {
+	code_coverage = 0,
+	read_from_coverage,
+};
+
 struct cover_t {
 	int fd;
 	uint32 size;
+	enum cov_type type;
 	char* data;
 	char* data_end;
 	// Note: On everything but darwin the first value in data is the count of
@@ -257,6 +263,7 @@ struct thread_t {
 	uint32 reserrno;
 	bool fault_injected;
 	cover_t cov;
+	cover_t rfcov;
 	bool soft_fail_state;
 };
 
