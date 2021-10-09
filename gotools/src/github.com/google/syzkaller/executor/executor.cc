@@ -44,6 +44,12 @@
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
+enum cov_type {
+	code_coverage = 0,
+	read_from_coverage,
+	nr_cov_type,
+};
+
 // uint64 is impossible to printf without using the clumsy and verbose "%" PRId64.
 // So we define and use uint64. Note: pkg/csource does s/uint64/uint64/.
 // Also define uint32/16/8 for consistency.
@@ -71,7 +77,7 @@ const int kMaxThreads = 16;
 const int kMaxFallbackThreads = 3;
 const int kInPipeFd = kMaxFd - 1; // remapped from stdin
 const int kOutPipeFd = kMaxFd - 2; // remapped from stdout
-const int kCoverFd = kOutPipeFd - (kMaxThreads * kMaxFallbackThreads);
+const int kCoverFd = kOutPipeFd - (kMaxThreads * kMaxFallbackThreads) * nr_cov_type;
 const int kMaxArgs = 9;
 const int kMaxCPU = 8;
 const int kCPUMask0 = 1 << 0;
@@ -216,11 +222,6 @@ struct call_t {
 	int sys_nr;
 	call_attrs_t attrs;
 	syscall_t call;
-};
-
-enum cov_type {
-	code_coverage = 0,
-	read_from_coverage,
 };
 
 struct cover_t {
@@ -480,9 +481,9 @@ int main(int argc, char** argv)
 			thread_set_t* set = &threads[i];
 			for (int j = 0; j < kMaxFallbackThreads; j++) {
 				thread_t* th = &set->set[j];
-				th->cov.fd = kCoverFd + (i * kMaxFallbackThreads) + j;
-				cover_open(&th->cov, false);
-				cover_protect(&th->cov);
+				int fd = kCoverFd + ((i * kMaxFallbackThreads) + j) * nr_cov_type;
+				cover_init(&th->cov, fd, code_coverage);
+				cover_init(&th->rfcov, fd + 1, read_from_coverage);
 			}
 		}
 		cover_open(&extra_cov, true);

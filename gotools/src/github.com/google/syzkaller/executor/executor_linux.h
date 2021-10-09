@@ -206,6 +206,15 @@ static void cover_reset(cover_t* cov)
 	}
 }
 
+static void cover_init(cover_t* cov, int fd, enum cov_type type)
+{
+	debug("cover init: fd=%d, type=%d\n", fd, type);
+	cov->fd = fd;
+	cov->type = type;
+	cover_open(cov, false);
+	cover_protect(cov);
+}
+
 static void cover_collect(cover_t* cov)
 {
 	if (is_kernel_64_bit)
