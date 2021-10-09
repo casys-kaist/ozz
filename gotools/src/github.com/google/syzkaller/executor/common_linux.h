@@ -3507,11 +3507,14 @@ static void setup_cgroups_loop()
 	if (mkdir(cgroupdir, 0777)) {
 		debug("mkdir(%s) failed: %d\n", cgroupdir, errno);
 	}
-	// Restrict number of pids per test process to prevent fork bombs.
-	// We have up to 16 threads + main process + loop.
-	// 32 pids should be enough for everyone.
+	// Syzkaller comment:
+	//   Restrict number of pids per test process to prevent fork bombs.
+	//   We have up to 16 threads + main process + loop.
+	//   32 pids should be enough for everyone.
+	// And we create more threads when a threads is blocked, so let's
+	// double the number of threads
 	snprintf(file, sizeof(file), "%s/pids.max", cgroupdir);
-	write_file(file, "32");
+	write_file(file, "64");
 	// Restrict memory consumption.
 	// We have some syscalls that inherently consume lots of memory,
 	// e.g. mounting some filesystem images requires at least 128MB
