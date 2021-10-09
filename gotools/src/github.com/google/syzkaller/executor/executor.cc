@@ -67,9 +67,10 @@ typedef unsigned char uint8;
 // Some common_OS.h files know about this constant for RLIMIT_NOFILE.
 const int kMaxFd = 250;
 const int kMaxThreads = 16;
+const int kMaxFallbackThreads = 3;
 const int kInPipeFd = kMaxFd - 1; // remapped from stdin
 const int kOutPipeFd = kMaxFd - 2; // remapped from stdout
-const int kCoverFd = kOutPipeFd - kMaxThreads;
+const int kCoverFd = kOutPipeFd - (kMaxThreads * kMaxFallbackThreads);
 const int kMaxArgs = 9;
 const int kCoverSize = 256 << 10;
 const int kFailStatus = 67;
@@ -255,7 +256,12 @@ struct thread_t {
 	bool soft_fail_state;
 };
 
-static thread_t threads[kMaxThreads];
+struct thread_set_t {
+	struct thread_t set[kMaxFallbackThreads];
+	int blocked;
+};
+
+static thread_set_t threads[kMaxThreads];
 static thread_t* last_scheduled;
 // Threads use this variable to access information about themselves.
 static __thread struct thread_t* current_thread;
@@ -348,8 +354,10 @@ struct feature_t {
 	void (*setup)();
 };
 
+static thread_t* get_thread(int thread);
 static thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64* pos);
 static void handle_completion(thread_t* th);
+static thread_t* unhand_worker_thread(thread_t* th);
 static void copyout_call_results(thread_t* th);
 static void write_call_output(thread_t* th, bool finished);
 static void write_extra_output();
@@ -422,7 +430,7 @@ int main(int argc, char** argv)
 	start_time_ms = current_time_ms();
 
 	os_init(argc, argv, (char*)SYZ_DATA_OFFSET, SYZ_NUM_PAGES * SYZ_PAGE_SIZE);
-	current_thread = &threads[0];
+	current_thread = get_thread(0);
 
 #if SYZ_EXECUTOR_USES_SHMEM
 	if (mmap(&input_data[0], kMaxInput, PROT_READ, MAP_PRIVATE | MAP_FIXED, kInFd, 0) != &input_data[0])
@@ -456,9 +464,13 @@ int main(int argc, char** argv)
 #endif
 	if (flag_coverage) {
 		for (int i = 0; i < kMaxThreads; i++) {
-			threads[i].cov.fd = kCoverFd + i;
-			cover_open(&threads[i].cov, false);
-			cover_protect(&threads[i].cov);
+			thread_set_t* set = &threads[i];
+			for (int j = 0; j < kMaxFallbackThreads; j++) {
+				thread_t* th = &set->set[j];
+				th->cov.fd = kCoverFd + (i * kMaxFallbackThreads) + j;
+				cover_open(&th->cov, false);
+				cover_protect(&th->cov);
+			}
 		}
 		cover_open(&extra_cov, true);
 		cover_protect(&extra_cov);
@@ -654,6 +666,8 @@ void reply_execute(int status)
 		fail("control pipe write failed");
 }
 
+// start_epoch() assumes schedule_call() gracefully handles a blocking
+// thread, and the forefront thread can execute an assigned call.
 void start_epoch()
 {
 	uint64_t timeout = 0;
@@ -661,12 +675,15 @@ void start_epoch()
 	// reset th->ready after th->start is set.
 	debug("start epoch %d\n", epoch);
 	for (int i = 0; i < kMaxThreads; i++) {
-		thread_t* th = &threads[i];
+		thread_t* th = get_thread(i);
 		if (th->created && event_isset(&th->ready)) {
-			event_set(&th->start);
+			if (event_isset(&th->start) || event_isset(&th->done) || !th->executing)
+				failmsg("bad thread state in start_epoch", "start=%d done=%d executing=%d",
+					event_isset(&th->start), event_isset(&th->done), th->executing);
 			const call_t* call = &syscalls[th->call_num];
 			if (timeout < call->attrs.timeout)
 				timeout = call->attrs.timeout;
+			event_set(&th->start);
 		}
 	}
 
@@ -676,7 +693,7 @@ void start_epoch()
 
 	// handle completion for all threads if any
 	for (int i = 0; i < kMaxThreads; i++) {
-		thread_t* th = &threads[i];
+		thread_t* th = get_thread(i);
 		if (!th->created)
 			continue;
 		if (th->executing) {
@@ -684,7 +701,7 @@ void start_epoch()
 				handle_completion(th);
 			else
 				// since we waited for this syscall
-				// for a some amount of time, wd don't
+				// for a some amount of time, we don't
 				// need to wait later syscalls long.
 				timeout_ms = 1;
 		}
@@ -717,7 +734,9 @@ retry:
 
 	if (flag_coverage && !colliding) {
 		if (!flag_threaded)
-			cover_enable(&threads[0].cov, flag_comparisons, false);
+			// XXX: In this project, flag_threaded is
+			// always true, so we can safely remove this if block
+			cover_enable(&get_thread(0)->cov, flag_comparisons, false);
 		if (flag_extra_coverage)
 			cover_reset(&extra_cov);
 	}
@@ -856,19 +875,27 @@ retry:
 		while (running > 0 && current_time_ms() <= wait_end) {
 			sleep_ms(1 * slowdown_scale);
 			for (int i = 0; i < kMaxThreads; i++) {
-				thread_t* th = &threads[i];
-				if (th->executing && event_isset(&th->done))
-					handle_completion(th);
+				thread_set_t* set = &threads[i];
+				for (int j = 0; j < kMaxFallbackThreads; j++) {
+					thread_t* th = &set->set[j];
+					if (!th->created)
+						continue;
+					if (th->executing && event_isset(&th->done))
+						handle_completion(th);
+				}
 			}
 		}
 		// Write output coverage for unfinished calls.
 		if (running > 0) {
 			for (int i = 0; i < kMaxThreads; i++) {
-				thread_t* th = &threads[i];
-				if (th->executing) {
-					if (flag_coverage)
-						cover_collect(&th->cov);
-					write_call_output(th, false);
+				thread_set_t* set = &threads[i];
+				for (int j = 0; j < kMaxFallbackThreads; j++) {
+					thread_t* th = &set->set[j];
+					if (th->executing) {
+						if (flag_coverage)
+							cover_collect(&th->cov);
+						write_call_output(th, false);
+					}
 				}
 			}
 		}
@@ -897,15 +924,37 @@ retry:
 	}
 }
 
+// NOTE: get_thread() should be called in the main thread
+// get_thread() does not care that the forefront thread is blocked or
+// not.
+thread_t* get_thread(int thread)
+{
+	thread_set_t* set = &threads[thread];
+	int idx = set->blocked;
+	if (idx >= kMaxFallbackThreads)
+		exitf("out of threads (id #%d)\n", thread);
+	return &set->set[idx];
+}
+
 thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64* pos)
 {
 	debug("schedule a call to thread %llu@%llu\n", thread, epoch);
-	thread_t* th = &threads[thread];
+	thread_t* th = get_thread(thread);
 	if (!th->created)
 		thread_create(th, thread);
-	if (event_isset(&th->done) && th->executing)
-		handle_completion(th);
-	// TODO: calls can be blocked
+	if (th->executing) {
+		if (event_isset(&th->done))
+			// The worker thread notify the main thread
+			// that it has been finished. The main thread
+			// can handle the completion.
+			handle_completion(th);
+		else
+			// The worker thread is either blocked or
+			// still executing the call. Drop the worker
+			// thread so remaining calls can be executed
+			// normally.
+			th = unhand_worker_thread(th);
+	}
 	if (event_isset(&th->ready) || !event_isset(&th->done) || th->executing)
 		failmsg("bad thread state in schedule", "ready=%d done=%d executing=%d",
 			event_isset(&th->ready), event_isset(&th->done), th->executing);
@@ -977,6 +1026,9 @@ void write_coverage_signal(cover_t* cov, uint32* signal_count_pos, uint32* cover
 // NOTE: handle_completion() should be called in the main thread
 void handle_completion(thread_t* th)
 {
+#if 0
+	debug("handle_completion: th #%2d\n", th->id);
+#endif
 	if (event_isset(&th->ready) || !event_isset(&th->done) || !th->executing)
 		failmsg("bad thread state in completion", "ready=%d done=%d executing=%d",
 			event_isset(&th->ready), event_isset(&th->done), th->executing);
@@ -993,15 +1045,38 @@ void handle_completion(thread_t* th)
 		fprintf(stderr, "running=%d collide=%d completed=%d flag_threaded=%d flag_collide=%d current=%d\n",
 			running, collide, completed, flag_threaded, flag_collide, th->id);
 		for (int i = 0; i < kMaxThreads; i++) {
-			thread_t* th1 = &threads[i];
-			fprintf(stderr, "th #%2d: created=%d executing=%d colliding=%d"
-					" ready=%d done=%d call_index=%d res=%lld reserrno=%d\n",
-				i, th1->created, th1->executing, th1->colliding,
-				event_isset(&th1->ready), event_isset(&th1->done),
-				th1->call_index, (uint64)th1->res, th1->reserrno);
+			thread_set_t* set = &threads[i];
+			for (int j = 0; j < kMaxFallbackThreads; j++) {
+				thread_t* th1 = &set->set[j];
+				fprintf(stderr, "th #%2d: created=%d executing=%d colliding=%d"
+						" ready=%d done=%d call_index=%d res=%lld reserrno=%d\n",
+					i, th1->created, th1->executing, th1->colliding,
+					event_isset(&th1->ready), event_isset(&th1->done),
+					th1->call_index, (uint64)th1->res, th1->reserrno);
+			}
 		}
 		exitf("negative running");
 	}
+}
+
+// NOTE: unhand_worker_thread() should be called in the main thread
+thread_t* unhand_worker_thread(thread_t* th)
+{
+	if (!event_isset(&th->done)) {
+		// The main thread needs to schedule a new call to th,
+		// while th is still executing a previous call. Assume
+		// that th is blocked, and find the next fallback
+		// thread to replace the previous one.
+		int idx, id = th->id;
+		thread_set_t* set = &threads[id];
+		idx = ++set->blocked;
+		debug("unhand the worker thread %d, blocked=%d\n", id, set->blocked);
+		th = &set->set[idx];
+		if (th->created)
+			failmsg("bad thread state in get_thread", "created=%d", th->created);
+		thread_create(th, id);
+	}
+	return th;
 }
 
 void copyout_call_results(thread_t* th)
