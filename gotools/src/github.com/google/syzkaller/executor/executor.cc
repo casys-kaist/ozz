@@ -1253,8 +1253,10 @@ void* worker_thread(void* arg)
 	threadid = th->id;
 	current_thread = th;
 	setup_affinity_mask(kCPUMaskAll & ~kCPUMask0);
-	if (flag_coverage)
+	if (flag_coverage) {
 		cover_enable(&th->cov, flag_comparisons, false);
+		cover_enable(&th->rfcov, false, false);
+	}
 	for (;;) {
 		event_wait(&th->ready);
 		// The main thread will notify th to start the
