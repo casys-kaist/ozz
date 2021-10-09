@@ -278,7 +278,11 @@ static thread_t* last_scheduled;
 // Threads use this variable to access information about themselves.
 static __thread struct thread_t* current_thread;
 
+// #define __EXTRA_RFCOV // TODO: Do we need to make use of extra rfcov?
 static cover_t extra_cov;
+#ifdef __EXTRA_RFCOV
+static cover_t extra_rfcov;
+#endif
 
 struct res_t {
 	bool executed;
@@ -488,9 +492,17 @@ int main(int argc, char** argv)
 		}
 		cover_open(&extra_cov, true);
 		cover_protect(&extra_cov);
+#ifdef __EXTRA_RFCOV
+		extra_rfcov.type = read_from_coverage
+		    cover_open(&extra_rfcov, true);
+		cover_protect(&extra_rfcov);
+#endif
 		if (flag_extra_coverage) {
 			// Don't enable comps because we don't use them in the fuzzer yet.
 			cover_enable(&extra_cov, false, true);
+#ifdef __EXTRA_RFCOV
+			cover_enable(&extra_rfcov, false, false);
+#endif
 		}
 		char sep = '/';
 #if GOOS_windows
