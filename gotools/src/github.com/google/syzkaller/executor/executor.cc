@@ -22,6 +22,8 @@
 
 #include "defs.h"
 
+#include "hypercall.h"
+
 #if defined(__GNUC__)
 #define SYSCALLAPI
 #define NORETURN __attribute__((noreturn))
@@ -43,6 +45,12 @@
 #endif
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+
+enum cov_type {
+	code_coverage = 0,
+	read_from_coverage,
+	nr_cov_type,
+};
 
 // uint64 is impossible to printf without using the clumsy and verbose "%" PRId64.
 // So we define and use uint64. Note: pkg/csource does s/uint64/uint64/.
@@ -67,11 +75,11 @@ typedef unsigned char uint8;
 // Note: zircon max fd is 256.
 // Some common_OS.h files know about this constant for RLIMIT_NOFILE.
 const int kMaxFd = 250;
-const int kMaxThreads = 16;
+const int kMaxThreads = 4;
 const int kMaxFallbackThreads = 3;
 const int kInPipeFd = kMaxFd - 1; // remapped from stdin
 const int kOutPipeFd = kMaxFd - 2; // remapped from stdout
-const int kCoverFd = kOutPipeFd - (kMaxThreads * kMaxFallbackThreads);
+const int kCoverFd = kOutPipeFd - (kMaxThreads * kMaxFallbackThreads) * nr_cov_type;
 const int kMaxArgs = 9;
 const int kMaxCPU = 8;
 const int kCPUMask0 = 1 << 0;
@@ -221,6 +229,7 @@ struct call_t {
 struct cover_t {
 	int fd;
 	uint32 size;
+	enum cov_type type;
 	char* data;
 	char* data_end;
 	// Note: On everything but darwin the first value in data is the count of
@@ -257,6 +266,7 @@ struct thread_t {
 	uint32 reserrno;
 	bool fault_injected;
 	cover_t cov;
+	cover_t rfcov;
 	bool soft_fail_state;
 };
 
@@ -270,7 +280,11 @@ static thread_t* last_scheduled;
 // Threads use this variable to access information about themselves.
 static __thread struct thread_t* current_thread;
 
+// #define __EXTRA_RFCOV // TODO: Do we need to make use of extra rfcov?
 static cover_t extra_cov;
+#ifdef __EXTRA_RFCOV
+static cover_t extra_rfcov;
+#endif
 
 struct res_t {
 	bool executed;
@@ -366,6 +380,8 @@ static void copyout_call_results(thread_t* th);
 static void write_call_output(thread_t* th, bool finished);
 static void write_extra_output();
 static void execute_call(thread_t* th);
+static void coverage_pre_call(thread_t* th);
+static void coverage_post_call(thread_t* th);
 static void thread_create(thread_t* th, int id);
 static void* worker_thread(void* arg);
 static uint64 read_input(uint64** input_posp, bool peek = false);
@@ -473,16 +489,24 @@ int main(int argc, char** argv)
 			thread_set_t* set = &threads[i];
 			for (int j = 0; j < kMaxFallbackThreads; j++) {
 				thread_t* th = &set->set[j];
-				th->cov.fd = kCoverFd + (i * kMaxFallbackThreads) + j;
-				cover_open(&th->cov, false);
-				cover_protect(&th->cov);
+				int fd = kCoverFd + ((i * kMaxFallbackThreads) + j) * nr_cov_type;
+				cover_init(&th->cov, fd, code_coverage);
+				cover_init(&th->rfcov, fd + 1, read_from_coverage);
 			}
 		}
 		cover_open(&extra_cov, true);
 		cover_protect(&extra_cov);
+#ifdef __EXTRA_RFCOV
+		extra_rfcov.type = read_from_coverage
+		    cover_open(&extra_rfcov, true);
+		cover_protect(&extra_rfcov);
+#endif
 		if (flag_extra_coverage) {
 			// Don't enable comps because we don't use them in the fuzzer yet.
 			cover_enable(&extra_cov, false, true);
+#ifdef __EXTRA_RFCOV
+			cover_enable(&extra_rfcov, false, false);
+#endif
 		}
 		char sep = '/';
 #if GOOS_windows
@@ -725,6 +749,7 @@ void wait_epoch(thread_t* th)
 // execute_one executes program stored in input_data.
 void execute_one()
 {
+	hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
 	// Duplicate global collide variable on stack.
 	// Fuzzer once come up with ioctl(fd, FIONREAD, 0x920000),
 	// where 0x920000 was exactly collide address, so every iteration reset collide to 0.
@@ -928,6 +953,8 @@ retry:
 		collide = colliding = true;
 		goto retry;
 	}
+
+	hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
 }
 
 // NOTE: get_thread() should be called in the main thread
@@ -1233,8 +1260,10 @@ void* worker_thread(void* arg)
 	threadid = th->id;
 	current_thread = th;
 	setup_affinity_mask(kCPUMaskAll & ~kCPUMask0);
-	if (flag_coverage)
+	if (flag_coverage) {
 		cover_enable(&th->cov, flag_comparisons, false);
+		cover_enable(&th->rfcov, false, false);
+	}
 	for (;;) {
 		event_wait(&th->ready);
 		// The main thread will notify th to start the
@@ -1269,8 +1298,8 @@ void execute_call(thread_t* th)
 		th->soft_fail_state = true;
 	}
 
-	if (flag_coverage)
-		cover_reset(&th->cov);
+	coverage_pre_call(th);
+
 	// For pseudo-syscalls and user-space functions NONFAILING can abort before assigning to th->res.
 	// Arrange for res = -1 and errno = EFAULT result for such case.
 	th->res = -1;
@@ -1283,24 +1312,40 @@ void execute_call(thread_t* th)
 	// Reset the flag before the first possible fail().
 	th->soft_fail_state = false;
 
-	if (flag_coverage) {
-		cover_collect(&th->cov);
-		if (th->cov.size >= kCoverSize)
-			failmsg("too much cover", "thr=%d, cov=%u", th->id, th->cov.size);
-	}
+	coverage_post_call(th);
+
 	th->fault_injected = false;
 
-	if (flag_fault && th->call_index == flag_fault_call) {
+	if (flag_fault && th->call_index == flag_fault_call)
 		th->fault_injected = fault_injected(fail_fd);
-	}
 
 	debug("call #%d@%d [%llums] <- %s=0x%llx errno=%d ",
 	      th->id, th->epoch, current_time_ms() - start_time_ms, call->name, (uint64)th->res, th->reserrno);
 	if (flag_coverage)
-		debug_noprefix("cover=%u ", th->cov.size);
+		debug_noprefix("cover=%u rfcov=%u", th->cov.size, th->rfcov.size);
 	if (flag_fault && th->call_index == flag_fault_call)
 		debug_noprefix("fault=%d ", th->fault_injected);
 	debug_noprefix("\n");
+}
+
+void coverage_pre_call(thread_t* th)
+{
+	if (!flag_coverage)
+		return;
+	cover_reset(&th->cov);
+	cover_reset(&th->rfcov);
+}
+
+void coverage_post_call(thread_t* th)
+{
+	if (!flag_coverage)
+		return;
+	cover_collect(&th->cov);
+	if (th->cov.size >= kCoverSize)
+		failmsg("too much cover", "thr=%d, cov=%u", th->id, th->cov.size);
+	cover_collect(&th->rfcov);
+	if (th->cov.size >= kCoverSize)
+		failmsg("too much rf cover", "thr=%d, cov=%u", th->id, th->rfcov.size);
 }
 
 #if SYZ_EXECUTOR_USES_SHMEM
