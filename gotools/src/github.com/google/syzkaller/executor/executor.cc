@@ -378,6 +378,8 @@ static void copyout_call_results(thread_t* th);
 static void write_call_output(thread_t* th, bool finished);
 static void write_extra_output();
 static void execute_call(thread_t* th);
+static void coverage_pre_call(thread_t* th);
+static void coverage_post_call(thread_t* th);
 static void thread_create(thread_t* th, int id);
 static void* worker_thread(void* arg);
 static uint64 read_input(uint64** input_posp, bool peek = false);
@@ -1291,8 +1293,8 @@ void execute_call(thread_t* th)
 		th->soft_fail_state = true;
 	}
 
-	if (flag_coverage)
-		cover_reset(&th->cov);
+	coverage_pre_call(th);
+
 	// For pseudo-syscalls and user-space functions NONFAILING can abort before assigning to th->res.
 	// Arrange for res = -1 and errno = EFAULT result for such case.
 	th->res = -1;
@@ -1305,24 +1307,40 @@ void execute_call(thread_t* th)
 	// Reset the flag before the first possible fail().
 	th->soft_fail_state = false;
 
-	if (flag_coverage) {
-		cover_collect(&th->cov);
-		if (th->cov.size >= kCoverSize)
-			failmsg("too much cover", "thr=%d, cov=%u", th->id, th->cov.size);
-	}
+	coverage_post_call(th);
+
 	th->fault_injected = false;
 
-	if (flag_fault && th->call_index == flag_fault_call) {
+	if (flag_fault && th->call_index == flag_fault_call)
 		th->fault_injected = fault_injected(fail_fd);
-	}
 
 	debug("call #%d@%d [%llums] <- %s=0x%llx errno=%d ",
 	      th->id, th->epoch, current_time_ms() - start_time_ms, call->name, (uint64)th->res, th->reserrno);
 	if (flag_coverage)
-		debug_noprefix("cover=%u ", th->cov.size);
+		debug_noprefix("cover=%u rfcov=%u", th->cov.size, th->rfcov.size);
 	if (flag_fault && th->call_index == flag_fault_call)
 		debug_noprefix("fault=%d ", th->fault_injected);
 	debug_noprefix("\n");
+}
+
+void coverage_pre_call(thread_t* th)
+{
+	if (!flag_coverage)
+		return;
+	cover_reset(&th->cov);
+	cover_reset(&th->rfcov);
+}
+
+void coverage_post_call(thread_t* th)
+{
+	if (!flag_coverage)
+		return;
+	cover_collect(&th->cov);
+	if (th->cov.size >= kCoverSize)
+		failmsg("too much cover", "thr=%d, cov=%u", th->id, th->cov.size);
+	cover_collect(&th->rfcov);
+	if (th->cov.size >= kCoverSize)
+		failmsg("too much rf cover", "thr=%d, cov=%u", th->id, th->rfcov.size);
 }
 
 #if SYZ_EXECUTOR_USES_SHMEM

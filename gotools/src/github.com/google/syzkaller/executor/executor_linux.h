@@ -175,7 +175,7 @@ static void cover_kmemcov_enable(cover_t* cov, bool collect_comps, bool extra)
 		// don't plan to use it.
 		failmsg("wrong arguments in cover_kmemcov_enable", "collect_comps=%d, extra=%d", collect_comps, extra);
 	if (ioctl(cov->fd, KMEMCOV_ENABLE, 0))
-		exitf("mem cover enable write trace failed");
+		exitf("rfcover enable write trace failed");
 }
 
 static void cover_enable(cover_t* cov, bool collect_comps, bool extra)
