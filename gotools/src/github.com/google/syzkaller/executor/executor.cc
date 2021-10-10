@@ -22,6 +22,8 @@
 
 #include "defs.h"
 
+#include "hypercall.h"
+
 #if defined(__GNUC__)
 #define SYSCALLAPI
 #define NORETURN __attribute__((noreturn))
@@ -747,6 +749,7 @@ void wait_epoch(thread_t* th)
 // execute_one executes program stored in input_data.
 void execute_one()
 {
+	hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
 	// Duplicate global collide variable on stack.
 	// Fuzzer once come up with ioctl(fd, FIONREAD, 0x920000),
 	// where 0x920000 was exactly collide address, so every iteration reset collide to 0.
@@ -950,6 +953,8 @@ retry:
 		collide = colliding = true;
 		goto retry;
 	}
+
+	hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
 }
 
 // NOTE: get_thread() should be called in the main thread
