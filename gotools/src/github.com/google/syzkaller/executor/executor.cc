@@ -638,7 +638,9 @@ void receive_execute()
 	flag_collect_cover = req.exec_flags & (1 << 0);
 	flag_dedup_cover = req.exec_flags & (1 << 1);
 	flag_fault = req.exec_flags & (1 << 2);
-	flag_comparisons = req.exec_flags & (1 << 3);
+	// flag_comparisions might be useful but we don't use it at
+	// this point.
+	flag_comparisons = false;
 	// NOTE: We always enable flag_threaded
 	flag_threaded = true;
 	// NOTE: We don't make use of flag_collide anymore
