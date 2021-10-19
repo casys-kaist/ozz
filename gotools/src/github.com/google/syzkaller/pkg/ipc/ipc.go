@@ -91,9 +91,15 @@ type CallInfo struct {
 	Signal []uint32 // feedback signal, filled if FlagSignal is set
 	Cover  []uint32 // per-call coverage, filled if FlagSignal is set and cover == true,
 	// if dedup == false, then cov effectively contains a trace, otherwise duplicates are removed
-	Comps   prog.CompMap // per-call comparison operands
-	RfCover []MemAccess
-	Errno   int // call errno (0 if the call was successful)
+	Comps  prog.CompMap // per-call comparison operands
+	Access []MemAccess
+	Errno  int // call errno (0 if the call was successful)
+	ConcurrencyInfo
+}
+
+type ConcurrencyInfo struct {
+	Thread uint64
+	Epoch  uint64
 }
 
 type MemAccess struct {
@@ -105,9 +111,26 @@ type MemAccess struct {
 }
 
 type ProgInfo struct {
-	Calls []CallInfo
-	Extra CallInfo // stores Signal and Cover collected from background threads
+	Calls     []CallInfo
+	Extra     CallInfo     // stores Signal and Cover collected from background threads
+	Conflicts ReadFromInfo // Read-from coverage inside epochs
+	Depends   ReadFromInfo // Read-from coverage outside epochs
 }
+
+// Example: for prog { epoch1: call1_1, call1_2 , epoch2: call2_1, call2_2 }
+// where call1_1 <- call1_2,
+//       call2_1 <- call1_1,
+//       call2_1 <- call1_2, and
+//       call2_1 <- call2_2,
+// Conflicts = {
+//     call1_1: [call1_2],
+//     call2_1: [call2_2]
+// },
+// Depends = {
+//     call2_1: [call1_1, call1_2],
+// }
+// (omitting empty slices)
+type ReadFromInfo map[int][]int
 
 type Env struct {
 	in  []byte
@@ -362,6 +385,10 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 			}
 			inf.Errno = int(reply.errno)
 			inf.Flags = CallFlags(reply.flags)
+			inf.ConcurrencyInfo = ConcurrencyInfo{
+				Thread: p.Calls[reply.index].Thread,
+				Epoch:  p.Calls[reply.index].Epoch,
+			}
 		} else {
 			extraParts = append(extraParts, CallInfo{})
 			inf = &extraParts[len(extraParts)-1]
@@ -374,7 +401,7 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 			return nil, fmt.Errorf("call %v/%v/%v: cover overflow: %v/%v",
 				i, reply.index, reply.num, reply.coverSize, len(out))
 		}
-		if inf.RfCover, ok = readReadFromCoverages(&out, reply.rfCoverSize); !ok {
+		if inf.Access, ok = readReadFromCoverages(&out, reply.rfCoverSize); !ok {
 			return nil, fmt.Errorf("call %v/%v%v: rfcover overflow: %v%v",
 				i, reply.index, reply.num, reply.rfCoverSize, len(out))
 		}
@@ -388,6 +415,7 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 		return info, nil
 	}
 	info.Extra = convertExtra(extraParts)
+	info.Conflicts, info.Depends = analyzeReadFromInfo(info.Calls)
 	return info, nil
 }
 
@@ -407,6 +435,23 @@ func convertExtra(extraParts []CallInfo) CallInfo {
 		i++
 	}
 	return extra
+}
+
+func analyzeReadFromInfo(calls []CallInfo) (ReadFromInfo, ReadFromInfo) {
+	conflicts := make(map[int][]int)
+	depends := make(map[int][]int)
+	for i1, c1 := range calls {
+		for i2, c2 := range calls {
+			if c1.readFrom(c2) {
+				if c1.sameEpoch(c2) {
+					conflicts[i1] = append(conflicts[i1], i2)
+				} else {
+					depends[i1] = append(depends[i1], i2)
+				}
+			}
+		}
+	}
+	return conflicts, depends
 }
 
 func readComps(outp *[]byte, compsSize uint32) (prog.CompMap, error) {
@@ -863,4 +908,61 @@ func (c *command) exec(opts *ExecOpts, progData []byte) (output []byte, hanged b
 		err0 = fmt.Errorf("executor %v: exit status %d\n%s", c.pid, exitStatus, output)
 	}
 	return
+}
+
+func (c1 CallInfo) readFrom(c2 CallInfo) bool {
+	// TODO: I'm not sure we want read-from only
+	return c1.interactWith(c2, true)
+}
+
+func (c1 CallInfo) interactWith(c2 CallInfo, readFrom bool) bool {
+	type detail struct {
+		size      uint32
+		timestamp uint32
+	}
+	const (
+		store = 0
+		load  = 1
+	)
+	if c1.Epoch < c2.Epoch && readFrom {
+		// c1 was executed before c2. c1 cannot read from c2
+		return false
+	}
+	sameEpoch := c1.sameEpoch(c2)
+	// collect details of accesses of c1
+	chk := make(map[uint32][]detail)
+	for _, acc := range c1.Access {
+		if acc.typ != load && readFrom {
+			continue
+		}
+		idx := acc.addr >> 3
+		chk[idx] = append(chk[idx], detail{
+			size:      acc.size,
+			timestamp: acc.timestamp,
+		})
+	}
+	for _, acc := range c2.Access {
+		if acc.typ != store && readFrom {
+			continue
+		}
+		idx := acc.addr >> 3
+		prevs := chk[idx]
+		// TODO: size
+		if (!sameEpoch && len(prevs) > 0) || !readFrom {
+			// c1 was executed after c2. c1 always interacts with (or
+			// reads from) c2
+			return true
+		}
+		// checking prev (load) read-from acc in the same epoch
+		for _, prev := range prevs {
+			if prev.timestamp < acc.timestamp {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (c1 CallInfo) sameEpoch(c2 CallInfo) bool {
+	return c1.Epoch == c2.Epoch
 }
