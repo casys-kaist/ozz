@@ -1012,7 +1012,7 @@ thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 cop
 
 #if SYZ_EXECUTOR_USES_SHMEM
 template <typename cover_data_t>
-void write_coverage_signal(cover_t* cov, uint32* signal_count_pos, uint32* cover_count_pos)
+void write_code_coverage_signal(cover_t* cov, uint32* signal_count_pos, uint32* cover_count_pos)
 {
 	// Write out feedback signals.
 	// Currently it is code edges computed as xor of two subsequent basic block PCs.
@@ -1055,6 +1055,42 @@ void write_coverage_signal(cover_t* cov, uint32* signal_count_pos, uint32* cover
 	for (uint32 i = 0; i < cover_size; i++)
 		write_output(cover_data[i] + cov->pc_offset);
 	*cover_count_pos = cover_size;
+}
+
+template <typename cover_data_t>
+void write_read_from_coverage_signal(cover_t* cov, uint32* signal_count_pos, uint32* cover_count_pos)
+{
+	if (signal_count_pos)
+		// The signal for read-from coverage is not well
+		// defined yet. Just ignore it.
+		failmsg("bad signal_count_pos in write_read_from_coverage_signal",
+			"signal_count_pos=%p", signal_count_pos);
+
+	uint32 cover_size = cov->size;
+	struct kmemcov_access* cover_data = &((struct kmemcov_access*)cov->data)[1];
+	for (uint32 i = 0; i < cover_size;i++) {
+		// Truncate all fields into uint32. This is fine for
+		// inst, size, type, and timestamp, but truncating
+		// addr may introduce the possibility that for two
+		// memory accesses that did not access the same memory
+		// object, our fuzzer thinks they did access the same
+		// memory object. Well, whatever, this is a fuzzer.
+		write_output(cover_data[i].inst);
+		write_output(cover_data[i].addr);
+		write_output(cover_data[i].size);
+		write_output(cover_data[i].type);
+		write_output(cover_data[i].timestamp);
+	}
+	*cover_count_pos = cover_size;
+}
+
+template <typename cover_data_t>
+void write_coverage_signal(cover_t* cov, uint32* signal_count_pos, uint32* cover_count_pos)
+{
+	if (cov->type == code_coverage)
+		write_code_coverage_signal<cover_data_t>(cov, signal_count_pos, cover_count_pos);
+	else
+		write_read_from_coverage_signal<cover_data_t>(cov, signal_count_pos, cover_count_pos);
 }
 #endif
 
@@ -1164,6 +1200,7 @@ void write_call_output(thread_t* th, bool finished)
 	uint32* signal_count_pos = write_output(0); // filled in later
 	uint32* cover_count_pos = write_output(0); // filled in later
 	uint32* comps_count_pos = write_output(0); // filled in later
+	uint32* rfcover_count_pos = write_output(0); // filled in later
 
 	if (flag_comparisons) {
 		// Collect only the comparisons
@@ -1186,10 +1223,13 @@ void write_call_output(thread_t* th, bool finished)
 		// Write out number of comparisons.
 		*comps_count_pos = comps_size;
 	} else if (flag_coverage) {
-		if (is_kernel_64_bit)
+		if (is_kernel_64_bit) {
 			write_coverage_signal<uint64>(&th->cov, signal_count_pos, cover_count_pos);
-		else
+			write_coverage_signal<uint64>(&th->rfcov, NULL, rfcover_count_pos);
+		} else {
+			// XXX: We support only 64 bit kernel.
 			write_coverage_signal<uint32>(&th->cov, signal_count_pos, cover_count_pos);
+		}
 	}
 	debug_verbose("out #%u: index=%u num=%u errno=%d finished=%d blocked=%d sig=%u cover=%u comps=%u\n",
 		      completed, th->call_index, th->call_num, reserrno, finished, blocked,
