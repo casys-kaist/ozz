@@ -91,8 +91,17 @@ type CallInfo struct {
 	Signal []uint32 // feedback signal, filled if FlagSignal is set
 	Cover  []uint32 // per-call coverage, filled if FlagSignal is set and cover == true,
 	// if dedup == false, then cov effectively contains a trace, otherwise duplicates are removed
-	Comps prog.CompMap // per-call comparison operands
-	Errno int          // call errno (0 if the call was successful)
+	Comps   prog.CompMap // per-call comparison operands
+	RfCover []MemAccess
+	Errno   int // call errno (0 if the call was successful)
+}
+
+type MemAccess struct {
+	inst      uint32
+	addr      uint32
+	size      uint32
+	typ       uint32
+	timestamp uint32
 }
 
 type ProgInfo struct {
@@ -365,6 +374,10 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 			return nil, fmt.Errorf("call %v/%v/%v: cover overflow: %v/%v",
 				i, reply.index, reply.num, reply.coverSize, len(out))
 		}
+		if inf.RfCover, ok = readReadFromCoverages(&out, reply.rfCoverSize); !ok {
+			return nil, fmt.Errorf("call %v/%v%v: rfcover overflow: %v%v",
+				i, reply.index, reply.num, reply.rfCoverSize, len(out))
+		}
 		comps, err := readComps(&out, reply.compsSize)
 		if err != nil {
 			return nil, err
@@ -476,6 +489,27 @@ func readUint32Array(outp *[]byte, size uint32) ([]uint32, bool) {
 	return res, true
 }
 
+func readReadFromCoverages(outp *[]byte, size uint32) ([]MemAccess, bool) {
+	array, ok := readUint32Array(outp, size*5)
+	if !ok {
+		return nil, false
+	}
+	if len(array)%5 != 0 {
+		return nil, false
+	}
+	var res []MemAccess
+	for i := 0; i < len(array); i += 5 {
+		res = append(res, MemAccess{
+			inst:      array[i],
+			addr:      array[i+1],
+			size:      array[i+2],
+			typ:       array[i+3],
+			timestamp: array[i+4],
+		})
+	}
+	return res, true
+}
+
 type command struct {
 	pid      int
 	config   *Config
@@ -535,6 +569,8 @@ type callReply struct {
 	signalSize uint32
 	coverSize  uint32
 	compsSize  uint32
+	// Read-from coverage
+	rfCoverSize uint32
 	// signal/cover/comps follow
 }
 
@@ -785,6 +821,8 @@ func (c *command) exec(opts *ExecOpts, progData []byte) (output []byte, hanged b
 			exitStatus = int(reply.status)
 			break
 		}
+		// NOTE: In this project (i.e., relrazzer), below codes will
+		// never be executed.
 		callReply := &callReply{}
 		callReplyData := (*[unsafe.Sizeof(*callReply)]byte)(unsafe.Pointer(callReply))[:]
 		if _, err := io.ReadFull(c.inrp, callReplyData); err != nil {
