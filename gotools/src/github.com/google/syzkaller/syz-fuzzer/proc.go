@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"runtime/debug"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -305,6 +306,7 @@ func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.P
 			time.Sleep(time.Second)
 			continue
 		}
+		proc.logResult(p, info, hanged)
 		log.Logf(2, "result hanged=%v: %s", hanged, output)
 		return info
 	}
@@ -351,5 +353,113 @@ func (proc *Proc) logProgram(opts *ipc.ExecOpts, p *prog.Prog) {
 		}
 	default:
 		log.Fatalf("unknown output type: %v", proc.fuzzer.outputType)
+	}
+}
+
+type ResultLogger struct {
+	p          *prog.Prog
+	info       *ipc.ProgInfo
+	threads    uint64
+	epochs     uint64
+	outputType OutputType
+	column     int
+}
+
+func (proc *Proc) logResult(p *prog.Prog, info *ipc.ProgInfo, hanged bool) {
+	if proc.fuzzer.outputType == OutputNone {
+		return
+	}
+
+	threads, epochs := p.Frame()
+	logger := ResultLogger{
+		p:          p,
+		info:       info,
+		threads:    threads,
+		epochs:     epochs,
+		outputType: proc.fuzzer.outputType,
+	}
+	(&logger).initialize()
+
+	proc.fuzzer.logMu.Lock()
+	defer proc.fuzzer.logMu.Unlock()
+
+	logger.logHeader()
+	for i := uint64(0); i < epochs; i++ {
+		logger.logEpochLocked(i)
+	}
+	logger.logConflictsLocked()
+	logger.logDependsLocked()
+}
+
+func (logger *ResultLogger) initialize() {
+	logger.column = len("thread#0")
+	for _, c := range logger.p.Calls {
+		l := len(c.Meta.Name)
+		if l > logger.column {
+			logger.column = l
+		}
+	}
+	logger.column += 2
+}
+
+func (logger ResultLogger) logHeader() {
+	header := []string{}
+	for i := uint64(0); i < logger.threads; i++ {
+		header = append(header, fmt.Sprintf("thread%d", i))
+	}
+	logger.logRowLocked(header)
+}
+
+func (logger ResultLogger) logEpochLocked(epoch uint64) {
+	m := make(map[uint64]string)
+	for _, c := range logger.p.Calls {
+		if c.Epoch == epoch {
+			m[c.Thread] = c.Meta.Name
+		}
+	}
+	row := []string{}
+	for i := uint64(0); i < logger.threads; i++ {
+		str := "(empty)"
+		if str0, ok := m[i]; ok {
+			str = str0
+		}
+		row = append(row, str)
+	}
+	logger.logRowLocked(row)
+}
+
+func (logger ResultLogger) logRowLocked(row []string) {
+	switch logger.outputType {
+	case OutputStdout:
+		s := ""
+		for _, r := range row {
+			s += r
+			s += strings.Repeat(" ", logger.column-len(r))
+		}
+		log.Logf(2, "%s", s)
+	default:
+		// TODO: We support standard output only, but don't want to
+		// quit with others
+	}
+}
+
+func (logger ResultLogger) logConflictsLocked() {
+	logger.logReadFrom(logger.info.Conflicts, "conflicts")
+}
+
+func (logger ResultLogger) logDependsLocked() {
+	logger.logReadFrom(logger.info.Depends, "depends")
+}
+
+func (logger ResultLogger) logReadFrom(rfinfo ipc.ReadFromInfo, name string) {
+	log.Logf(2, name)
+	for i, rfs := range rfinfo {
+		c := logger.p.Calls[i]
+		for _, rf := range rfs {
+			rfc := logger.p.Calls[rf]
+			log.Logf(2, "%s", fmt.Sprintf("%v(%d,%d) <- %v(%d,%d)"),
+				c.Meta.Name, c.Epoch, c.Thread,
+				rfc.Meta.Name, rfc.Epoch, rfc.Thread)
+		}
 	}
 }
