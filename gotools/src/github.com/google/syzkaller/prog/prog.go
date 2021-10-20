@@ -476,3 +476,18 @@ func (p *Prog) fixupEpoch() {
 		ctx.useThread(c.Thread)
 	}
 }
+
+func (p *Prog) Frame() (uint64, uint64) {
+	thread, epoch := uint64(0), uint64(0)
+	for i := 0; i < len(p.Calls); i++ {
+		if thread < p.Calls[i].Thread {
+			thread = p.Calls[i].Thread
+		}
+		if epoch < p.Calls[i].Epoch {
+			epoch = p.Calls[i].Epoch
+		}
+	}
+	// the size of the frame is one larger than the max thread id and
+	// the max epoch.
+	return thread + 1, epoch + 1
+}
