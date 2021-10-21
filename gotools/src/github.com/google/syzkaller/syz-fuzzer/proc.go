@@ -449,14 +449,14 @@ func (logger ResultLogger) logRowLocked(row []string) {
 }
 
 func (logger ResultLogger) logConflictsLocked() {
-	logger.logReadFrom(logger.info.Conflicts, "conflicts")
+	logger.logAffectedBy(logger.info.Conflicts, "conflicts")
 }
 
 func (logger ResultLogger) logDependsLocked() {
-	logger.logReadFrom(logger.info.Depends, "depends")
+	logger.logAffectedBy(logger.info.Depends, "depends")
 }
 
-func (logger ResultLogger) logReadFrom(rfinfo ipc.ReadFromInfo, name string) {
+func (logger ResultLogger) logAffectedBy(rfinfo ipc.AffectedByInfo, name string) {
 	log.Logf(2, name)
 	for i, rfs := range rfinfo {
 		c := logger.p.Calls[i]

@@ -112,9 +112,9 @@ type MemAccess struct {
 
 type ProgInfo struct {
 	Calls     []CallInfo
-	Extra     CallInfo     // stores Signal and Cover collected from background threads
-	Conflicts ReadFromInfo // Read-from coverage inside epochs
-	Depends   ReadFromInfo // Read-from coverage outside epochs
+	Extra     CallInfo       // stores Signal and Cover collected from background threads
+	Conflicts AffectedByInfo // Read-from coverage inside epochs
+	Depends   AffectedByInfo // Read-from coverage outside epochs
 }
 
 // Example: for prog { epoch1: call1_1, call1_2 , epoch2: call2_1, call2_2 }
@@ -130,7 +130,7 @@ type ProgInfo struct {
 //     call2_1: [call1_1, call1_2],
 // }
 // (omitting empty slices)
-type ReadFromInfo map[int][]int
+type AffectedByInfo map[int][]int
 
 type Env struct {
 	in  []byte
@@ -411,7 +411,7 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 		}
 		inf.Comps = comps
 	}
-	info.Conflicts, info.Depends = analyzeReadFromInfo(info.Calls)
+	info.Conflicts, info.Depends = analyzeAffectedByInfo(info.Calls)
 	if len(extraParts) == 0 {
 		return info, nil
 	}
@@ -437,7 +437,7 @@ func convertExtra(extraParts []CallInfo) CallInfo {
 	return extra
 }
 
-func analyzeReadFromInfo(calls []CallInfo) (ReadFromInfo, ReadFromInfo) {
+func analyzeAffectedByInfo(calls []CallInfo) (AffectedByInfo, AffectedByInfo) {
 	conflicts := make(map[int][]int)
 	depends := make(map[int][]int)
 	for i1, c1 := range calls {
@@ -445,7 +445,7 @@ func analyzeReadFromInfo(calls []CallInfo) (ReadFromInfo, ReadFromInfo) {
 			if i1 == i2 {
 				continue
 			}
-			if c1.readFrom(c2) {
+			if c1.affectedBy(c2) {
 				if c1.sameEpoch(c2) {
 					conflicts[i1] = append(conflicts[i1], i2)
 				} else {
@@ -913,7 +913,7 @@ func (c *command) exec(opts *ExecOpts, progData []byte) (output []byte, hanged b
 	return
 }
 
-func (c1 CallInfo) readFrom(c2 CallInfo) bool {
+func (c1 CallInfo) affectedBy(c2 CallInfo) bool {
 	// TODO: I'm not sure we want read-from only
 	return c1.interactWith(c2, true)
 }
