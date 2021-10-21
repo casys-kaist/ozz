@@ -74,7 +74,7 @@ func (proc *Proc) loop() {
 			case *WorkTriage:
 				proc.triageInput(item)
 			case *WorkCandidate:
-				proc.execute(proc.execOpts, item.p, item.flags, StatCandidate)
+				proc.executeCandidate(item)
 			case *WorkSmash:
 				proc.smashInput(item)
 			default:
@@ -199,6 +199,11 @@ func getSignalAndCover(p *prog.Prog, info *ipc.ProgInfo, call int) (signal.Signa
 		inf = &info.Calls[call]
 	}
 	return signal.FromRaw(inf.Signal, signalPrio(p, inf, call)), inf.Cover
+}
+
+func (proc *Proc) executeCandidate(item *WorkCandidate) {
+	log.Logf(1, "%v: executing a candidate", proc.pid)
+	proc.execute(proc.execOpts, item.p, item.flags, StatCandidate)
 }
 
 func (proc *Proc) smashInput(item *WorkSmash) {
