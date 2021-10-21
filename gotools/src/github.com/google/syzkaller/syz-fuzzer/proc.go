@@ -457,7 +457,7 @@ func (logger ResultLogger) logReadFrom(rfinfo ipc.ReadFromInfo, name string) {
 		c := logger.p.Calls[i]
 		for _, rf := range rfs {
 			rfc := logger.p.Calls[rf]
-			log.Logf(2, "%s", fmt.Sprintf("%v(%d,%d) <- %v(%d,%d)"),
+			log.Logf(2, "%v(%d,%d) <- %v(%d,%d)",
 				c.Meta.Name, c.Epoch, c.Thread,
 				rfc.Meta.Name, rfc.Epoch, rfc.Thread)
 		}
