@@ -411,11 +411,11 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 		}
 		inf.Comps = comps
 	}
+	info.Conflicts, info.Depends = analyzeReadFromInfo(info.Calls)
 	if len(extraParts) == 0 {
 		return info, nil
 	}
 	info.Extra = convertExtra(extraParts)
-	info.Conflicts, info.Depends = analyzeReadFromInfo(info.Calls)
 	return info, nil
 }
 
