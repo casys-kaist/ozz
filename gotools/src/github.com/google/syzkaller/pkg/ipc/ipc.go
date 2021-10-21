@@ -442,6 +442,9 @@ func analyzeReadFromInfo(calls []CallInfo) (ReadFromInfo, ReadFromInfo) {
 	depends := make(map[int][]int)
 	for i1, c1 := range calls {
 		for i2, c2 := range calls {
+			if i1 == i2 {
+				continue
+			}
 			if c1.readFrom(c2) {
 				if c1.sameEpoch(c2) {
 					conflicts[i1] = append(conflicts[i1], i2)
