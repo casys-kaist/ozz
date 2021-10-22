@@ -1,5 +1,7 @@
 package signal
 
+import "fmt"
+
 // ReadFrom represents read-from coverage for two instructions. For
 // given two instructions inst1 and inst2, if ok is true where _, ok
 // := rf[inst1][inst2], inst1 affects inst2 which means inst2 reads
@@ -94,4 +96,9 @@ type Access struct {
 
 func NewAccess(inst, addr, size, typ, timestamp uint32) Access {
 	return Access{inst: inst, addr: addr, size: size, typ: typ, timestamp: timestamp}
+}
+
+func (acc Access) String() string {
+	return fmt.Sprintf("%x accesses %x (size: %d, type: %d, timestamp:%d)",
+		acc.inst, acc.addr, acc.size, acc.typ, acc.timestamp)
 }
