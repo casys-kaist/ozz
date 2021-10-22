@@ -92,7 +92,7 @@ type CallInfo struct {
 	Cover  []uint32 // per-call coverage, filled if FlagSignal is set and cover == true,
 	// if dedup == false, then cov effectively contains a trace, otherwise duplicates are removed
 	Comps  prog.CompMap // per-call comparison operands
-	Access []MemAccess
+	Access []signal.Access
 	Errno  int // call errno (0 if the call was successful)
 	ConcurrencyInfo
 }
@@ -102,35 +102,16 @@ type ConcurrencyInfo struct {
 	Epoch  uint64
 }
 
-type MemAccess struct {
-	inst      uint32
-	addr      uint32
-	size      uint32
-	typ       uint32
-	timestamp uint32
-}
-
 type ProgInfo struct {
-	Calls     []CallInfo
-	Extra     CallInfo       // stores Signal and Cover collected from background threads
-	Conflicts AffectedByInfo // Read-from coverage inside epochs
-	Depends   AffectedByInfo // Read-from coverage outside epochs
+	Calls []CallInfo
+	Extra CallInfo // stores Signal and Cover collected from background threads
+	// RFInfo describe read-from coverage between instructions from
+	// two calls. For example, RFInfo[i1][i2] represents read-from
+	// coverage for instructions from calls, Calls[i1] and
+	// Calls[i2]. Note that it is not limited to two calls inside the
+	// same epoch, meaning two calls possibly reside in other epochs.
+	RFInfo [][]signal.ReadFrom
 }
-
-// Example: for prog { epoch1: call1_1, call1_2 , epoch2: call2_1, call2_2 }
-// where call1_1 <- call1_2,
-//       call2_1 <- call1_1,
-//       call2_1 <- call1_2, and
-//       call2_1 <- call2_2,
-// Conflicts = {
-//     call1_1: [call1_2],
-//     call2_1: [call2_2]
-// },
-// Depends = {
-//     call2_1: [call1_1, call1_2],
-// }
-// (omitting empty slices)
-type AffectedByInfo map[int][]int
 
 type Env struct {
 	in  []byte
@@ -411,7 +392,7 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 		}
 		inf.Comps = comps
 	}
-	info.Conflicts, info.Depends = analyzeAffectedByInfo(info.Calls)
+	info.RFInfo = analyzeReadFromInfo(p, info.Calls)
 	if len(extraParts) == 0 {
 		return info, nil
 	}
@@ -437,24 +418,25 @@ func convertExtra(extraParts []CallInfo) CallInfo {
 	return extra
 }
 
-func analyzeAffectedByInfo(calls []CallInfo) (AffectedByInfo, AffectedByInfo) {
-	conflicts := make(map[int][]int)
-	depends := make(map[int][]int)
+func analyzeReadFromInfo(p *prog.Prog, calls []CallInfo) (rfinfo [][]signal.ReadFrom) {
+	n := len(p.Calls)
+	rfinfo = make([][]signal.ReadFrom, n)
+	for i := 0; i < n; i++ {
+		rfinfo[i] = make([]signal.ReadFrom, n)
+	}
 	for i1, c1 := range calls {
 		for i2, c2 := range calls {
 			if i1 == i2 {
 				continue
 			}
-			if c1.affectedBy(c2) {
-				if c1.sameEpoch(c2) {
-					conflicts[i1] = append(conflicts[i1], i2)
-				} else {
-					depends[i1] = append(depends[i1], i2)
-				}
-			}
+			rfinfo[i1][i2] = signal.FromAccesses(
+				c1.Access,
+				c2.Access,
+				signal.FromEpoch(c1.Epoch, c2.Epoch),
+			)
 		}
 	}
-	return conflicts, depends
+	return
 }
 
 func readComps(outp *[]byte, compsSize uint32) (prog.CompMap, error) {
@@ -537,7 +519,7 @@ func readUint32Array(outp *[]byte, size uint32) ([]uint32, bool) {
 	return res, true
 }
 
-func readReadFromCoverages(outp *[]byte, size uint32) ([]MemAccess, bool) {
+func readReadFromCoverages(outp *[]byte, size uint32) ([]signal.Access, bool) {
 	array, ok := readUint32Array(outp, size*5)
 	if !ok {
 		return nil, false
@@ -545,15 +527,15 @@ func readReadFromCoverages(outp *[]byte, size uint32) ([]MemAccess, bool) {
 	if len(array)%5 != 0 {
 		return nil, false
 	}
-	var res []MemAccess
+	var res []signal.Access
 	for i := 0; i < len(array); i += 5 {
-		res = append(res, MemAccess{
-			inst:      array[i],
-			addr:      array[i+1],
-			size:      array[i+2],
-			typ:       array[i+3],
-			timestamp: array[i+4],
-		})
+		res = append(res, signal.NewAccess(
+			array[i],
+			array[i+1],
+			array[i+2],
+			array[i+3],
+			array[i+4],
+		))
 	}
 	return res, true
 }
@@ -911,61 +893,4 @@ func (c *command) exec(opts *ExecOpts, progData []byte) (output []byte, hanged b
 		err0 = fmt.Errorf("executor %v: exit status %d\n%s", c.pid, exitStatus, output)
 	}
 	return
-}
-
-func (c1 CallInfo) affectedBy(c2 CallInfo) bool {
-	// TODO: I'm not sure we want read-from only
-	return c1.interactWith(c2, true)
-}
-
-func (c1 CallInfo) interactWith(c2 CallInfo, readFrom bool) bool {
-	type detail struct {
-		size      uint32
-		timestamp uint32
-	}
-	const (
-		store = 0
-		load  = 1
-	)
-	if c1.Epoch < c2.Epoch && readFrom {
-		// c1 was executed before c2. c1 cannot read from c2
-		return false
-	}
-	sameEpoch := c1.sameEpoch(c2)
-	// collect details of accesses of c1
-	chk := make(map[uint32][]detail)
-	for _, acc := range c1.Access {
-		if acc.typ != load && readFrom {
-			continue
-		}
-		idx := acc.addr >> 3
-		chk[idx] = append(chk[idx], detail{
-			size:      acc.size,
-			timestamp: acc.timestamp,
-		})
-	}
-	for _, acc := range c2.Access {
-		if acc.typ != store && readFrom {
-			continue
-		}
-		idx := acc.addr >> 3
-		prevs := chk[idx]
-		// TODO: size
-		if (!sameEpoch && len(prevs) > 0) || !readFrom {
-			// c1 was executed after c2. c1 always interacts with (or
-			// reads from) c2
-			return true
-		}
-		// checking prev (load) read-from acc in the same epoch
-		for _, prev := range prevs {
-			if prev.timestamp < acc.timestamp {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (c1 CallInfo) sameEpoch(c2 CallInfo) bool {
-	return c1.Epoch == c2.Epoch
 }

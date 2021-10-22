@@ -392,8 +392,7 @@ func (proc *Proc) logResult(p *prog.Prog, info *ipc.ProgInfo, hanged bool) {
 	for i := uint64(0); i < epochs; i++ {
 		logger.logEpochLocked(i)
 	}
-	logger.logConflictsLocked()
-	logger.logDependsLocked()
+	logger.logReadFrom()
 }
 
 func (logger *ResultLogger) initialize() {
@@ -448,23 +447,33 @@ func (logger ResultLogger) logRowLocked(row []string) {
 	}
 }
 
-func (logger ResultLogger) logConflictsLocked() {
-	logger.logAffectedBy(logger.info.Conflicts, "conflicts")
-}
-
-func (logger ResultLogger) logDependsLocked() {
-	logger.logAffectedBy(logger.info.Depends, "depends")
-}
-
-func (logger ResultLogger) logAffectedBy(rfinfo ipc.AffectedByInfo, name string) {
-	log.Logf(2, name)
-	for i, rfs := range rfinfo {
-		c := logger.p.Calls[i]
-		for _, rf := range rfs {
-			rfc := logger.p.Calls[rf]
-			log.Logf(2, "%v(%d,%d) <- %v(%d,%d)",
-				c.Meta.Name, c.Epoch, c.Thread,
-				rfc.Meta.Name, rfc.Epoch, rfc.Thread)
+func (logger ResultLogger) logReadFrom() {
+	conflicts := []string{}
+	depends := []string{}
+	for i1, c1 := range logger.p.Calls {
+		for i2, c2 := range logger.p.Calls {
+			if i1 == i2 {
+				continue
+			}
+			if len(logger.info.RFInfo[i1][i2]) == 0 {
+				continue
+			}
+			str := fmt.Sprintf("%v(%d@%d) <- %v(%d@%d)",
+				c1.Meta.Name, c1.Thread, c1.Epoch,
+				c2.Meta.Name, c2.Thread, c2.Epoch)
+			if c1.Epoch == c2.Epoch {
+				conflicts = append(conflicts, str)
+			} else {
+				depends = append(depends, str)
+			}
 		}
+	}
+	log.Logf(2, "conflicts")
+	for _, str := range conflicts {
+		log.Logf(2, str)
+	}
+	log.Logf(2, "depends")
+	for _, str := range depends {
+		log.Logf(2, str)
 	}
 }
