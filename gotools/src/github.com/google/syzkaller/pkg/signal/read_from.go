@@ -73,7 +73,8 @@ func FromAccesses(acc1, acc2 []Access, order Order) ReadFrom {
 			// we don't care the type of a2 since we track store-load
 			// and store-store relations
 			if a1.addr>>3 != a2.addr>>3 {
-				// TODO: check precisely using .size
+				// TODO: check precisely using .size. testdata/gen.py
+				// is also needed to be fixed.
 				continue
 			}
 			if order == Before || a1.timestamp < a2.timestamp {
@@ -99,6 +100,6 @@ func NewAccess(inst, addr, size, typ, timestamp uint32) Access {
 }
 
 func (acc Access) String() string {
-	return fmt.Sprintf("%x accesses %x (size: %d, type: %d, timestamp:%d)",
+	return fmt.Sprintf("%x accesses %x (size: %d, type: %d, timestamp: %d)",
 		acc.inst, acc.addr, acc.size, acc.typ, acc.timestamp)
 }

@@ -47,6 +47,10 @@ for i, acc1 in enumerate(access):
             s = set()
             for a1 in acc1:
                 for a2 in acc2:
+                    # TODO: Since FromAccesses() in read_from.go does
+                    # not consider size of accesses at this point,
+                    # this script does not consider it too. Fix this
+                    # when FromAccesses() is fixed
                     if a1.addr>>3 == a2.addr>>3 and a1.typ == 0:
                         s.add(hex(a1.inst)[2:] + ' ' + hex(a2.inst)[2:] + '\n')
             for a in sorted(list(s)):
