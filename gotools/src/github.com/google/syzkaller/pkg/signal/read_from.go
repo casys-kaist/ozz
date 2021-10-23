@@ -25,7 +25,7 @@ func (rf ReadFrom) Empty() bool {
 type Order uint32
 
 const (
-	Before = Order(1)
+	Before = iota
 	Parallel
 	After
 )
@@ -65,7 +65,7 @@ func FromAccesses(acc1, acc2 []Access, order Order) ReadFrom {
 	}
 
 	for _, a1 := range acc1 {
-		if a1.typ != load {
+		if a1.typ == load {
 			// only store operations can affect acc2
 			continue
 		}
