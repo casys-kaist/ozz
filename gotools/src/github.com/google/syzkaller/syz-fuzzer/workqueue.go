@@ -67,7 +67,7 @@ type WorkSmash struct {
 type WorkThreading struct {
 	p     *prog.Prog
 	flags ProgTypes
-	calls racingCalls
+	calls prog.RacingCalls
 	info  *ipc.ProgInfo
 }
 
@@ -117,6 +117,12 @@ func (wq *WorkQueue) dequeue() (item interface{}) {
 		item = wq.candidate[last]
 		wq.candidate = wq.candidate[:last]
 		wantCandidates = len(wq.candidate) < wq.procs
+	} else if len(wq.threading) != 0 {
+		// TODO: need to think about the priority of the threading
+		// queue.
+		last := len(wq.threading) - 1
+		item = wq.threading[last]
+		wq.threading = wq.threading[:last]
 	} else if len(wq.triage) != 0 {
 		last := len(wq.triage) - 1
 		item = wq.triage[last]

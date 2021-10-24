@@ -82,6 +82,7 @@ const (
 	StatSmash
 	StatHint
 	StatSeed
+	StatThreading
 	StatCount
 )
 
@@ -94,6 +95,7 @@ var statNames = [StatCount]string{
 	StatSmash:     "exec smash",
 	StatHint:      "exec hints",
 	StatSeed:      "exec seeds",
+	StatThreading: "exec threadings",
 }
 
 type OutputType int
@@ -583,11 +585,7 @@ func (fuzzer *Fuzzer) checkNewCallSignal(p *prog.Prog, info *ipc.CallInfo, call 
 	return true
 }
 
-type racingCalls struct {
-	calls []int
-}
-
-func (fuzzer *Fuzzer) identifyRacingCalls(p *prog.Prog, info *ipc.ProgInfo) (racing []racingCalls) {
+func (fuzzer *Fuzzer) identifyRacingCalls(p *prog.Prog, info *ipc.ProgInfo) (racing []prog.RacingCalls) {
 	// identify calls that are likely to be of interest when run
 	// in parallel.
 	// TODO: This function requires two more works: 1) it does not
@@ -595,7 +593,7 @@ func (fuzzer *Fuzzer) identifyRacingCalls(p *prog.Prog, info *ipc.ProgInfo) (rac
 	for call1 := 0; call1 < len(p.Calls); call1++ {
 		for call2 := call1 + 1; call2 < len(p.Calls); call2++ {
 			if !info.RFInfo[call1][call2].Empty() {
-				racing = append(racing, racingCalls{calls: []int{call1, call2}})
+				racing = append(racing, prog.RacingCalls{Calls: []int{call1, call2}})
 			}
 		}
 	}

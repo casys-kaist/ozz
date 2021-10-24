@@ -77,6 +77,8 @@ func (proc *Proc) loop() {
 				proc.executeCandidate(item)
 			case *WorkSmash:
 				proc.smashInput(item)
+			case *WorkThreading:
+				proc.threadingInput(item)
 			default:
 				log.Fatalf("unknown work type: %#v", item)
 			}
@@ -222,6 +224,13 @@ func (proc *Proc) smashInput(item *WorkSmash) {
 	}
 }
 
+func (proc *Proc) threadingInput(item *WorkThreading) {
+	log.Logf(1, "#%v: threading an input", proc.pid)
+	p := item.p.Clone()
+	p.Threading(item.calls)
+	proc.execute(proc.execOpts, p, ProgNormal, StatThreading)
+}
+
 func (proc *Proc) failCall(p *prog.Prog, call int) {
 	for nth := 0; nth < 100; nth++ {
 		log.Logf(1, "#%v: injecting fault into call %v/%v", proc.pid, call, nth)
@@ -304,7 +313,7 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 	})
 }
 
-func (proc *Proc) enqueueThreading(p *prog.Prog, flags ProgTypes, calls racingCalls, info *ipc.ProgInfo) {
+func (proc *Proc) enqueueThreading(p *prog.Prog, flags ProgTypes, calls prog.RacingCalls, info *ipc.ProgInfo) {
 	proc.fuzzer.workQueue.enqueue(&WorkThreading{
 		p:     p.Clone(),
 		flags: flags,
