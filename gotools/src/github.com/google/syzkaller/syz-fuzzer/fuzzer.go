@@ -583,6 +583,25 @@ func (fuzzer *Fuzzer) checkNewCallSignal(p *prog.Prog, info *ipc.CallInfo, call 
 	return true
 }
 
+type racingCalls struct {
+	calls []int
+}
+
+func (fuzzer *Fuzzer) identifyRacingCalls(p *prog.Prog, info *ipc.ProgInfo) (racing []racingCalls) {
+	// identify calls that are likely to be of interest when run
+	// in parallel.
+	// TODO: This function requires two more works: 1) it does not
+	// impose a kind of coverage. 2) it considers only two calls.
+	for call1 := 0; call1 < len(p.Calls); call1++ {
+		for call2 := call1 + 1; call2 < len(p.Calls); call2++ {
+			if !info.RFInfo[call1][call2].Empty() {
+				racing = append(racing, racingCalls{calls: []int{call1, call2}})
+			}
+		}
+	}
+	return
+}
+
 func signalPrio(p *prog.Prog, info *ipc.CallInfo, call int) (prio uint8) {
 	if call == -1 {
 		return 0
