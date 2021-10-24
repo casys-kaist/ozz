@@ -20,6 +20,7 @@ type WorkQueue struct {
 	candidate       []*WorkCandidate
 	triage          []*WorkTriage
 	smash           []*WorkSmash
+	threading       []*WorkThreading
 
 	procs          int
 	needCandidates chan struct{}
@@ -61,6 +62,15 @@ type WorkSmash struct {
 	call int
 }
 
+// WorkThreading are programs that are about to split into multiple
+// threads.
+type WorkThreading struct {
+	p     *prog.Prog
+	flags ProgTypes
+	calls racingCalls
+	info  *ipc.ProgInfo
+}
+
 func newWorkQueue(procs int, needCandidates chan struct{}) *WorkQueue {
 	return &WorkQueue{
 		procs:          procs,
@@ -82,6 +92,8 @@ func (wq *WorkQueue) enqueue(item interface{}) {
 		wq.candidate = append(wq.candidate, item)
 	case *WorkSmash:
 		wq.smash = append(wq.smash, item)
+	case *WorkThreading:
+		wq.threading = append(wq.threading, item)
 	default:
 		panic("unknown work type")
 	}

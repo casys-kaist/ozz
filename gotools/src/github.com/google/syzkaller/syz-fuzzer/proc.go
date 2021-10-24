@@ -258,6 +258,7 @@ func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes,
 	if info == nil {
 		return nil
 	}
+
 	calls, extra := proc.fuzzer.checkNewSignal(p, info)
 	for _, callIndex := range calls {
 		proc.enqueueCallTriage(p, flags, callIndex, info.Calls[callIndex])
@@ -268,6 +269,10 @@ func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes,
 
 	proc.detachReadFrom(p, info)
 
+	racingCalls := proc.fuzzer.identifyRacingCalls(p, info)
+	for _, racing := range racingCalls {
+		proc.enqueueThreading(p, flags, racing, info)
+	}
 	return info
 }
 
@@ -296,6 +301,15 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 		call:  callIndex,
 		info:  info,
 		flags: flags,
+	})
+}
+
+func (proc *Proc) enqueueThreading(p *prog.Prog, flags ProgTypes, calls racingCalls, info *ipc.ProgInfo) {
+	proc.fuzzer.workQueue.enqueue(&WorkThreading{
+		p:     p.Clone(),
+		flags: flags,
+		calls: calls,
+		info:  info,
 	})
 }
 
