@@ -22,6 +22,18 @@ func (rf ReadFrom) Empty() bool {
 	return true
 }
 
+func (rf ReadFrom) Copy() ReadFrom {
+	new := ReadFrom{}
+	for k, v := range rf {
+		m := make(map[uint32]struct{})
+		for k, v := range v {
+			m[k] = v
+		}
+		new[k] = m
+	}
+	return new
+}
+
 type Order uint32
 
 const (
