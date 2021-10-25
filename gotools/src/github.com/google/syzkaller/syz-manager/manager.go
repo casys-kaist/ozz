@@ -44,6 +44,7 @@ var (
 	flagConfig = flag.String("config", "", "configuration file")
 	flagDebug  = flag.Bool("debug", false, "dump all VM output to console")
 	flagBench  = flag.String("bench", "", "write execution statistics into this file periodically")
+	flagSeed   = flag.String("seed", "normal", "seed type (normal, cve)")
 )
 
 type Manager struct {
@@ -452,7 +453,12 @@ func (mgr *Manager) preloadCorpus() {
 	}
 	mgr.corpusDB = corpusDB
 
-	if seedDir := filepath.Join(mgr.cfg.Syzkaller, "sys", mgr.cfg.TargetOS, "test"); osutil.IsExist(seedDir) {
+	seedDir := filepath.Join(mgr.cfg.Syzkaller, "sys", mgr.cfg.TargetOS, "test")
+	if *flagSeed == "cve" {
+		log.Logf(0, "loading seeds for CVEs...")
+		seedDir = filepath.Join(seedDir, "cve")
+	}
+	if osutil.IsExist(seedDir) {
 		seeds, err := ioutil.ReadDir(seedDir)
 		if err != nil {
 			log.Fatalf("failed to read seeds dir: %v", err)
@@ -463,6 +469,9 @@ func (mgr *Manager) preloadCorpus() {
 				// syscall, which is not interesting to test race
 				// condition. Let's ignore them for now, and once we
 				// have done enough testing, include them again.
+				continue
+			}
+			if seed.IsDir() {
 				continue
 			}
 			data, err := ioutil.ReadFile(filepath.Join(seedDir, seed.Name()))
