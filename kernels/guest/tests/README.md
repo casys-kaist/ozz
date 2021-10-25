@@ -25,3 +25,9 @@ testing that kssb and qcsched can trigger a complex synthetic bug.
 ## `blk-mq_real-world.c`
 
 testing that kssb and qcsched can trigger a (slightly modified) real-world bug.
+
+# poc
+
+The `poc` directory contains proof-of-concepts of a few well-known CVEs.
+
+# CVE-2017-2636
