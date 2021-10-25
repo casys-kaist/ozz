@@ -394,6 +394,7 @@ static bool copyout(char* addr, uint64 size, uint64* res);
 static void setup_control_pipes();
 static void setup_features(char** enable, int n);
 static void setup_affinity_mask(int mask);
+static bool run_in_epoch(thread_t* th);
 
 #include "syscalls.h"
 
@@ -729,7 +730,7 @@ void start_epoch()
 		if (!th->created)
 			continue;
 		if (th->executing) {
-			if (event_timedwait(&th->done, timeout_ms))
+			if (event_timedwait(&th->done, timeout_ms) && run_in_epoch(th))
 				handle_completion(th);
 			else
 				// since we waited for this syscall
@@ -743,9 +744,17 @@ void start_epoch()
 
 void wait_epoch(thread_t* th)
 {
-	debug("wait epoch %d\n", th->epoch);
-	event_wait(&th->start);
-	event_reset(&th->start);
+	do {
+		debug("wait epoch %d\n", th->epoch);
+		event_wait(&th->start);
+		event_reset(&th->start);
+	} while (!run_in_epoch(th));
+}
+
+bool run_in_epoch(thread_t* th)
+{
+	// return true if th can execute a call in the global epoch
+	return th->epoch <= epoch;
 }
 
 // execute_one executes program stored in input_data.
@@ -1068,7 +1077,7 @@ void write_read_from_coverage_signal(cover_t* cov, uint32* signal_count_pos, uin
 
 	uint32 cover_size = cov->size;
 	struct kmemcov_access* cover_data = &((struct kmemcov_access*)cov->data)[1];
-	for (uint32 i = 0; i < cover_size;i++) {
+	for (uint32 i = 0; i < cover_size; i++) {
 		// Truncate all fields into uint32. This is fine for
 		// inst, size, type, and timestamp, but truncating
 		// addr may introduce the possibility that for two
