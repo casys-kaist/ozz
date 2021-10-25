@@ -28,7 +28,7 @@ if [ -n "$DEBUG" ]; then
 	_TEE=${TEE:="$TMP_DIR/log"}
 fi
 
-OPTS="-config $CONFIG $_DEBUG"
+OPTS="$OPTS -config $CONFIG $_DEBUG"
 
 echo "Run syzkaller"
 echo "    kernel : (default) $(readlink -f $KERNEL_X86_64)"
