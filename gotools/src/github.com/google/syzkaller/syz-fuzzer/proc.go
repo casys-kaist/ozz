@@ -287,7 +287,7 @@ func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes,
 
 func (proc *Proc) detachReadFrom(p *prog.Prog, info *ipc.ProgInfo) {
 	// As described in enqueueCallTriage(), info.RFInfo points to the
-	// output shmem region, detect it before using it.
+	// output shmem region, detach it before using it.
 	rfinfo := info.RFInfo
 	l := len(p.Calls)
 	info.RFInfo = make([][]signal.ReadFrom, l)
@@ -498,7 +498,7 @@ func (logger ResultLogger) logReadFrom() {
 			if len(logger.info.RFInfo[i1][i2]) == 0 {
 				continue
 			}
-			str := fmt.Sprintf("%v(%d@%d) <- %v(%d@%d)",
+			str := fmt.Sprintf("%v(%d@%d) -> %v(%d@%d)",
 				c1.Meta.Name, c1.Thread, c1.Epoch,
 				c2.Meta.Name, c2.Thread, c2.Epoch)
 			if c1.Epoch == c2.Epoch {

@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/google/syzkaller/pkg/ipc"
+	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/prog"
 )
 
@@ -101,10 +102,12 @@ func (wq *WorkQueue) enqueue(item interface{}) {
 
 func (wq *WorkQueue) dequeue() (item interface{}) {
 	wq.mu.RLock()
-	if len(wq.triageCandidate)+len(wq.candidate)+len(wq.triage)+len(wq.smash) == 0 {
+	if len(wq.triageCandidate)+len(wq.candidate)+len(wq.triage)+len(wq.threading)+len(wq.smash) == 0 {
 		wq.mu.RUnlock()
 		return nil
 	}
+	log.Logf(1, "triageCandidate=%v candidate=%v threading=%v triage=%v smash=%v",
+		len(wq.triageCandidate), len(wq.candidate), len(wq.threading), len(wq.triage), len(wq.smash))
 	wq.mu.RUnlock()
 	wq.mu.Lock()
 	wantCandidates := false
