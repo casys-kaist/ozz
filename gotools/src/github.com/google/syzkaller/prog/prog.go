@@ -11,6 +11,11 @@ type Prog struct {
 	Target   *Target
 	Calls    []*Call
 	Comments []string
+	// TODO: Razzer mechanism. if Threaded is true, p is already
+	// threaded so we don't thread it more. This is possibly a
+	// limittation of Razzer. Improve this if possible.
+	Threaded bool
+	RacingCalls
 }
 
 type Call struct {

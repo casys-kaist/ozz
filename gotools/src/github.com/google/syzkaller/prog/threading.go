@@ -3,8 +3,8 @@ package prog
 import "github.com/google/syzkaller/pkg/log"
 
 type RacingCalls struct {
-	// Calls represents a set of prog.Calls that will be executed in
-	// parallel.
+	// Calls represents a subset of prog.Calls that will be executed
+	// in parallel.
 	// TODO: It might be useful when we run multiple sets of
 	// prog.Calls in parallel altogether. Fix this after improving
 	// Threading(). See TODO's in Threading().
@@ -48,4 +48,10 @@ func (p *Prog) Threading(calls RacingCalls) {
 		p.Calls[i].Thread = 1
 	}
 	p.Calls[idx1].Epoch = p.Calls[idx2].Epoch
+
+	// TODO: Razzer requirement 4. denote p is already threaded so we
+	// don't thread it more. This is possibly a limittation of
+	// Razzer. Improve this if possible.
+	p.Threaded = true
+	p.RacingCalls = calls
 }

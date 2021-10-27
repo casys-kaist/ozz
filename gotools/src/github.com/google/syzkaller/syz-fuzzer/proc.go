@@ -278,6 +278,13 @@ func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes,
 
 	proc.detachReadFrom(p, info)
 
+	if p.Threaded {
+		// TODO: Razzer mechanism. p is already threaded so we don't
+		// thread it more. This is possibly a limittation of
+		// Razzer. Improve this if possible.
+		return info
+	}
+
 	racingCalls := proc.fuzzer.identifyRacingCalls(p, info)
 	for _, racing := range racingCalls {
 		proc.enqueueThreading(p, flags, racing, info)
