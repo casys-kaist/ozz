@@ -33,7 +33,6 @@ const (
 	ProgCandidate ProgTypes = 1 << iota
 	ProgMinimized
 	ProgSmashed
-	ProgThreading
 	ProgNormal ProgTypes = 0
 )
 
