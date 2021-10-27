@@ -15,7 +15,7 @@ type Prog struct {
 	// threaded so we don't thread it more. This is possibly a
 	// limittation of Razzer. Improve this if possible.
 	Threaded bool
-	RacingCalls
+	Contender
 }
 
 type Call struct {

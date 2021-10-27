@@ -67,7 +67,7 @@ type WorkSmash struct {
 // threads.
 type WorkThreading struct {
 	p     *prog.Prog
-	calls prog.RacingCalls
+	calls prog.Contender
 	info  *ipc.ProgInfo
 }
 

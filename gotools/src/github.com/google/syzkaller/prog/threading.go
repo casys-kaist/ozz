@@ -2,7 +2,7 @@ package prog
 
 import "github.com/google/syzkaller/pkg/log"
 
-type RacingCalls struct {
+type Contender struct {
 	// Calls represents a subset of prog.Calls that will be executed
 	// in parallel.
 	// TODO: It might be useful when we run multiple sets of
@@ -11,10 +11,10 @@ type RacingCalls struct {
 	Calls []int
 }
 
-func (p *Prog) Threading(calls RacingCalls) {
+func (p *Prog) Threading(calls Contender) {
 	// TODO: Current implementation is the Razzer's threading
 	// mechanism. I think we can do better. Improve
-	// Fuzzer.identifyRacingCalls() and this function together.
+	// Fuzzer.identifyContender() and this function together.
 
 	if len(calls.Calls) != 2 {
 		// TODO: Razzer's requirement 1. Razzer runs only two syscalls
@@ -53,5 +53,5 @@ func (p *Prog) Threading(calls RacingCalls) {
 	// don't thread it more. This is possibly a limittation of
 	// Razzer. Improve this if possible.
 	p.Threaded = true
-	p.RacingCalls = calls
+	p.Contender = calls
 }

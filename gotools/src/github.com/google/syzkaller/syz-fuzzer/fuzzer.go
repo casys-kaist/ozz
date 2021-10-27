@@ -541,7 +541,7 @@ func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, info *ipc.ProgInfo,
 	fuzzer.signalMu.Lock()
 	defer fuzzer.signalMu.Unlock()
 
-	c := p.RacingCalls.Calls
+	c := p.Contender.Calls
 	fuzzer.corpusReadFrom.Merge(info.RFInfo[c[0]][c[1]])
 }
 
@@ -603,24 +603,24 @@ func (fuzzer *Fuzzer) checkNewCallSignal(p *prog.Prog, info *ipc.CallInfo, call 
 	return true
 }
 
-func (fuzzer *Fuzzer) checkNewReadFrom(p *prog.Prog, info *ipc.ProgInfo, racing prog.RacingCalls) bool {
+func (fuzzer *Fuzzer) checkNewReadFrom(p *prog.Prog, info *ipc.ProgInfo, contender prog.Contender) bool {
 	fuzzer.signalMu.RLock()
 	defer fuzzer.signalMu.RUnlock()
-	c := racing.Calls
+	c := contender.Calls
 	diff := fuzzer.corpusReadFrom.Diff(info.RFInfo[c[0]][c[1]])
 	return !diff.Empty()
 }
 
-func (fuzzer *Fuzzer) identifyRacingCalls(p *prog.Prog, info *ipc.ProgInfo) (res []prog.RacingCalls) {
+func (fuzzer *Fuzzer) identifyContenders(p *prog.Prog, info *ipc.ProgInfo) (res []prog.Contender) {
 	// identify calls that are likely to be of interest when run
 	// in parallel.
 	// TODO: This function requires more works: it considers only two
 	// calls.
 	for call1 := 0; call1 < len(p.Calls); call1++ {
 		for call2 := call1 + 1; call2 < len(p.Calls); call2++ {
-			group := prog.RacingCalls{Calls: []int{call1, call2}}
+			group := prog.Contender{Calls: []int{call1, call2}}
 			if !info.RFInfo[call1][call2].Empty() && fuzzer.checkNewReadFrom(p, info, group) {
-				res = append(res, prog.RacingCalls{Calls: []int{call1, call2}})
+				res = append(res, prog.Contender{Calls: []int{call1, call2}})
 			}
 		}
 	}

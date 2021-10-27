@@ -286,22 +286,22 @@ func (proc *Proc) postExecute(p *prog.Prog, flags ProgTypes, info *ipc.ProgInfo)
 		proc.enqueueCallTriage(p, flags, -1, info.Extra)
 	}
 
-	racingCalls := proc.fuzzer.identifyRacingCalls(p, info)
-	for _, racing := range racingCalls {
-		proc.enqueueThreading(p, racing, info)
+	contenders := proc.fuzzer.identifyContenders(p, info)
+	for _, contender := range contenders {
+		proc.enqueueThreading(p, contender, info)
 	}
 	return info
 }
 
 func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.ProgInfo {
 	// looking for read-from coverage
-	if proc.fuzzer.checkNewReadFrom(p, info, p.RacingCalls) {
+	if proc.fuzzer.checkNewReadFrom(p, info, p.Contender) {
 		// TODO: Razzer's mechanism. we don't minimize p when
 		// threading, but we can.
 		data := p.Serialize()
 		sig := hash.Hash(data)
 		log.Logf(2, "added new threaded input for %v, %v to corpus:\n%s",
-			p.RacingCalls.Calls[0], p.RacingCalls.Calls[1], data)
+			p.Contender.Calls[0], p.Contender.Calls[1], data)
 		proc.fuzzer.addThreadedInputToCorpus(p, info, sig)
 	}
 
@@ -340,7 +340,7 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 	})
 }
 
-func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.RacingCalls, info *ipc.ProgInfo) {
+func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, info *ipc.ProgInfo) {
 	proc.fuzzer.workQueue.enqueue(&WorkThreading{
 		p:     p.Clone(),
 		calls: calls,
