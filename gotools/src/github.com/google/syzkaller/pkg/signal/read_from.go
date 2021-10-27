@@ -8,6 +8,11 @@ import "fmt"
 // from inst1.
 type ReadFrom map[uint32]map[uint32]struct{}
 
+func (rf ReadFrom) Contain(from, to uint32) bool {
+	_, ok := rf[from][to]
+	return ok
+}
+
 func (rf ReadFrom) Empty() bool {
 	if len(rf) == 0 {
 		return true
@@ -22,6 +27,13 @@ func (rf ReadFrom) Empty() bool {
 	return true
 }
 
+func (rf ReadFrom) Add(from, to uint32) {
+	if _, ok := rf[from]; !ok {
+		rf[from] = make(map[uint32]struct{})
+	}
+	rf[from][to] = struct{}{}
+}
+
 func (rf ReadFrom) Copy() ReadFrom {
 	new := ReadFrom{}
 	for k, v := range rf {
@@ -32,6 +44,29 @@ func (rf ReadFrom) Copy() ReadFrom {
 		new[k] = m
 	}
 	return new
+}
+
+func (rf ReadFrom) Merge(rf1 ReadFrom) {
+	if rf1.Empty() {
+		return
+	}
+	for from, tos := range rf1 {
+		for to, _ := range tos {
+			rf.Add(from, to)
+		}
+	}
+}
+
+func (rf ReadFrom) Diff(rf1 ReadFrom) ReadFrom {
+	res := ReadFrom{}
+	for from, tos := range rf1 {
+		for to, _ := range tos {
+			if _, ok := rf[from][to]; !ok {
+				res.Add(from, to)
+			}
+		}
+	}
+	return res
 }
 
 type Order uint32
@@ -68,13 +103,7 @@ func FromAccesses(acc1, acc2 []Access, order Order) ReadFrom {
 		load  = 1
 	)
 
-	res := make(map[uint32]map[uint32]struct{})
-	add := func(inst1, inst2 uint32) {
-		if _, ok := res[inst1]; !ok {
-			res[inst1] = make(map[uint32]struct{})
-		}
-		res[inst1][inst2] = struct{}{}
-	}
+	var res ReadFrom = make(map[uint32]map[uint32]struct{})
 
 	for _, a1 := range acc1 {
 		if a1.typ == load {
@@ -91,7 +120,7 @@ func FromAccesses(acc1, acc2 []Access, order Order) ReadFrom {
 			}
 			if order == Before || a1.timestamp < a2.timestamp {
 				// a1 is store which executed before a2
-				add(a1.inst, a2.inst)
+				res.Add(a1.inst, a2.inst)
 			}
 		}
 	}

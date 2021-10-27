@@ -9,6 +9,80 @@ import (
 	"testing"
 )
 
+func initReadFrom(rf ReadFrom, data [][2]uint32) {
+	for _, d := range data {
+		rf.Add(d[0], d[1])
+	}
+}
+
+func TestAdd(t *testing.T) {
+	rf := ReadFrom{}
+	data := [][2]uint32{
+		{1, 2},
+		{2, 3},
+	}
+	initReadFrom(rf, data)
+
+	for _, d := range data {
+		if _, ok := rf[d[0]][d[1]]; !ok {
+			t.Errorf("missing %d, %d", d[0], d[1])
+		}
+	}
+}
+
+func TestMerge(t *testing.T) {
+	rf1, rf2 := ReadFrom{}, ReadFrom{}
+	data1 := [][2]uint32{
+		{1, 2},
+		{2, 3},
+	}
+	data2 := [][2]uint32{
+		{100, 101},
+		{102, 103},
+	}
+
+	initReadFrom(rf1, data1)
+	initReadFrom(rf2, data2)
+
+	rf1.Merge(rf2)
+
+	check := func(data [][2]uint32) {
+		for _, d := range data {
+			if _, ok := rf1[d[0]][d[1]]; !ok {
+				t.Errorf("missing %d, %d", d[0], d[1])
+			}
+		}
+	}
+	check(data1)
+	check(data2)
+}
+
+func TestDiff(t *testing.T) {
+	rf1, rf2 := ReadFrom{}, ReadFrom{}
+	data1 := [][2]uint32{
+		{1, 2},
+		{2, 3},
+	}
+	data2 := [][2]uint32{
+		{1, 2},
+		{102, 103},
+	}
+
+	initReadFrom(rf1, data1)
+	initReadFrom(rf2, data2)
+
+	diff := rf1.Diff(rf2)
+	if !diff.Contain(102, 103) {
+		t.Errorf("wrong: does not contain 102, 103")
+	}
+	if diff.Contain(1, 2) {
+		t.Errorf("wrong: contains 1, 2")
+	}
+	if diff.Contain(2, 3) {
+		t.Errorf("wrong: contains 2, 3")
+	}
+}
+
 func TestFromEpoch(t *testing.T) {
 	epoch1, epoch2 := uint64(1), uint64(2)
 	if res := FromEpoch(epoch1, epoch2); res != Before {
