@@ -56,10 +56,11 @@ type Fuzzer struct {
 	corpusPrios  []int64
 	sumPrios     int64
 
-	signalMu     sync.RWMutex
-	corpusSignal signal.Signal // signal of inputs in corpus
-	maxSignal    signal.Signal // max signal ever observed including flakes
-	newSignal    signal.Signal // diff of maxSignal since last sync with master
+	signalMu       sync.RWMutex
+	corpusSignal   signal.Signal // signal of inputs in corpus
+	maxSignal      signal.Signal // max signal ever observed including flakes
+	newSignal      signal.Signal // diff of maxSignal since last sync with master
+	corpusReadFrom signal.ReadFrom
 
 	checkResult *rpctype.CheckArgs
 	logMu       sync.Mutex
@@ -262,6 +263,7 @@ func main() {
 		faultInjectionEnabled:    r.CheckResult.Features[host.FeatureFault].Enabled,
 		comparisonTracingEnabled: r.CheckResult.Features[host.FeatureComparisons].Enabled,
 		corpusHashes:             make(map[hash.Sig]struct{}),
+		corpusReadFrom:           make(map[uint32]map[uint32]struct{}),
 		checkResult:              r.CheckResult,
 	}
 	gateCallback := fuzzer.useBugFrames(r, *flagProcs)
@@ -505,19 +507,23 @@ func (fuzzer *FuzzerSnapshot) chooseProgram(r *rand.Rand) *prog.Prog {
 	return fuzzer.corpus[idx]
 }
 
-func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig hash.Sig) {
+func (fuzzer *Fuzzer) __addInputToCorpus(p *prog.Prog, sig hash.Sig, prio int64) {
 	fuzzer.corpusMu.Lock()
+	defer fuzzer.corpusMu.Unlock()
 	if _, ok := fuzzer.corpusHashes[sig]; !ok {
 		fuzzer.corpus = append(fuzzer.corpus, p)
 		fuzzer.corpusHashes[sig] = struct{}{}
-		prio := int64(len(sign))
-		if sign.Empty() {
-			prio = 1
-		}
 		fuzzer.sumPrios += prio
 		fuzzer.corpusPrios = append(fuzzer.corpusPrios, fuzzer.sumPrios)
 	}
-	fuzzer.corpusMu.Unlock()
+}
+
+func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig hash.Sig) {
+	prio := int64(len(sign))
+	if sign.Empty() {
+		prio = 1
+	}
+	fuzzer.__addInputToCorpus(p, sig, prio)
 
 	if !sign.Empty() {
 		fuzzer.signalMu.Lock()
@@ -525,6 +531,18 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 		fuzzer.maxSignal.Merge(sign)
 		fuzzer.signalMu.Unlock()
 	}
+}
+
+func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, info *ipc.ProgInfo, sig hash.Sig) {
+	// TODO: how to set the priority of threaded input?
+	const threadedPrio = 1000
+	fuzzer.__addInputToCorpus(p, sig, threadedPrio)
+
+	fuzzer.signalMu.Lock()
+	defer fuzzer.signalMu.Unlock()
+
+	c := p.RacingCalls.Calls
+	fuzzer.corpusReadFrom.Merge(info.RFInfo[c[0]][c[1]])
 }
 
 func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
@@ -585,15 +603,24 @@ func (fuzzer *Fuzzer) checkNewCallSignal(p *prog.Prog, info *ipc.CallInfo, call 
 	return true
 }
 
-func (fuzzer *Fuzzer) identifyRacingCalls(p *prog.Prog, info *ipc.ProgInfo) (racing []prog.RacingCalls) {
+func (fuzzer *Fuzzer) checkNewReadFrom(p *prog.Prog, info *ipc.ProgInfo, racing prog.RacingCalls) bool {
+	fuzzer.signalMu.RLock()
+	defer fuzzer.signalMu.RUnlock()
+	c := racing.Calls
+	diff := fuzzer.corpusReadFrom.Diff(info.RFInfo[c[0]][c[1]])
+	return !diff.Empty()
+}
+
+func (fuzzer *Fuzzer) identifyRacingCalls(p *prog.Prog, info *ipc.ProgInfo) (res []prog.RacingCalls) {
 	// identify calls that are likely to be of interest when run
 	// in parallel.
-	// TODO: This function requires two more works: 1) it does not
-	// impose a kind of coverage. 2) it considers only two calls.
+	// TODO: This function requires more works: it considers only two
+	// calls.
 	for call1 := 0; call1 < len(p.Calls); call1++ {
 		for call2 := call1 + 1; call2 < len(p.Calls); call2++ {
-			if !info.RFInfo[call1][call2].Empty() {
-				racing = append(racing, prog.RacingCalls{Calls: []int{call1, call2}})
+			group := prog.RacingCalls{Calls: []int{call1, call2}}
+			if !info.RFInfo[call1][call2].Empty() && fuzzer.checkNewReadFrom(p, info, group) {
+				res = append(res, prog.RacingCalls{Calls: []int{call1, call2}})
 			}
 		}
 	}

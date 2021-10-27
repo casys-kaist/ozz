@@ -33,6 +33,7 @@ const (
 	ProgCandidate ProgTypes = 1 << iota
 	ProgMinimized
 	ProgSmashed
+	ProgThreading
 	ProgNormal ProgTypes = 0
 )
 
@@ -67,7 +68,6 @@ type WorkSmash struct {
 // threads.
 type WorkThreading struct {
 	p     *prog.Prog
-	flags ProgTypes
 	calls prog.RacingCalls
 	info  *ipc.ProgInfo
 }
