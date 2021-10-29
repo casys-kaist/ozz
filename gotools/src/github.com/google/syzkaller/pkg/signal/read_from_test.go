@@ -83,6 +83,21 @@ func TestDiff(t *testing.T) {
 	}
 }
 
+func TestCopy(t *testing.T) {
+	rf := ReadFrom{}
+	data := [][2]uint32{
+		{1, 2},
+		{2, 3},
+	}
+	initReadFrom(rf, data)
+	copied := rf.Copy()
+	for _, d := range data {
+		if !copied.Contain(d[0], d[1]) {
+			t.Errorf("missing %d, %v", d[0], d[1])
+		}
+	}
+}
+
 func TestFromEpoch(t *testing.T) {
 	epoch1, epoch2 := uint64(1), uint64(2)
 	if res := FromEpoch(epoch1, epoch2); res != Before {
