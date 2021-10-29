@@ -24,7 +24,8 @@ func TestAdd(t *testing.T) {
 	initReadFrom(rf, data)
 
 	for _, d := range data {
-		if _, ok := rf[d[0]][d[1]]; !ok {
+		k := makeKey(d[0], d[1])
+		if !rf.containKey(k) {
 			t.Errorf("missing %d, %d", d[0], d[1])
 		}
 	}
@@ -48,7 +49,8 @@ func TestMerge(t *testing.T) {
 
 	check := func(data [][2]uint32) {
 		for _, d := range data {
-			if _, ok := rf1[d[0]][d[1]]; !ok {
+			k := makeKey(d[0], d[1])
+			if !rf1.containKey(k) {
 				t.Errorf("missing %d, %d", d[0], d[1])
 			}
 		}
@@ -149,10 +151,6 @@ func TestFromAccesses(t *testing.T) {
 		acc[idx].access = append(acc[idx].access, NewAccess(u[0], u[1], u[2], u[3], u[4]))
 	}
 
-	type rfans struct {
-		a, b uint32
-	}
-
 	// let's compare the built accesses and test data
 	ncalls := len(acc)
 	for i := 0; i < ncalls; i++ {
@@ -175,7 +173,7 @@ func TestFromAccesses(t *testing.T) {
 			if err != nil {
 				t.Errorf("unexpected error while reading a file: %v, %v", fn, err)
 			}
-			ans := map[rfans]struct{}{}
+			ans := map[key]struct{}{}
 			for _, line := range strings.Split(string(b), "\n") {
 				if len(line) == 0 {
 					continue
@@ -189,27 +187,19 @@ func TestFromAccesses(t *testing.T) {
 				if err != nil {
 					t.Errorf("parsing error: %v", err)
 				}
-				ans[rfans{a: uint32(a), b: uint32(b)}] = struct{}{}
+				ans[key{from: uint32(a), to: uint32(b)}] = struct{}{}
 			}
 
 			// build read-from from accesses
-			rfs := FromAccesses(acc[i].access, acc[j].access, FromEpoch(uint64(i), uint64(j)))
-			cnt := 0
-			for a := range rfs {
-				for b := range rfs[a] {
-					cnt++
-					k := rfans{
-						a: a,
-						b: b,
-					}
-					if _, ok := ans[k]; !ok {
-						t.Errorf("wrong %s, %x %x", fn, k.a, k.b)
-					}
+			rf := FromAccesses(acc[i].access, acc[j].access, FromEpoch(uint64(i), uint64(j)))
+			for k := range rf {
+				if _, ok := ans[k]; !ok {
+					t.Errorf("wrong %s, %x %x", fn, k.from, k.to)
 				}
 			}
-			if len(ans) != cnt {
-				t.Errorf("missing read-from %s, len(ans): %v, cnt: %v",
-					fn, len(ans), cnt)
+			if len(ans) != len(rf) {
+				t.Errorf("missing read-from %s, len(ans): %v, len(rf): %v",
+					fn, len(ans), len(rf))
 			}
 		}
 	}

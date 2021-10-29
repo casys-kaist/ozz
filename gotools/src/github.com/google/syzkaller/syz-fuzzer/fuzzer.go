@@ -263,7 +263,7 @@ func main() {
 		faultInjectionEnabled:    r.CheckResult.Features[host.FeatureFault].Enabled,
 		comparisonTracingEnabled: r.CheckResult.Features[host.FeatureComparisons].Enabled,
 		corpusHashes:             make(map[hash.Sig]struct{}),
-		corpusReadFrom:           make(map[uint32]map[uint32]struct{}),
+		corpusReadFrom:           signal.NewReadFrom(),
 		checkResult:              r.CheckResult,
 	}
 	gateCallback := fuzzer.useBugFrames(r, *flagProcs)

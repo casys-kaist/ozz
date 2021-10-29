@@ -6,42 +6,38 @@ import "fmt"
 // given two instructions inst1 and inst2, if ok is true where _, ok
 // := rf[inst1][inst2], inst1 affects inst2 which means inst2 reads
 // from inst1.
-type ReadFrom map[uint32]map[uint32]struct{}
+type key struct{ from, to uint32 }
+type ReadFrom map[key]struct{}
 
-func (rf ReadFrom) Contain(from, to uint32) bool {
-	_, ok := rf[from][to]
+func NewReadFrom() ReadFrom { return make(map[key]struct{}) }
+
+func (rf ReadFrom) containKey(k key) bool {
+	_, ok := rf[k]
 	return ok
 }
 
+func (rf ReadFrom) Contain(from, to uint32) bool {
+	k := makeKey(from, to)
+	return rf.containKey(k)
+}
+
 func (rf ReadFrom) Empty() bool {
-	if len(rf) == 0 {
-		return true
-	}
-	// XXX: This loop wastes computing power. Do not retains an empty
-	// map in the middle if possible.
-	for _, v := range rf {
-		if len(v) != 0 {
-			return false
-		}
-	}
-	return true
+	return len(rf) == 0
+}
+
+func (rf ReadFrom) addKey(k key) {
+	rf[k] = struct{}{}
 }
 
 func (rf ReadFrom) Add(from, to uint32) {
-	if _, ok := rf[from]; !ok {
-		rf[from] = make(map[uint32]struct{})
-	}
-	rf[from][to] = struct{}{}
+	k := makeKey(from, to)
+	rf.addKey(k)
 }
 
 func (rf ReadFrom) Copy() ReadFrom {
 	new := ReadFrom{}
-	for k, v := range rf {
-		m := make(map[uint32]struct{})
-		for k, v := range v {
-			m[k] = v
-		}
-		new[k] = m
+	for k := range rf {
+		new.addKey(k)
 	}
 	return new
 }
@@ -50,20 +46,16 @@ func (rf ReadFrom) Merge(rf1 ReadFrom) {
 	if rf1.Empty() {
 		return
 	}
-	for from, tos := range rf1 {
-		for to, _ := range tos {
-			rf.Add(from, to)
-		}
+	for k := range rf1 {
+		rf.addKey(k)
 	}
 }
 
 func (rf ReadFrom) Diff(rf1 ReadFrom) ReadFrom {
 	res := ReadFrom{}
-	for from, tos := range rf1 {
-		for to, _ := range tos {
-			if _, ok := rf[from][to]; !ok {
-				res.Add(from, to)
-			}
+	for k := range rf1 {
+		if !rf.containKey(k) {
+			res.addKey(k)
 		}
 	}
 	return res
@@ -103,7 +95,7 @@ func FromAccesses(acc1, acc2 []Access, order Order) ReadFrom {
 		load  = 1
 	)
 
-	var res ReadFrom = make(map[uint32]map[uint32]struct{})
+	res := NewReadFrom()
 
 	for _, a1 := range acc1 {
 		if a1.typ == load {
@@ -144,3 +136,5 @@ func (acc Access) String() string {
 	return fmt.Sprintf("%x accesses %x (size: %d, type: %d, timestamp: %d)",
 		acc.inst, acc.addr, acc.size, acc.typ, acc.timestamp)
 }
+
+func makeKey(from, to uint32) key { return key{from: from, to: to} }
