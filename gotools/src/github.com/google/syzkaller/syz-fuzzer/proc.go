@@ -521,12 +521,13 @@ func (logger ResultLogger) logReadFrom() {
 			if i1 == i2 {
 				continue
 			}
-			if len(logger.info.RFInfo[i1][i2]) == 0 {
+			rf := logger.info.RFInfo[i1][i2]
+			if rf.Len() == 0 {
 				continue
 			}
-			str := fmt.Sprintf("%v(%d@%d) -> %v(%d@%d)",
+			str := fmt.Sprintf("%v(%d@%d) -> %v(%d@%d) (read-from=%d)",
 				c1.Meta.Name, c1.Thread, c1.Epoch,
-				c2.Meta.Name, c2.Thread, c2.Epoch)
+				c2.Meta.Name, c2.Thread, c2.Epoch, rf.Len())
 			if c1.Epoch == c2.Epoch {
 				conflicts = append(conflicts, str)
 			} else {

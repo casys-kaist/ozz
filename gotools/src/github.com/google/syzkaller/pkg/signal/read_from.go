@@ -61,6 +61,10 @@ func (rf ReadFrom) Diff(rf1 ReadFrom) ReadFrom {
 	return res
 }
 
+func (rf ReadFrom) Len() int {
+	return len(rf)
+}
+
 type Order uint32
 
 const (

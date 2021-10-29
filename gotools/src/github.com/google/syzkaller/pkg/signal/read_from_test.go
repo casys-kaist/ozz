@@ -16,7 +16,7 @@ func initReadFrom(rf ReadFrom, data [][2]uint32) {
 }
 
 func TestAdd(t *testing.T) {
-	rf := ReadFrom{}
+	rf := NewReadFrom()
 	data := [][2]uint32{
 		{1, 2},
 		{2, 3},
@@ -31,8 +31,23 @@ func TestAdd(t *testing.T) {
 	}
 }
 
+func TestLen(t *testing.T) {
+	rf := NewReadFrom()
+	data := [][2]uint32{
+		{1, 2},
+		{2, 3},
+		{2, 3}, // duplicate
+		{3, 4},
+	}
+	initReadFrom(rf, data)
+	if rf.Len() != len(data)-1 {
+		t.Errorf("wrong length: expected %d, got %d",
+			len(data)-1, rf.Len())
+	}
+}
+
 func TestMerge(t *testing.T) {
-	rf1, rf2 := ReadFrom{}, ReadFrom{}
+	rf1, rf2 := NewReadFrom(), NewReadFrom()
 	data1 := [][2]uint32{
 		{1, 2},
 		{2, 3},
@@ -60,7 +75,7 @@ func TestMerge(t *testing.T) {
 }
 
 func TestDiff(t *testing.T) {
-	rf1, rf2 := ReadFrom{}, ReadFrom{}
+	rf1, rf2 := NewReadFrom(), NewReadFrom()
 	data1 := [][2]uint32{
 		{1, 2},
 		{2, 3},
@@ -86,7 +101,7 @@ func TestDiff(t *testing.T) {
 }
 
 func TestCopy(t *testing.T) {
-	rf := ReadFrom{}
+	rf := NewReadFrom()
 	data := [][2]uint32{
 		{1, 2},
 		{2, 3},
