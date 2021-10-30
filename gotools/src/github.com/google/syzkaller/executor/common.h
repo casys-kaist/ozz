@@ -691,9 +691,9 @@ static void loop(void)
 			if (current_time_ms() - start < program_timeout_ms)
 				continue;
 #else
-			if (current_time_ms() - start < /*{{{PROGRAM_TIMEOUT_MS}}}*/) {
-				continue;
-			}
+		if (current_time_ms() - start < /*{{{PROGRAM_TIMEOUT_MS}}}*/) {
+			continue;
+		}
 #endif
 			// NOTE: worker threads are hanged. disbale
 			// kssb since enabling kssb incurs a large

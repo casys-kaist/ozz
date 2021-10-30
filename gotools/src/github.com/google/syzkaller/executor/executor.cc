@@ -83,7 +83,17 @@ const int kOutPipeFd = kMaxFd - 2; // remapped from stdout
 const int kCoverFd = kOutPipeFd - (kMaxThreads * kMaxFallbackThreads) * nr_cov_type;
 const int kMaxArgs = 9;
 const int kMaxCPU = 8;
-const int kCPUMask0 = 1 << 0;
+#define __mask(n) (1 << n)
+const int kCPUMask[kMaxCPU] = {
+    __mask(0),
+    __mask(1),
+    __mask(2),
+    __mask(3),
+    __mask(4),
+    __mask(5),
+    __mask(6),
+    __mask(7),
+};
 const int kCPUMaskAll = 0xff;
 const int kCoverSize = 256 << 10;
 const int kFailStatus = 67;
@@ -270,7 +280,7 @@ struct thread_t {
 	intptr_t args[kMaxArgs];
 	int epoch;
 	uint64 num_sched;
-	schedule_t *sched;
+	schedule_t sched[kMaxSchedule];
 	intptr_t res;
 	uint32 reserrno;
 	bool fault_injected;
@@ -382,13 +392,16 @@ struct feature_t {
 };
 
 static thread_t* get_thread(int thread);
-static thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t *sched, uint64* pos);
+static thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos);
 static void handle_completion(thread_t* th);
 static thread_t* unhand_worker_thread(thread_t* th);
 static void copyout_call_results(thread_t* th);
 static void write_call_output(thread_t* th, bool finished);
 static void write_extra_output();
 static void execute_call(thread_t* th);
+static void setup_schedule(int num_sched, schedule_t* sched, int cpu);
+static void clear_schedule(int num_sched);
+static int lookup_available_cpu(int id);
 static void coverage_pre_call(thread_t* th);
 static void coverage_post_call(thread_t* th);
 static void thread_create(thread_t* th, int id);
@@ -462,7 +475,7 @@ int main(int argc, char** argv)
 
 	os_init(argc, argv, (char*)SYZ_DATA_OFFSET, SYZ_NUM_PAGES * SYZ_PAGE_SIZE);
 	current_thread = get_thread(0);
-	setup_affinity_mask(kCPUMask0);
+	setup_affinity_mask(kCPUMask[0]);
 
 #if SYZ_EXECUTOR_USES_SHMEM
 	if (mmap(&input_data[0], kMaxInput, PROT_READ, MAP_PRIVATE | MAP_FIXED, kInFd, 0) != &input_data[0])
@@ -708,6 +721,18 @@ void reply_execute(int status)
 		fail("control pipe write failed");
 }
 
+int count_contenders()
+{
+	int num = 0;
+	for (int i = 0; i < kMaxThreads; i++) {
+		thread_t* th = get_thread(i);
+		if (!th->created || !event_isset(&th->ready) || th->num_sched == 0 || !run_in_epoch(th))
+			continue;
+		num++;
+	}
+	return num;
+}
+
 // start_epoch() assumes schedule_call() gracefully handles a blocking
 // thread, and the forefront thread can execute an assigned call.
 void start_epoch()
@@ -716,6 +741,9 @@ void start_epoch()
 	// Signal threads that are ready to execute. Each thread will
 	// reset th->ready after th->start is set.
 	debug("start epoch %d\n", epoch);
+	int num_contender = count_contenders();
+	if (num_contender != 0)
+		hypercall(HCALL_PREPARE_BP, num_contender, 0, 0);
 	for (int i = 0; i < kMaxThreads; i++) {
 		thread_t* th = get_thread(i);
 		if (th->created && event_isset(&th->ready)) {
@@ -914,7 +942,7 @@ retry:
 		uint64 epoch = read_input(&input_pos);
 		uint64 num_sched = read_input(&input_pos);
 		schedule_t sched[kMaxSchedule];
-		for (uint64 i = 0; i < num_sched;i++) {
+		for (uint64 i = 0; i < num_sched; i++) {
 			sched[i].thread = read_input(&input_pos);
 			sched[i].addr = read_input(&input_pos);
 			sched[i].order = read_input(&input_pos);
@@ -996,7 +1024,7 @@ thread_t* get_thread(int thread)
 	return &set->set[idx];
 }
 
-thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t *sched, uint64* pos)
+thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos)
 {
 	debug("schedule a call to thread %llu@%llu\n", thread, epoch);
 	thread_t* th = get_thread(thread);
@@ -1031,7 +1059,8 @@ thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 cop
 		th->args[i] = args[i];
 	th->epoch = epoch;
 	th->num_sched = num_sched;
-	th->sched = sched;
+	for (uint64 i = 0; i < num_sched; i++)
+		th->sched[i] = sched[i];
 	event_set(&th->ready);
 	running++;
 	return th;
@@ -1328,7 +1357,7 @@ void* worker_thread(void* arg)
 	thread_t* th = (thread_t*)arg;
 	threadid = th->id;
 	current_thread = th;
-	setup_affinity_mask(kCPUMaskAll & ~kCPUMask0);
+	setup_affinity_mask(kCPUMaskAll & ~kCPUMask[0]);
 	if (flag_coverage) {
 		cover_enable(&th->cov, flag_comparisons, false);
 		cover_enable(&th->rfcov, false, false);
@@ -1373,7 +1402,10 @@ void execute_call(thread_t* th)
 	// Arrange for res = -1 and errno = EFAULT result for such case.
 	th->res = -1;
 	errno = EFAULT;
+	int cpu = lookup_available_cpu(th->id);
+	setup_schedule(th->num_sched, th->sched, cpu);
 	NONFAILING(th->res = execute_syscall(call, th->args));
+	clear_schedule(th->num_sched);
 	th->reserrno = errno;
 	// Our pseudo-syscalls may misbehave.
 	if ((th->res == -1 && th->reserrno == 0) || call->attrs.ignore_return)
@@ -1395,6 +1427,48 @@ void execute_call(thread_t* th)
 	if (flag_fault && th->call_index == flag_fault_call)
 		debug_noprefix("fault=%d ", th->fault_injected);
 	debug_noprefix("\n");
+}
+
+void setup_schedule(int num_sched, schedule_t* sched, int cpu)
+{
+	setup_affinity_mask(kCPUMask[cpu]);
+	if (num_sched == 0)
+		return;
+	debug("installing breakpoint bp=%d\n", num_sched);
+	for (int i = 0; i < num_sched; i++) {
+		hypercall(HCALL_INSTALL_BP, sched[i].addr, sched[i].order, 0);
+	}
+
+	int attempt = 10;
+	uint64 res = hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
+	while (res == (uint64)(-EINVAL) && --attempt) {
+		sleep_ms(10);
+		res = hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
+	}
+	// hypercall(HCALL_ACTIVATE_BP) can return -EBUSY if another
+	// thread already asked QCMU to activate the schedule, and it
+	// is the only case of the return value of -EBUSY. So -EBUSY
+	// is fine.
+	if (res != 0 && res != (unsigned long long)(-EBUSY))
+		debug("failed to setup a schedule: %llx\n", res);
+}
+
+void clear_schedule(int num_sched)
+{
+	if (num_sched != 0) {
+		hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
+		hypercall(HCALL_CLEAR_BP, 0, 0, 0);
+	}
+	setup_affinity_mask(kCPUMaskAll & ~kCPUMask[0]);
+}
+
+int lookup_available_cpu(int id)
+{
+	// TODO: Currently, we are testing to trigger CVE-2017-2636
+	// with only one worker process, so it is okay to statically
+	// assign a thread to a cpu. This limits the number of
+	// processes, so fix this.
+	return id + 1;
 }
 
 void coverage_pre_call(thread_t* th)
