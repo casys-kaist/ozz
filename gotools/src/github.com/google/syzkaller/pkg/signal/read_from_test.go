@@ -9,6 +9,112 @@ import (
 	"testing"
 )
 
+func initReadFrom(rf ReadFrom, data [][2]uint32) {
+	for _, d := range data {
+		rf.Add(d[0], d[1])
+	}
+}
+
+func TestAdd(t *testing.T) {
+	rf := NewReadFrom()
+	data := [][2]uint32{
+		{1, 2},
+		{2, 3},
+	}
+	initReadFrom(rf, data)
+
+	for _, d := range data {
+		k := makeKey(d[0], d[1])
+		if !rf.containKey(k) {
+			t.Errorf("missing %d, %d", d[0], d[1])
+		}
+	}
+}
+
+func TestLen(t *testing.T) {
+	rf := NewReadFrom()
+	data := [][2]uint32{
+		{1, 2},
+		{2, 3},
+		{2, 3}, // duplicate
+		{3, 4},
+	}
+	initReadFrom(rf, data)
+	if rf.Len() != len(data)-1 {
+		t.Errorf("wrong length: expected %d, got %d",
+			len(data)-1, rf.Len())
+	}
+}
+
+func TestMerge(t *testing.T) {
+	rf1, rf2 := NewReadFrom(), NewReadFrom()
+	data1 := [][2]uint32{
+		{1, 2},
+		{2, 3},
+	}
+	data2 := [][2]uint32{
+		{100, 101},
+		{102, 103},
+	}
+
+	initReadFrom(rf1, data1)
+	initReadFrom(rf2, data2)
+
+	rf1.Merge(rf2)
+
+	check := func(data [][2]uint32) {
+		for _, d := range data {
+			k := makeKey(d[0], d[1])
+			if !rf1.containKey(k) {
+				t.Errorf("missing %d, %d", d[0], d[1])
+			}
+		}
+	}
+	check(data1)
+	check(data2)
+}
+
+func TestDiff(t *testing.T) {
+	rf1, rf2 := NewReadFrom(), NewReadFrom()
+	data1 := [][2]uint32{
+		{1, 2},
+		{2, 3},
+	}
+	data2 := [][2]uint32{
+		{1, 2},
+		{102, 103},
+	}
+
+	initReadFrom(rf1, data1)
+	initReadFrom(rf2, data2)
+
+	diff := rf1.Diff(rf2)
+	if !diff.Contain(102, 103) {
+		t.Errorf("wrong: does not contain 102, 103")
+	}
+	if diff.Contain(1, 2) {
+		t.Errorf("wrong: contains 1, 2")
+	}
+	if diff.Contain(2, 3) {
+		t.Errorf("wrong: contains 2, 3")
+	}
+}
+
+func TestCopy(t *testing.T) {
+	rf := NewReadFrom()
+	data := [][2]uint32{
+		{1, 2},
+		{2, 3},
+	}
+	initReadFrom(rf, data)
+	copied := rf.Copy()
+	for _, d := range data {
+		if !copied.Contain(d[0], d[1]) {
+			t.Errorf("missing %d, %v", d[0], d[1])
+		}
+	}
+}
+
 func TestFromEpoch(t *testing.T) {
 	epoch1, epoch2 := uint64(1), uint64(2)
 	if res := FromEpoch(epoch1, epoch2); res != Before {
@@ -60,10 +166,6 @@ func TestFromAccesses(t *testing.T) {
 		acc[idx].access = append(acc[idx].access, NewAccess(u[0], u[1], u[2], u[3], u[4]))
 	}
 
-	type rfans struct {
-		a, b uint32
-	}
-
 	// let's compare the built accesses and test data
 	ncalls := len(acc)
 	for i := 0; i < ncalls; i++ {
@@ -86,7 +188,7 @@ func TestFromAccesses(t *testing.T) {
 			if err != nil {
 				t.Errorf("unexpected error while reading a file: %v, %v", fn, err)
 			}
-			ans := map[rfans]struct{}{}
+			ans := map[key]struct{}{}
 			for _, line := range strings.Split(string(b), "\n") {
 				if len(line) == 0 {
 					continue
@@ -100,27 +202,19 @@ func TestFromAccesses(t *testing.T) {
 				if err != nil {
 					t.Errorf("parsing error: %v", err)
 				}
-				ans[rfans{a: uint32(a), b: uint32(b)}] = struct{}{}
+				ans[key{from: uint32(a), to: uint32(b)}] = struct{}{}
 			}
 
 			// build read-from from accesses
-			rfs := FromAccesses(acc[i].access, acc[j].access, FromEpoch(uint64(i), uint64(j)))
-			cnt := 0
-			for a := range rfs {
-				for b := range rfs[a] {
-					cnt++
-					k := rfans{
-						a: a,
-						b: b,
-					}
-					if _, ok := ans[k]; !ok {
-						t.Errorf("wrong %s, %x %x", fn, k.a, k.b)
-					}
+			rf := FromAccesses(acc[i].access, acc[j].access, FromEpoch(uint64(i), uint64(j)))
+			for k := range rf {
+				if _, ok := ans[k]; !ok {
+					t.Errorf("wrong %s, %x %x", fn, k.from, k.to)
 				}
 			}
-			if len(ans) != cnt {
-				t.Errorf("missing read-from %s, len(ans): %v, cnt: %v",
-					fn, len(ans), cnt)
+			if len(ans) != len(rf) {
+				t.Errorf("missing read-from %s, len(ans): %v, len(rf): %v",
+					fn, len(ans), len(rf))
 			}
 		}
 	}

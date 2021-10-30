@@ -1,16 +1,18 @@
 OUTDIR=build/
-SRC=$(wildcard *.c)
-DEPS=$(patsubst %.c, $(OUTDIR)/%, $(SRC))
+SRC=$(wildcard **/*.c)
+DST=$(patsubst %.c,%,$(addprefix $(OUTDIR),$(SRC)))
 
-all: $(DEPS)
+all: prep $(DST)
 
 prep:
-	mkdir -p $(OUTDIR)
+	@mkdir -p $(OUTDIR)/poc
+	@mkdir -p $(OUTDIR)/tests
 
-$(OUTDIR)/%: %.c
-	@make prep
+build/tests/%: tests/%.c
 	@gcc $< -o $@ -x86_64 -lpthread --static
-	@aarch64-linux-gnu-gcc $< -o $@-aarch64 -lpthread --static
+
+build/poc/%: poc/%.c
+	@gcc $< -o $@ -x86_64 -lpthread --static
 
 clean:
 	@rm -rf $(OUTDIR)

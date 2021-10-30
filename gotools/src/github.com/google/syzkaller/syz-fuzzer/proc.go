@@ -77,6 +77,8 @@ func (proc *Proc) loop() {
 				proc.executeCandidate(item)
 			case *WorkSmash:
 				proc.smashInput(item)
+			case *WorkThreading:
+				proc.threadingInput(item)
 			default:
 				log.Fatalf("unknown work type: %#v", item)
 			}
@@ -88,20 +90,20 @@ func (proc *Proc) loop() {
 		if len(fuzzerSnapshot.corpus) == 0 || i%generatePeriod == 0 {
 			// Generate a new prog.
 			p := proc.fuzzer.target.Generate(proc.rnd, prog.RecommendedCalls, ct)
-			log.Logf(1, "#%v: generated", proc.pid)
+			log.Logf(1, "proc #%v: generated", proc.pid)
 			proc.execute(proc.execOpts, p, ProgNormal, StatGenerate)
 		} else {
 			// Mutate an existing prog.
 			p := fuzzerSnapshot.chooseProgram(proc.rnd).Clone()
 			p.Mutate(proc.rnd, prog.RecommendedCalls, ct, fuzzerSnapshot.corpus)
-			log.Logf(1, "#%v: mutated", proc.pid)
+			log.Logf(1, "proc #%v: mutated", proc.pid)
 			proc.execute(proc.execOpts, p, ProgNormal, StatFuzz)
 		}
 	}
 }
 
 func (proc *Proc) triageInput(item *WorkTriage) {
-	log.Logf(1, "#%v: triaging type=%x", proc.pid, item.flags)
+	log.Logf(1, "proc #%v: triaging type=%x", proc.pid, item.flags)
 
 	prio := signalPrio(item.p, &item.info, item.call)
 	inputSignal := signal.FromRaw(item.info.Signal, prio)
@@ -202,7 +204,7 @@ func getSignalAndCover(p *prog.Prog, info *ipc.ProgInfo, call int) (signal.Signa
 }
 
 func (proc *Proc) executeCandidate(item *WorkCandidate) {
-	log.Logf(1, "%v: executing a candidate", proc.pid)
+	log.Logf(1, "proc #%v: executing a candidate", proc.pid)
 	proc.execute(proc.execOpts, item.p, item.flags, StatCandidate)
 }
 
@@ -217,14 +219,21 @@ func (proc *Proc) smashInput(item *WorkSmash) {
 	for i := 0; i < 100; i++ {
 		p := item.p.Clone()
 		p.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, fuzzerSnapshot.corpus)
-		log.Logf(1, "#%v: smash mutated", proc.pid)
+		log.Logf(1, "proc #%v: smash mutated", proc.pid)
 		proc.execute(proc.execOpts, p, ProgNormal, StatSmash)
 	}
 }
 
+func (proc *Proc) threadingInput(item *WorkThreading) {
+	log.Logf(1, "proc #%v: threading an input", proc.pid)
+	p := item.p.Clone()
+	p.Threading(item.calls)
+	proc.execute(proc.execOpts, p, ProgNormal, StatThreading)
+}
+
 func (proc *Proc) failCall(p *prog.Prog, call int) {
 	for nth := 0; nth < 100; nth++ {
-		log.Logf(1, "#%v: injecting fault into call %v/%v", proc.pid, call, nth)
+		log.Logf(1, "proc #%v: injecting fault into call %v/%v", proc.pid, call, nth)
 		opts := *proc.execOpts
 		opts.Flags |= ipc.FlagInjectFault
 		opts.FaultCall = call
@@ -237,7 +246,7 @@ func (proc *Proc) failCall(p *prog.Prog, call int) {
 }
 
 func (proc *Proc) executeHintSeed(p *prog.Prog, call int) {
-	log.Logf(1, "#%v: collecting comparisons", proc.pid)
+	log.Logf(1, "proc #%v: collecting comparisons", proc.pid)
 	// First execute the original program to dump comparisons from KCOV.
 	info := proc.execute(proc.execOptsComps, p, ProgNormal, StatSeed)
 	if info == nil {
@@ -248,7 +257,7 @@ func (proc *Proc) executeHintSeed(p *prog.Prog, call int) {
 	// a syscall argument and a comparison operand.
 	// Execute each of such mutants to check if it gives new coverage.
 	p.MutateWithHints(call, info.Calls[call].Comps, func(p *prog.Prog) {
-		log.Logf(1, "#%v: executing comparison hint", proc.pid)
+		log.Logf(1, "proc #%v: executing comparison hint", proc.pid)
 		proc.execute(proc.execOpts, p, ProgNormal, StatHint)
 	})
 }
@@ -258,6 +267,17 @@ func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes,
 	if info == nil {
 		return nil
 	}
+	proc.detachReadFrom(p, info)
+
+	if !p.Threaded {
+		return proc.postExecute(p, flags, info)
+	} else {
+		return proc.postExecuteThreaded(p, info)
+	}
+}
+
+func (proc *Proc) postExecute(p *prog.Prog, flags ProgTypes, info *ipc.ProgInfo) *ipc.ProgInfo {
+	// looking for code coverage
 	calls, extra := proc.fuzzer.checkNewSignal(p, info)
 	for _, callIndex := range calls {
 		proc.enqueueCallTriage(p, flags, callIndex, info.Calls[callIndex])
@@ -265,7 +285,45 @@ func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes,
 	if extra {
 		proc.enqueueCallTriage(p, flags, -1, info.Extra)
 	}
+
+	contenders := proc.fuzzer.identifyContenders(p, info)
+	for _, contender := range contenders {
+		proc.enqueueThreading(p, contender, info)
+	}
 	return info
+}
+
+func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.ProgInfo {
+	// looking for read-from coverage
+	if proc.fuzzer.checkNewReadFrom(p, info, p.Contender) {
+		// TODO: Razzer's mechanism. we don't minimize p when
+		// threading, but we can.
+		data := p.Serialize()
+		sig := hash.Hash(data)
+		log.Logf(2, "added new threaded input for %v, %v to corpus:\n%s",
+			p.Contender.Calls[0], p.Contender.Calls[1], data)
+		proc.fuzzer.addThreadedInputToCorpus(p, info, sig)
+	}
+
+	// TODO: Razzer mechanism. p is already threaded so we don't
+	// thread it more. So here we don't enqueue more threading works.
+	// This is possibly a limitation of Razzer. Improve this if
+	// possible.
+	return info
+}
+
+func (proc *Proc) detachReadFrom(p *prog.Prog, info *ipc.ProgInfo) {
+	// As described in enqueueCallTriage(), info.RFInfo points to the
+	// output shmem region, detach it before using it.
+	rfinfo := info.RFInfo
+	l := len(p.Calls)
+	info.RFInfo = make([][]signal.ReadFrom, l)
+	for i := 0; i < l; i++ {
+		info.RFInfo[i] = make([]signal.ReadFrom, l)
+		for j := 0; j < l; j++ {
+			info.RFInfo[i][j] = rfinfo[i][j].Copy()
+		}
+	}
 }
 
 func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int, info ipc.CallInfo) {
@@ -279,6 +337,14 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 		call:  callIndex,
 		info:  info,
 		flags: flags,
+	})
+}
+
+func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, info *ipc.ProgInfo) {
+	proc.fuzzer.workQueue.enqueue(&WorkThreading{
+		p:     p.Clone(),
+		calls: calls,
+		info:  info,
 	})
 }
 
@@ -455,12 +521,13 @@ func (logger ResultLogger) logReadFrom() {
 			if i1 == i2 {
 				continue
 			}
-			if len(logger.info.RFInfo[i1][i2]) == 0 {
+			rf := logger.info.RFInfo[i1][i2]
+			if rf.Len() == 0 {
 				continue
 			}
-			str := fmt.Sprintf("%v(%d@%d) <- %v(%d@%d)",
+			str := fmt.Sprintf("%v(%d@%d) -> %v(%d@%d) (read-from=%d)",
 				c1.Meta.Name, c1.Thread, c1.Epoch,
-				c2.Meta.Name, c2.Thread, c2.Epoch)
+				c2.Meta.Name, c2.Thread, c2.Epoch, rf.Len())
 			if c1.Epoch == c2.Epoch {
 				conflicts = append(conflicts, str)
 			} else {

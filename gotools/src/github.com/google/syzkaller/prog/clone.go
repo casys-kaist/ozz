@@ -9,8 +9,10 @@ import (
 
 func (p *Prog) Clone() *Prog {
 	p1 := &Prog{
-		Target: p.Target,
-		Calls:  make([]*Call, len(p.Calls)),
+		Target:    p.Target,
+		Calls:     make([]*Call, len(p.Calls)),
+		Threaded:  p.Threaded,
+		Contender: p.Contender,
 	}
 	newargs := make(map[*ResultArg]*ResultArg)
 	for ci, c := range p.Calls {
