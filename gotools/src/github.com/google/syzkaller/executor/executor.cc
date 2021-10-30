@@ -76,6 +76,7 @@ typedef unsigned char uint8;
 // Some common_OS.h files know about this constant for RLIMIT_NOFILE.
 const int kMaxFd = 250;
 const int kMaxThreads = 4;
+const int kMaxSchedule = 4;
 const int kMaxFallbackThreads = 3;
 const int kInPipeFd = kMaxFd - 1; // remapped from stdin
 const int kOutPipeFd = kMaxFd - 2; // remapped from stdout
@@ -247,6 +248,12 @@ struct cover_t {
 	intptr_t pc_offset;
 };
 
+struct schedule_t {
+	uint64_t thread;
+	uint64_t addr;
+	uint64_t order;
+};
+
 struct thread_t {
 	int id;
 	bool created;
@@ -262,6 +269,8 @@ struct thread_t {
 	int num_args;
 	intptr_t args[kMaxArgs];
 	int epoch;
+	uint64 num_sched;
+	schedule_t *sched;
 	intptr_t res;
 	uint32 reserrno;
 	bool fault_injected;
@@ -373,7 +382,7 @@ struct feature_t {
 };
 
 static thread_t* get_thread(int thread);
-static thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64* pos);
+static thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t *sched, uint64* pos);
 static void handle_completion(thread_t* th);
 static thread_t* unhand_worker_thread(thread_t* th);
 static void copyout_call_results(thread_t* th);
@@ -903,8 +912,15 @@ retry:
 			args[i] = 0;
 		uint64 thread = read_input(&input_pos);
 		uint64 epoch = read_input(&input_pos);
+		uint64 num_sched = read_input(&input_pos);
+		schedule_t sched[kMaxSchedule];
+		for (uint64 i = 0; i < num_sched;i++) {
+			sched[i].thread = read_input(&input_pos);
+			sched[i].addr = read_input(&input_pos);
+			sched[i].order = read_input(&input_pos);
+		}
 		schedule_call(call_index++, call_num, colliding, copyout_index,
-			      num_args, args, thread, epoch, input_pos);
+			      num_args, args, thread, epoch, num_sched, sched, input_pos);
 	}
 
 	if (!colliding && !collide && running > 0) {
@@ -980,7 +996,7 @@ thread_t* get_thread(int thread)
 	return &set->set[idx];
 }
 
-thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64* pos)
+thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t *sched, uint64* pos)
 {
 	debug("schedule a call to thread %llu@%llu\n", thread, epoch);
 	thread_t* th = get_thread(thread);
@@ -1014,6 +1030,8 @@ thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 cop
 	for (int i = 0; i < kMaxArgs; i++)
 		th->args[i] = args[i];
 	th->epoch = epoch;
+	th->num_sched = num_sched;
+	th->sched = sched;
 	event_set(&th->ready);
 	running++;
 	return th;

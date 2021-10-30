@@ -16,6 +16,7 @@ type Prog struct {
 	// limittation of Razzer. Improve this if possible.
 	Threaded bool
 	Contender
+	Schedule
 }
 
 type Call struct {

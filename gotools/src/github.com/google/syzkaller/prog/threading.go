@@ -54,4 +54,13 @@ func (p *Prog) Threading(calls Contender) {
 	// Razzer. Improve this if possible.
 	p.Threaded = true
 	p.Contender = calls
+	p.Schedule = sequentialSchedule(p)
+}
+
+func (p *Prog) Contenders() []*Call {
+	res := []*Call{}
+	for _, ci := range p.Contender.Calls {
+		res = append(res, p.Calls[ci])
+	}
+	return res
 }

@@ -76,12 +76,23 @@ func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
 		w.writeEpoch(c)
 		w.csumMap, w.csumUses = calcChecksumsCall(c)
 		w.serializeCall(c)
+		w.writeSchedule(c, p.Schedule)
 	}
 	w.write(execInstrEOF)
 	if w.eof || w.copyoutSeq > execMaxCommands {
 		return 0, ErrExecBufferTooSmall
 	}
 	return len(buffer) - len(w.buf), nil
+}
+
+func (w *execContext) writeSchedule(c *Call, sched Schedule) {
+	match := sched.Match(c)
+	w.write(uint64(match.Len()))
+	for _, point := range match.points {
+		w.write(point.call.Thread)
+		w.write(point.addr)
+		w.write(point.order)
+	}
 }
 
 func (w *execContext) writeEpoch(c *Call) {

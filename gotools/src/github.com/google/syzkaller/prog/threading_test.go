@@ -6,7 +6,7 @@ func TestRazzerThreading(t *testing.T) {
 	l := 7
 	p := simpleRazzerProg(l)
 
-	racing := RacingCalls{Calls: []int{2, 5}}
+	racing := Contender{Calls: []int{2, 5}}
 
 	p.Threading(racing)
 
