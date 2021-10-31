@@ -76,7 +76,6 @@ func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
 		w.writeEpoch(c)
 		w.csumMap, w.csumUses = calcChecksumsCall(c)
 		w.serializeCall(c)
-		w.writeEpoch(c)
 	}
 	w.write(execInstrEOF)
 	if w.eof || w.copyoutSeq > execMaxCommands {
@@ -86,11 +85,10 @@ func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
 }
 
 func (w *execContext) writeEpoch(c *Call) {
-	if w.epoch == c.Epoch {
-		return
+	if w.epoch+1 == c.Epoch {
+		w.write(execInstrEpoch)
+		w.epoch++
 	}
-	w.write(execInstrEpoch)
-	w.epoch = c.Epoch
 }
 
 func (w *execContext) serializeCall(c *Call) {
