@@ -1,12 +1,18 @@
 package signal
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
+
+type key struct{ from, to uint32 }
+
+func makeKey(from, to uint32) key { return key{from: from, to: to} }
 
 // ReadFrom represents read-from coverage for two instructions. For
 // given two instructions inst1 and inst2, if ok is true where _, ok
 // := rf[inst1][inst2], inst1 affects inst2 which means inst2 reads
 // from inst1.
-type key struct{ from, to uint32 }
 type ReadFrom map[key]struct{}
 
 func NewReadFrom() ReadFrom { return make(map[key]struct{}) }
@@ -87,11 +93,11 @@ func FromEpoch(i1, i2 uint64) Order {
 // and acc2
 // TODO: signal uses prio describing priority of each element. I
 // have no idea that we need it too.
-func FromAccesses(acc1, acc2 []Access, order Order) ReadFrom {
+func FromAccesses(acc1, acc2 []Access, order Order) (ReadFrom, SerialAccess) {
 	if order == After {
 		// if acc1 happened after acc2, nothing from acc2 could be
 		// affected by acc1.
-		return nil
+		return nil, nil
 	}
 
 	const (
@@ -99,7 +105,8 @@ func FromAccesses(acc1, acc2 []Access, order Order) ReadFrom {
 		load  = 1
 	)
 
-	res := NewReadFrom()
+	rf := NewReadFrom()
+	used := []Access{}
 
 	for _, a1 := range acc1 {
 		if a1.typ == load {
@@ -116,12 +123,15 @@ func FromAccesses(acc1, acc2 []Access, order Order) ReadFrom {
 			}
 			if order == Before || a1.timestamp < a2.timestamp {
 				// a1 is store which executed before a2
-				res.Add(a1.inst, a2.inst)
+				rf.Add(a1.inst, a2.inst)
+				used = append(used, a1, a2)
 			}
 		}
 	}
 
-	return res
+	serial := serializeAccess(used)
+
+	return rf, serial
 }
 
 type Access struct {
@@ -141,4 +151,17 @@ func (acc Access) String() string {
 		acc.inst, acc.addr, acc.size, acc.typ, acc.timestamp)
 }
 
-func makeKey(from, to uint32) key { return key{from: from, to: to} }
+type SerialAccess []uint32
+
+func serializeAccess(acc []Access) SerialAccess {
+	serial := SerialAccess{}
+	sort.Slice(acc, func(i, j int) bool { return acc[i].timestamp < acc[j].timestamp })
+	for _, acc := range acc {
+		serial.Add(acc)
+	}
+	return serial
+}
+
+func (serial SerialAccess) Add(acc Access) {
+	serial = append(serial, acc.inst)
+}

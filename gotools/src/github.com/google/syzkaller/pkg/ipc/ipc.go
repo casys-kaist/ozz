@@ -111,6 +111,9 @@ type ProgInfo struct {
 	// Calls[i2]. Note that it is not limited to two calls inside the
 	// same epoch, meaning two calls possibly reside in other epochs.
 	RFInfo [][]signal.ReadFrom
+	// Serial are accesses that are used to build ReadFrom and sorted
+	// according to Accesses' timestamps
+	Serial [][]signal.SerialAccess
 }
 
 type Env struct {
@@ -392,7 +395,7 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 		}
 		inf.Comps = comps
 	}
-	info.RFInfo = analyzeReadFromInfo(p, info.Calls)
+	info.RFInfo, info.Serial = analyzeReadFromInfo(p, info.Calls)
 	if len(extraParts) == 0 {
 		return info, nil
 	}
@@ -418,7 +421,7 @@ func convertExtra(extraParts []CallInfo) CallInfo {
 	return extra
 }
 
-func analyzeReadFromInfo(p *prog.Prog, calls []CallInfo) (rfinfo [][]signal.ReadFrom) {
+func analyzeReadFromInfo(p *prog.Prog, calls []CallInfo) (rfinfo [][]signal.ReadFrom, serial [][]signal.SerialAccess) {
 	n := len(p.Calls)
 	rfinfo = make([][]signal.ReadFrom, n)
 	for i := 0; i < n; i++ {
@@ -429,7 +432,7 @@ func analyzeReadFromInfo(p *prog.Prog, calls []CallInfo) (rfinfo [][]signal.Read
 			if i1 == i2 {
 				continue
 			}
-			rfinfo[i1][i2] = signal.FromAccesses(
+			rfinfo[i1][i2], serial[i1][i2] = signal.FromAccesses(
 				c1.Access,
 				c2.Access,
 				signal.FromEpoch(c1.Epoch, c2.Epoch),

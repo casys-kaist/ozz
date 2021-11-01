@@ -71,4 +71,5 @@ func (p *Prog) Contenders() []*Call {
 type ThreadedProg struct {
 	P        *Prog
 	ReadFrom signal.ReadFrom
+	Serial   signal.SerialAccess
 }

@@ -549,13 +549,14 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 	}
 }
 
-func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, readfrom signal.ReadFrom) {
+func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, readfrom signal.ReadFrom, serial signal.SerialAccess) {
 	// TODO: priority
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()
 	fuzzer.threadedCorpus = append(fuzzer.threadedCorpus, &prog.ThreadedProg{
 		P:        p,
 		ReadFrom: readfrom,
+		Serial:   serial,
 	})
 }
 
@@ -563,10 +564,11 @@ func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, info *ipc.ProgInfo,
 	// TODO: how to set the priority of threaded input?
 	c := p.Contender.Calls
 	readfrom := info.RFInfo[c[0]][c[1]]
+	serial := info.Serial[c[0]][c[1]]
 
 	const threadedPrio = 1000
 	fuzzer.__addInputToCorpus(p, sig, threadedPrio)
-	fuzzer.addInputToThreadedCorpus(p, readfrom)
+	fuzzer.addInputToThreadedCorpus(p, readfrom, serial)
 
 	fuzzer.signalMu.Lock()
 	defer fuzzer.signalMu.Unlock()
