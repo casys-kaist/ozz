@@ -343,10 +343,37 @@ func (p *parser) parseProg() (*Prog, error) {
 	if p.comment != "" {
 		prog.Comments = append(prog.Comments, p.comment)
 	}
-	if err := p.parseSchedule(prog); err != nil {
+	if err := p.postProcess(prog); err != nil {
 		return nil, err
 	}
 	return prog, nil
+}
+
+func (p *parser) postProcess(prog *Prog) error {
+	if err := p.parseSchedule(prog); err != nil {
+		return err
+	}
+	if err := p.inspectThreaded(prog); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *parser) inspectThreaded(prog *Prog) error {
+	m := make(map[uint64]struct{})
+	maxEpoch := uint64(len(prog.Calls))
+	for _, c := range prog.Calls {
+		if c.Epoch > maxEpoch {
+			return fmt.Errorf("too large epoch: epoch %v, max %v",
+				c.Epoch, maxEpoch)
+		}
+		if _, ok := m[c.Epoch]; ok {
+			prog.Threaded = true
+			continue
+		}
+		m[c.Epoch] = struct{}{}
+	}
+	return nil
 }
 
 func (p *parser) parseConcurrencyInfo() (uint64, uint64, error) {
