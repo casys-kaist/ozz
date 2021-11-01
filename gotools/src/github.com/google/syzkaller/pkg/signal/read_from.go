@@ -71,6 +71,22 @@ func (rf ReadFrom) Len() int {
 	return len(rf)
 }
 
+func (rf ReadFrom) Flatting() []uint32 {
+	r := []uint32{}
+	c := make(map[uint32]struct{})
+	for k := range rf {
+		if _, ok := c[k.from]; !ok {
+			c[k.from] = struct{}{}
+			r = append(r, k.from)
+		}
+		if _, ok := c[k.to]; !ok {
+			c[k.to] = struct{}{}
+			r = append(r, k.to)
+		}
+	}
+	return r
+}
+
 type Order uint32
 
 const (

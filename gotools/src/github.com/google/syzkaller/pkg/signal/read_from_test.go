@@ -130,6 +130,21 @@ func TestFromEpoch(t *testing.T) {
 	}
 }
 
+func TestFlatting(t *testing.T) {
+	rf := NewReadFrom()
+	data := [][2]uint32{
+		{1, 2},
+		{2, 3},
+		{2, 3}, // duplicate
+		{3, 4},
+	}
+	initReadFrom(rf, data)
+	flat := rf.Flatting()
+	if l := len(flat); l != 4 {
+		t.Errorf("wrong flatting len, expected %d, got %d", 4, l)
+	}
+}
+
 func TestFromAccesses(t *testing.T) {
 	dat, err := ioutil.ReadFile("testdata/accesses.dat")
 	if err != nil {
@@ -206,7 +221,8 @@ func TestFromAccesses(t *testing.T) {
 			}
 
 			// build read-from from accesses
-			rf := FromAccesses(acc[i].access, acc[j].access, FromEpoch(uint64(i), uint64(j)))
+			// TODO: serial
+			rf, _ := FromAccesses(acc[i].access, acc[j].access, FromEpoch(uint64(i), uint64(j)))
 			for k := range rf {
 				if _, ok := ans[k]; !ok {
 					t.Errorf("wrong %s, %x %x", fn, k.from, k.to)
