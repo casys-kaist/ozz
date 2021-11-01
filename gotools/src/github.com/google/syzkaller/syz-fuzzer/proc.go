@@ -92,12 +92,19 @@ func (proc *Proc) loop() {
 			p := proc.fuzzer.target.Generate(proc.rnd, prog.RecommendedCalls, ct)
 			log.Logf(1, "proc #%v: generated", proc.pid)
 			proc.execute(proc.execOpts, p, ProgNormal, StatGenerate)
-		} else {
+		} else if i%2 == 1 {
 			// Mutate an existing prog.
 			p := fuzzerSnapshot.chooseProgram(proc.rnd).Clone()
 			p.Mutate(proc.rnd, prog.RecommendedCalls, ct, fuzzerSnapshot.corpus)
 			log.Logf(1, "proc #%v: mutated", proc.pid)
 			proc.execute(proc.execOpts, p, ProgNormal, StatFuzz)
+		} else {
+			// Mutate a schedule of an existing prog.
+			tp := fuzzerSnapshot.chooseThreadedProgram(proc.rnd)
+			p := tp.P.Clone()
+			log.Logf(1, "proc #%v: scheduling an input", proc.pid)
+			p.MutateSchedule(tp.ReadFrom)
+			proc.execute(proc.execOpts, p, ProgNormal, StatSchedule)
 		}
 	}
 }

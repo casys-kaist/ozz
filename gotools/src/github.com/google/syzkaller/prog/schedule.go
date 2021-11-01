@@ -1,5 +1,7 @@
 package prog
 
+import "github.com/google/syzkaller/pkg/signal"
+
 type Point struct {
 	call  *Call
 	addr  uint64
@@ -8,6 +10,9 @@ type Point struct {
 
 type Schedule struct {
 	points []Point
+}
+
+func (p *Prog) MutateSchedule(readfrom signal.ReadFrom) {
 }
 
 func (sched Schedule) Len() int {

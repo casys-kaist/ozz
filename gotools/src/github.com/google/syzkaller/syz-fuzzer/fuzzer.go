@@ -86,6 +86,7 @@ const (
 	StatHint
 	StatSeed
 	StatThreading
+	StatSchedule
 	StatCount
 )
 
@@ -99,6 +100,7 @@ var statNames = [StatCount]string{
 	StatHint:      "exec hints",
 	StatSeed:      "exec seeds",
 	StatThreading: "exec threadings",
+	StatSchedule:  "exec schedulings",
 }
 
 type OutputType int
@@ -507,6 +509,18 @@ func (fuzzer *FuzzerSnapshot) chooseProgram(r *rand.Rand) *prog.Prog {
 		return fuzzer.corpusPrios[i] >= randVal
 	})
 	return fuzzer.corpus[idx]
+}
+
+func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.ThreadedProg {
+	// TODO: Unlike corpus, Current ThreadedCorpus does not consider
+	// priorities of ThreadedProgs. It is fine for now (i.e., testing
+	// our fuzzer), but it might be required to come back here to
+	// improve our fuzzer.
+	if len(fuzzer.threadedCorpus) == 0 {
+		return nil
+	}
+	idx := r.Int63n(int64(len(fuzzer.threadedCorpus)))
+	return fuzzer.threadedCorpus[idx]
 }
 
 func (fuzzer *Fuzzer) __addInputToCorpus(p *prog.Prog, sig hash.Sig, prio int64) {
