@@ -1,6 +1,9 @@
 package prog
 
-import "github.com/google/syzkaller/pkg/log"
+import (
+	"github.com/google/syzkaller/pkg/log"
+	"github.com/google/syzkaller/pkg/signal"
+)
 
 type Contender struct {
 	// Calls represents a subset of prog.Calls that will be executed
@@ -63,4 +66,9 @@ func (p *Prog) Contenders() []*Call {
 		res = append(res, p.Calls[ci])
 	}
 	return res
+}
+
+type ThreadedProg struct {
+	P        *Prog
+	ReadFrom signal.ReadFrom
 }

@@ -50,11 +50,12 @@ type Fuzzer struct {
 	faultInjectionEnabled    bool
 	comparisonTracingEnabled bool
 
-	corpusMu     sync.RWMutex
-	corpus       []*prog.Prog
-	corpusHashes map[hash.Sig]struct{}
-	corpusPrios  []int64
-	sumPrios     int64
+	corpusMu       sync.RWMutex
+	corpus         []*prog.Prog
+	threadedCorpus []*prog.ThreadedProg
+	corpusHashes   map[hash.Sig]struct{}
+	corpusPrios    []int64
+	sumPrios       int64
 
 	signalMu       sync.RWMutex
 	corpusSignal   signal.Signal // signal of inputs in corpus
@@ -67,9 +68,10 @@ type Fuzzer struct {
 }
 
 type FuzzerSnapshot struct {
-	corpus      []*prog.Prog
-	corpusPrios []int64
-	sumPrios    int64
+	corpus         []*prog.Prog
+	threadedCorpus []*prog.ThreadedProg
+	corpusPrios    []int64
+	sumPrios       int64
 }
 
 type Stat int
@@ -533,22 +535,35 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 	}
 }
 
+func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, readfrom signal.ReadFrom) {
+	// TODO: priority
+	fuzzer.corpusMu.Lock()
+	defer fuzzer.corpusMu.Unlock()
+	fuzzer.threadedCorpus = append(fuzzer.threadedCorpus, &prog.ThreadedProg{
+		P:        p,
+		ReadFrom: readfrom,
+	})
+}
+
 func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, info *ipc.ProgInfo, sig hash.Sig) {
 	// TODO: how to set the priority of threaded input?
+	c := p.Contender.Calls
+	readfrom := info.RFInfo[c[0]][c[1]]
+
 	const threadedPrio = 1000
 	fuzzer.__addInputToCorpus(p, sig, threadedPrio)
+	fuzzer.addInputToThreadedCorpus(p, readfrom)
 
 	fuzzer.signalMu.Lock()
 	defer fuzzer.signalMu.Unlock()
 
-	c := p.Contender.Calls
-	fuzzer.corpusReadFrom.Merge(info.RFInfo[c[0]][c[1]])
+	fuzzer.corpusReadFrom.Merge(readfrom)
 }
 
 func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
 	fuzzer.corpusMu.RLock()
 	defer fuzzer.corpusMu.RUnlock()
-	return FuzzerSnapshot{fuzzer.corpus, fuzzer.corpusPrios, fuzzer.sumPrios}
+	return FuzzerSnapshot{fuzzer.corpus, fuzzer.threadedCorpus, fuzzer.corpusPrios, fuzzer.sumPrios}
 }
 
 func (fuzzer *Fuzzer) addMaxSignal(sign signal.Signal) {
