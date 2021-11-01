@@ -267,7 +267,11 @@ func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes,
 	if info == nil {
 		return nil
 	}
-	proc.detachReadFrom(p, info)
+
+	// All c.Access will not used any longer.
+	for _, c := range info.Calls {
+		c.Access = nil
+	}
 
 	if !p.Threaded {
 		return proc.postExecute(p, flags, info)
@@ -310,20 +314,6 @@ func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.Pro
 	// This is possibly a limitation of Razzer. Improve this if
 	// possible.
 	return info
-}
-
-func (proc *Proc) detachReadFrom(p *prog.Prog, info *ipc.ProgInfo) {
-	// As described in enqueueCallTriage(), info.RFInfo points to the
-	// output shmem region, detach it before using it.
-	rfinfo := info.RFInfo
-	l := len(p.Calls)
-	info.RFInfo = make([][]signal.ReadFrom, l)
-	for i := 0; i < l; i++ {
-		info.RFInfo[i] = make([]signal.ReadFrom, l)
-		for j := 0; j < l; j++ {
-			info.RFInfo[i][j] = rfinfo[i][j].Copy()
-		}
-	}
 }
 
 func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int, info ipc.CallInfo) {
