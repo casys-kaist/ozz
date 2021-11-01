@@ -24,6 +24,16 @@ func (sched Schedule) Match(c *Call) Schedule {
 	return res
 }
 
+func (sched Schedule) CallIndex(call *Call, p *Prog) int {
+	for ci, c := range p.Calls {
+		if c == call {
+			return ci
+		}
+	}
+	// something wrong. sched does not have Call.
+	return -1
+}
+
 func sequentialSchedule(p *Prog) Schedule {
 	s := Schedule{}
 	if !p.Threaded {
