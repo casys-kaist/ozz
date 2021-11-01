@@ -148,11 +148,7 @@ func TestCrossTarget(t *testing.T) {
 	t.Parallel()
 	const OS = "linux"
 	var archs []string
-	for _, target := range AllTargets() {
-		if target.OS == OS {
-			archs = append(archs, target.Arch)
-		}
-	}
+	archs = append(archs, "linux")
 	for _, arch := range archs {
 		target, err := GetTarget(OS, arch)
 		if err != nil {

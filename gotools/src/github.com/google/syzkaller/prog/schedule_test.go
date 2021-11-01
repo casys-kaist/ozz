@@ -2,7 +2,7 @@ package prog
 
 import "testing"
 
-func TestMacth(t *testing.T) {
+func TestMatch(t *testing.T) {
 	c0 := &Call{Thread: 0}
 	c1 := &Call{Thread: 1}
 	c2 := &Call{Thread: 2}

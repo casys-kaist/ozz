@@ -278,8 +278,8 @@ func (p *parser) parseProg() (*Prog, error) {
 		c := &Call{
 			Meta:    meta,
 			Ret:     MakeReturnArg(meta.Ret),
-			Thread:  ^uint64(0),
-			Epoch:   ^uint64(0),
+			Thread:  0,
+			Epoch:   0,
 			Comment: p.comment,
 		}
 		prog.Calls = append(prog.Calls, c)
