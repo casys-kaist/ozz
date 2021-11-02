@@ -660,6 +660,32 @@ func (fuzzer *Fuzzer) identifyContenders(p *prog.Prog, info *ipc.ProgInfo) (res 
 	return
 }
 
+func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog, calls prog.Contender, info *ipc.ProgInfo, r *rand.Rand) bool {
+	// Threading a given input requires at most O(n*n) re-execution to
+	// collect read-from inside an epoch (i.e., conflicts), so the
+	// threading queue may explode very quickly. To avoid that
+	// situation, we shut off the threading work if
+	if len(fuzzer.workQueue.threading) > maxWorkThreading {
+		// 1) the threading workqueue already contains lots of
+		// threading work. It is fine even if info contains
+		// interesting read-froms. We don't lose a chance to find
+		// threaded p because we don't collect the interesting
+		// read-froms so we will eventually find similar threaded p in
+		// the future.
+		return true
+	}
+	if rf := info.RFInfo[calls.Calls[0]][calls.Calls[1]]; fuzzer.corpusReadFrom.Diff(rf).Empty() && r.Intn(100) == 0 {
+		// 2) obtained read-from (i.e., depends relationship) does not
+		// give a clue for interesting read-from (i.e., conflicts). It
+		// might provide interesting results if we execute the
+		// threaded p, but it is somewhat unlikely. Give this case
+		// very low chance (i.e., 1%) to go into the threading
+		// workqueue.
+		return true
+	}
+	return false
+}
+
 func signalPrio(p *prog.Prog, info *ipc.CallInfo, call int) (prio uint8) {
 	if call == -1 {
 		return 0

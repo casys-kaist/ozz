@@ -344,6 +344,9 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 }
 
 func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, info *ipc.ProgInfo) {
+	if proc.fuzzer.shutOffThreading(p, calls, info, proc.rnd) {
+		return
+	}
 	proc.fuzzer.workQueue.enqueue(&WorkThreading{
 		p:     p.Clone(),
 		calls: calls,
