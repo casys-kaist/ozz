@@ -156,18 +156,38 @@ type Access struct {
 	size      uint32
 	typ       uint32
 	timestamp uint32
+	// TODO: do we need to keep epoch?
+	thread uint64
 }
 
-func NewAccess(inst, addr, size, typ, timestamp uint32) Access {
-	return Access{inst: inst, addr: addr, size: size, typ: typ, timestamp: timestamp}
+func NewAccess(inst, addr, size, typ, timestamp uint32, thread, epoch uint64) Access {
+	return Access{inst, addr, size, typ, timestamp, thread}
 }
 
 func (acc Access) String() string {
-	return fmt.Sprintf("%x accesses %x (size: %d, type: %d, timestamp: %d)",
-		acc.inst, acc.addr, acc.size, acc.typ, acc.timestamp)
+	return fmt.Sprintf("thread #%d: %x accesses %x (size: %d, type: %d, timestamp: %d)",
+		acc.thread, acc.inst, acc.addr, acc.size, acc.typ, acc.timestamp)
 }
 
 type SerialAccess []uint32
+func (acc Access) ExecutedBy(thread uint64) bool {
+	return acc.thread == thread
+}
+
+// TODO: expose each fields
+func (acc Access) Thread() uint64 {
+	return acc.thread
+}
+
+func (acc Access) Inst() uint32 {
+	return acc.inst
+}
+
+func (acc Access) Owned(inst uint64, thread uint64) bool {
+	// TODO: possibly temporary. used by only scheduler.findAccess()
+	// (i.e., prog/schedule.go)
+	return acc.inst == uint32(inst) && acc.thread == thread
+}
 
 func serializeAccess(acc []Access) SerialAccess {
 	serial := SerialAccess{}

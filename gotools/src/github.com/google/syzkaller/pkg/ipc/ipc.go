@@ -385,7 +385,7 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 			return nil, fmt.Errorf("call %v/%v/%v: cover overflow: %v/%v",
 				i, reply.index, reply.num, reply.coverSize, len(out))
 		}
-		if inf.Access, ok = readReadFromCoverages(&out, reply.rfCoverSize); !ok {
+		if inf.Access, ok = readReadFromCoverages(&out, reply.rfCoverSize, inf); !ok {
 			return nil, fmt.Errorf("call %v/%v%v: rfcover overflow: %v%v",
 				i, reply.index, reply.num, reply.rfCoverSize, len(out))
 		}
@@ -522,7 +522,7 @@ func readUint32Array(outp *[]byte, size uint32) ([]uint32, bool) {
 	return res, true
 }
 
-func readReadFromCoverages(outp *[]byte, size uint32) ([]signal.Access, bool) {
+func readReadFromCoverages(outp *[]byte, size uint32, inf *CallInfo) ([]signal.Access, bool) {
 	array, ok := readUint32Array(outp, size*5)
 	if !ok {
 		return nil, false
@@ -538,6 +538,8 @@ func readReadFromCoverages(outp *[]byte, size uint32) ([]signal.Access, bool) {
 			array[i+2],
 			array[i+3],
 			array[i+4],
+			inf.Thread,
+			inf.Epoch,
 		))
 	}
 	return res, true
