@@ -169,7 +169,6 @@ func (acc Access) String() string {
 		acc.thread, acc.inst, acc.addr, acc.size, acc.typ, acc.timestamp)
 }
 
-type SerialAccess []uint32
 func (acc Access) ExecutedBy(thread uint64) bool {
 	return acc.thread == thread
 }
@@ -189,6 +188,8 @@ func (acc Access) Owned(inst uint64, thread uint64) bool {
 	return acc.inst == uint32(inst) && acc.thread == thread
 }
 
+type SerialAccess []Access
+
 func serializeAccess(acc []Access) SerialAccess {
 	serial := SerialAccess{}
 	sort.Slice(acc, func(i, j int) bool { return acc[i].timestamp < acc[j].timestamp })
@@ -199,5 +200,33 @@ func serializeAccess(acc []Access) SerialAccess {
 }
 
 func (serial SerialAccess) Add(acc Access) {
-	serial = append(serial, acc.inst)
+	n := len(serial)
+	idx := sort.Search(n, func(i int) bool {
+		return serial[i].timestamp >= acc.timestamp
+	})
+	if idx == n {
+		serial = append(serial, acc)
+	} else {
+		serial = append(serial[:idx], acc)
+		serial = append(serial, serial[idx:]...)
+	}
+}
+
+func (serial SerialAccess) Find(inst uint32, max int) SerialAccess {
+	// Find at most max Accesses for each thread that are executed at inst
+	chk := make(map[uint64]int)
+	res := SerialAccess{}
+	for _, acc := range serial {
+		if cnt := chk[acc.thread]; acc.inst == inst && cnt < max {
+			res.Add(acc)
+			chk[acc.thread]++
+		}
+		if len(res) == max*2 {
+			// TODO: Razzer's mechanism. We execute at most two
+			// syscalls in parallel (i.e., the maximum length of res
+			// is max*2).
+			break
+		}
+	}
+	return res
 }
