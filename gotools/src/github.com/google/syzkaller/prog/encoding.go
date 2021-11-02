@@ -360,18 +360,17 @@ func (p *parser) postProcess(prog *Prog) error {
 }
 
 func (p *parser) inspectThreaded(prog *Prog) error {
-	m := make(map[uint64]struct{})
-	maxEpoch := uint64(len(prog.Calls))
-	for _, c := range prog.Calls {
-		if c.Epoch > maxEpoch {
-			return fmt.Errorf("too large epoch: epoch %v, max %v",
-				c.Epoch, maxEpoch)
+	if prog.Schedule.Len() == 0 {
+		prog.Threaded = false
+		return nil
+	}
+	for ci, c := range prog.Calls {
+		if prog.Schedule.Match(c).Len() != 0 {
+			prog.Contender.Calls = append(prog.Contender.Calls, ci)
 		}
-		if _, ok := m[c.Epoch]; ok {
-			prog.Threaded = true
-			continue
-		}
-		m[c.Epoch] = struct{}{}
+	}
+	if len(prog.Contender.Calls) != 2 {
+		return fmt.Errorf("wrong number of calls: %d", len(prog.Contender.Calls))
 	}
 	return nil
 }
