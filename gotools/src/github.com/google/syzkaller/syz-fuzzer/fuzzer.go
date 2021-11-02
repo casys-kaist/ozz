@@ -52,10 +52,11 @@ type Fuzzer struct {
 
 	corpusMu       sync.RWMutex
 	corpus         []*prog.Prog
-	threadedCorpus []*prog.ThreadedProg
 	corpusHashes   map[hash.Sig]struct{}
 	corpusPrios    []int64
 	sumPrios       int64
+	threadedCorpus []*prog.ThreadedProg
+	staleCount     map[uint32]int
 
 	signalMu       sync.RWMutex
 	corpusSignal   signal.Signal // signal of inputs in corpus
@@ -268,6 +269,7 @@ func main() {
 		comparisonTracingEnabled: r.CheckResult.Features[host.FeatureComparisons].Enabled,
 		corpusHashes:             make(map[hash.Sig]struct{}),
 		corpusReadFrom:           signal.NewReadFrom(),
+		staleCount:               make(map[uint32]int),
 		checkResult:              r.CheckResult,
 	}
 	gateCallback := fuzzer.useBugFrames(r, *flagProcs)
@@ -514,8 +516,8 @@ func (fuzzer *FuzzerSnapshot) chooseProgram(r *rand.Rand) *prog.Prog {
 func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.ThreadedProg {
 	// TODO: Unlike corpus, Current ThreadedCorpus does not consider
 	// priorities of ThreadedProgs. It is fine for now (i.e., testing
-	// our fuzzer), but it might be required to come back here to
-	// improve our fuzzer.
+	// our fuzzer), but we may require to come back here to improve
+	// our fuzzer.
 	if len(fuzzer.threadedCorpus) == 0 {
 		return nil
 	}

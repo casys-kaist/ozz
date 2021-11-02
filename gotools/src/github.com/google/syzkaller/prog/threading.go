@@ -57,7 +57,7 @@ func (p *Prog) Threading(calls Contender) {
 	// Razzer. Improve this if possible.
 	p.Threaded = true
 	p.Contender = calls
-	p.Schedule = sequentialSchedule(p)
+	p.appendDummyPoints()
 }
 
 func (p *Prog) Contenders() []*Call {

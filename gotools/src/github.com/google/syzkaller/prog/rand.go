@@ -21,6 +21,8 @@ const (
 	// "Recommended" max number of calls in programs.
 	// If we receive longer programs from hub/corpus we discard them.
 	MaxCalls = 40
+	// "Recommended" number of scheduling points in programs
+	RecommendedPoints = 4
 )
 
 type randGen struct {
