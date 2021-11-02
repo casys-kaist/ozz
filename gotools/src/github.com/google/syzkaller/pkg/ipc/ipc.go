@@ -422,11 +422,7 @@ func convertExtra(extraParts []CallInfo) CallInfo {
 }
 
 func analyzeReadFromInfo(p *prog.Prog, calls []CallInfo) (rfinfo [][]signal.ReadFrom, serial [][]signal.SerialAccess) {
-	n := len(p.Calls)
-	rfinfo = make([][]signal.ReadFrom, n)
-	for i := 0; i < n; i++ {
-		rfinfo[i] = make([]signal.ReadFrom, n)
-	}
+	initReadFromInfo(p, &rfinfo, &serial)
 	for i1, c1 := range calls {
 		for i2, c2 := range calls {
 			if i1 == i2 {
@@ -440,6 +436,16 @@ func analyzeReadFromInfo(p *prog.Prog, calls []CallInfo) (rfinfo [][]signal.Read
 		}
 	}
 	return
+}
+
+func initReadFromInfo(p *prog.Prog, rfinfo *[][]signal.ReadFrom, serial *[][]signal.SerialAccess) {
+	n := len(p.Calls)
+	*rfinfo = make([][]signal.ReadFrom, n)
+	*serial = make([][]signal.SerialAccess, n)
+	for i := 0; i < n; i++ {
+		(*rfinfo)[i] = make([]signal.ReadFrom, n)
+		(*serial)[i] = make([]signal.SerialAccess, n)
+	}
 }
 
 func readComps(outp *[]byte, compsSize uint32) (prog.CompMap, error) {
