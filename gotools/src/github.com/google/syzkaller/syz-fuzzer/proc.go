@@ -101,6 +101,9 @@ func (proc *Proc) loop() {
 		} else {
 			// Mutate a schedule of an existing prog.
 			tp := fuzzerSnapshot.chooseThreadedProgram(proc.rnd)
+			if tp == nil {
+				continue
+			}
 			p := tp.P.Clone()
 			ok := p.MutateSchedule(proc.rnd, proc.fuzzer.staleCount, prog.RecommendedPoints, tp.ReadFrom, tp.Serial)
 			if !ok {
