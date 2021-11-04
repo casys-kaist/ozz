@@ -424,3 +424,22 @@ serialize0(0x0)
 		t.Errorf("bad program comments %q\nwant: %q", p.Comments, wantComments)
 	}
 }
+
+func TestInspectThreaded(t *testing.T) {
+	target := initTargetTest(t, "test", "64")
+	p, err := target.Deserialize([]byte(`
+serialize0(0x0) <0x0, 0x0>
+serialize0(0x0) <0x0, 0x1>
+serialize0(0x0) <0x0, 0x3>
+serialize0(0x0) <0x1, 0x2>
+serialize0(0x0) <0x1, 0x3>
+#-- 0x2, 0x0, 0x0
+#-- 0x4, 0x0, 0x1
+`), Strict)
+	if err != nil {
+		t.Errorf("bad program: %v", err)
+	}
+	if !p.Threaded {
+		t.Errorf("bad program: not threaded")
+	}
+}

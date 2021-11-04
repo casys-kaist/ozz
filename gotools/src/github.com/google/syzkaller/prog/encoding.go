@@ -372,6 +372,7 @@ func (p *parser) inspectThreaded(prog *Prog) error {
 	if len(prog.Contender.Calls) != 2 {
 		return fmt.Errorf("wrong number of calls: %d", len(prog.Contender.Calls))
 	}
+	prog.Threaded = true
 	return nil
 }
 
