@@ -47,17 +47,22 @@ func (p *Prog) appendDummyPoints() {
 	}
 	calls := p.Contenders()
 	n := p.Schedule.Len()
-	for i, c := range calls {
+	order := 0
+	for _, c := range calls {
 		if p.Schedule.Match(c).Len() != 0 {
 			// c has points
 			continue
 		}
 		p.Schedule.points = append(p.Schedule.points,
-			Point{call: c, addr: ^uint64(0), order: uint64(i + n)})
+			Point{call: c, addr: ^uint64(0), order: uint64(order + n)})
+		order++
 	}
 }
 
 func (p *Prog) MutateSchedule(rs rand.Source, staleCount map[uint32]int, nPoints int, readfrom signal.ReadFrom, serial signal.SerialAccess) bool {
+	if len(p.Contenders()) != 2 {
+		return false
+	}
 	r := newRand(p.Target, rs)
 	ctx := &scheduler{
 		p:          p,
