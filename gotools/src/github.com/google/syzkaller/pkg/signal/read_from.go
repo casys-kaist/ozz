@@ -192,7 +192,6 @@ type SerialAccess []Access
 
 func serializeAccess(acc []Access) SerialAccess {
 	serial := SerialAccess{}
-	sort.Slice(acc, func(i, j int) bool { return acc[i].timestamp < acc[j].timestamp })
 	for _, acc := range acc {
 		serial.Add(acc)
 	}
@@ -207,8 +206,8 @@ func (serial *SerialAccess) Add(acc Access) {
 	if idx == n {
 		*serial = append(*serial, acc)
 	} else {
-		*serial = append((*serial)[:idx], acc)
-		*serial = append(*serial, (*serial)[idx:]...)
+		*serial = append((*serial)[:idx+1], (*serial)[idx:]...)
+		(*serial)[idx] = acc
 	}
 }
 
