@@ -178,7 +178,7 @@ func TestFromAccesses(t *testing.T) {
 				u = append(u, uint32(n))
 			}
 		}
-		acc[idx].access = append(acc[idx].access, NewAccess(u[0], u[1], u[2], u[3], u[4]))
+		acc[idx].access = append(acc[idx].access, NewAccess(u[0], u[1], u[2], u[3], u[4], 0, uint64(idx)))
 	}
 
 	// let's compare the built accesses and test data
@@ -204,6 +204,7 @@ func TestFromAccesses(t *testing.T) {
 				t.Errorf("unexpected error while reading a file: %v, %v", fn, err)
 			}
 			ans := map[key]struct{}{}
+			serialAns := make(map[uint32]struct{})
 			for _, line := range strings.Split(string(b), "\n") {
 				if len(line) == 0 {
 					continue
@@ -218,11 +219,12 @@ func TestFromAccesses(t *testing.T) {
 					t.Errorf("parsing error: %v", err)
 				}
 				ans[key{from: uint32(a), to: uint32(b)}] = struct{}{}
+				serialAns[uint32(a)] = struct{}{}
+				serialAns[uint32(b)] = struct{}{}
 			}
 
 			// build read-from from accesses
-			// TODO: serial
-			rf, _ := FromAccesses(acc[i].access, acc[j].access, FromEpoch(uint64(i), uint64(j)))
+			rf, serial := FromAccesses(acc[i].access, acc[j].access, FromEpoch(uint64(i), uint64(j)))
 			for k := range rf {
 				if _, ok := ans[k]; !ok {
 					t.Errorf("wrong %s, %x %x", fn, k.from, k.to)
@@ -231,6 +233,11 @@ func TestFromAccesses(t *testing.T) {
 			if len(ans) != len(rf) {
 				t.Errorf("missing read-from %s, len(ans): %v, len(rf): %v",
 					fn, len(ans), len(rf))
+			}
+			for _, acc := range serial {
+				if _, ok := serialAns[acc.Inst()]; !ok {
+					t.Errorf("wrong serial: missing %v", acc.Inst())
+				}
 			}
 		}
 	}
