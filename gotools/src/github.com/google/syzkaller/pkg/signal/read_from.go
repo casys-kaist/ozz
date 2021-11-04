@@ -191,6 +191,12 @@ func (acc Access) Owned(inst uint64, thread uint64) bool {
 type SerialAccess []Access
 
 func serializeAccess(acc []Access) SerialAccess {
+	// NOTE: acc is not sorted when this function is called by
+	// FromAcesses. Although SerialAccess will sort them, it is too
+	// slow since moving elements need to copy lots of memory
+	// objects. To take advantage of the fast path (i.e., idx == n in
+	// Add()), we sort acc here and then hand it to serial.Add().
+	sort.Slice(acc, func(i, j int) bool { return acc[i].timestamp < acc[j].timestamp })
 	serial := SerialAccess{}
 	for _, acc := range acc {
 		serial.Add(acc)
