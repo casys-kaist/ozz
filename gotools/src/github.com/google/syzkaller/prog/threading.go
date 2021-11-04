@@ -1,6 +1,8 @@
 package prog
 
 import (
+	"fmt"
+
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/pkg/signal"
 )
@@ -72,4 +74,57 @@ type ThreadedProg struct {
 	P        *Prog
 	ReadFrom signal.ReadFrom
 	Serial   signal.SerialAccess
+}
+
+func (p *Prog) sanitizeRazzer() error {
+	p.fixupEpoch()
+	epoch := make(map[uint64]uint64)
+	for i := 0; i < len(p.Calls); i++ {
+		c := p.Calls[i]
+		if e, ok := epoch[c.Thread]; ok && e >= c.Epoch {
+			return fmt.Errorf("wrong epoch in a thread, thread=%v epoch=%v", c.Thread, c.Epoch)
+		}
+		epoch[c.Thread] = c.Epoch
+	}
+	if p.Threaded {
+		return p.sanitizeRazzerThreaded()
+	} else {
+		return p.sanitizeRazzerSequential()
+	}
+}
+
+func (p *Prog) sanitizeRazzerThreaded() error {
+	calls := p.Contenders()
+	if len(calls) != 2 {
+		return fmt.Errorf("wrong number of contenders: %v", len(calls))
+	}
+	if calls[0].Epoch != calls[1].Epoch {
+		return fmt.Errorf("two contenders do not share epoch %v, %v", calls[0].Epoch, calls[1].Epoch)
+	}
+	var call *Call
+	for _, point := range p.Schedule.points {
+		if call == point.call {
+			return fmt.Errorf("two scheduling points are on the same call: %v", call.Meta.Name)
+		}
+		call = point.call
+	}
+	return nil
+}
+
+func (p *Prog) sanitizeRazzerSequential() error {
+	calls := p.Contenders()
+	if len(calls) != 0 {
+		return fmt.Errorf("sequential program has contenders")
+	}
+	if p.Schedule.Len() != 0 {
+		return fmt.Errorf("sequential program has schedules")
+	}
+	used := make(map[uint64]struct{})
+	for _, c := range p.Calls {
+		if _, ok := used[c.Epoch]; ok {
+			return fmt.Errorf("more than one call share epoch %v", c.Epoch)
+		}
+		used[c.Epoch] = struct{}{}
+	}
+	return nil
 }

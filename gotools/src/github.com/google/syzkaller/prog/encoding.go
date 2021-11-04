@@ -356,6 +356,9 @@ func (p *parser) postProcess(prog *Prog) error {
 	if err := p.inspectThreaded(prog); err != nil {
 		return err
 	}
+	if err := prog.sanitizeRazzer(); err != nil {
+		return err
+	}
 	return nil
 }
 

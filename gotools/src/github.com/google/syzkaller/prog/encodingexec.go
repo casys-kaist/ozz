@@ -63,7 +63,9 @@ var ErrExecBufferTooSmall = errors.New("encodingexec: provided buffer is too sma
 // Returns number of bytes written to the buffer.
 // If the provided buffer is too small for the program an error is returned.
 func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
-	p.fixupEpoch()
+	if err := p.sanitizeRazzer(); err != nil {
+		return 0, err
+	}
 	p.debugValidate()
 	w := &execContext{
 		target: p.Target,
