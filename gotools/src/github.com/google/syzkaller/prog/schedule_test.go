@@ -1,6 +1,10 @@
 package prog
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/google/syzkaller/pkg/signal"
+)
 
 func TestMatch(t *testing.T) {
 	c0 := &Call{Thread: 0}
@@ -51,5 +55,37 @@ func TestAppendDummyPoints(t *testing.T) {
 	p2 := Point{call: c2, order: 1, addr: ^uint64(0)}
 	if p.Schedule.points[1] != p2 {
 		t.Errorf("point1 is not dummy: %v", p.Schedule.points[1])
+	}
+}
+
+func TestScheduleFromAccesses(t *testing.T) {
+	c0 := &Call{Thread: 0, Epoch: 0}
+	c1 := &Call{Thread: 1, Epoch: 1}
+	c2 := &Call{Thread: 0, Epoch: 1}
+	p := &Prog{
+		Calls:     []*Call{c0, c1, c2},
+		Threaded:  true,
+		Contender: Contender{[]int{1, 2}},
+	}
+	serial := signal.SerialAccess{}
+	serial.Add(signal.NewAccess(0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0))
+	serial.Add(signal.NewAccess(0x1, 0x1, 0x0, 0x0, 0x1, 0x0, 0x0))
+	serial.Add(signal.NewAccess(0x2, 0x2, 0x0, 0x0, 0x2, 0x1, 0x0))
+	serial.Add(signal.NewAccess(0x3, 0x3, 0x0, 0x0, 0x3, 0x0, 0x0))
+	serial.Add(signal.NewAccess(0x4, 0x4, 0x0, 0x0, 0x4, 0x1, 0x0))
+	p.scheduleFromAccesses(serial)
+	if p.Schedule.Len() != 4 {
+		t.Errorf("wrong length, got %v", p.Schedule.Len())
+	}
+	ans := []Point{
+		{c2, 0xffffffff00000000, 0x0},
+		{c1, 0xffffffff00000002, 0x1},
+		{c2, 0xffffffff00000003, 0x2},
+		{c1, 0xffffffff00000004, 0x3},
+	}
+	for i := 0; i < 4; i++ {
+		if p.Schedule.points[i] != ans[i] {
+			t.Errorf("wrong, %v, %v", p.Schedule.points[i], ans[i])
+		}
 	}
 }
