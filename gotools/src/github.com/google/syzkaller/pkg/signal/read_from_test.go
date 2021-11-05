@@ -130,6 +130,21 @@ func TestFromEpoch(t *testing.T) {
 	}
 }
 
+func TestFlatting(t *testing.T) {
+	rf := NewReadFrom()
+	data := [][2]uint32{
+		{1, 2},
+		{2, 3},
+		{2, 3}, // duplicate
+		{3, 4},
+	}
+	initReadFrom(rf, data)
+	flat := rf.Flatting()
+	if l := len(flat); l != 4 {
+		t.Errorf("wrong flatting len, expected %d, got %d", 4, l)
+	}
+}
+
 func TestFromAccesses(t *testing.T) {
 	dat, err := ioutil.ReadFile("testdata/accesses.dat")
 	if err != nil {
@@ -163,7 +178,7 @@ func TestFromAccesses(t *testing.T) {
 				u = append(u, uint32(n))
 			}
 		}
-		acc[idx].access = append(acc[idx].access, NewAccess(u[0], u[1], u[2], u[3], u[4]))
+		acc[idx].access = append(acc[idx].access, NewAccess(u[0], u[1], u[2], u[3], u[4], 0, uint64(idx)))
 	}
 
 	// let's compare the built accesses and test data
@@ -189,6 +204,7 @@ func TestFromAccesses(t *testing.T) {
 				t.Errorf("unexpected error while reading a file: %v, %v", fn, err)
 			}
 			ans := map[key]struct{}{}
+			serialAns := make(map[uint32]struct{})
 			for _, line := range strings.Split(string(b), "\n") {
 				if len(line) == 0 {
 					continue
@@ -203,10 +219,12 @@ func TestFromAccesses(t *testing.T) {
 					t.Errorf("parsing error: %v", err)
 				}
 				ans[key{from: uint32(a), to: uint32(b)}] = struct{}{}
+				serialAns[uint32(a)] = struct{}{}
+				serialAns[uint32(b)] = struct{}{}
 			}
 
 			// build read-from from accesses
-			rf := FromAccesses(acc[i].access, acc[j].access, FromEpoch(uint64(i), uint64(j)))
+			rf, serial := FromAccesses(acc[i].access, acc[j].access, FromEpoch(uint64(i), uint64(j)))
 			for k := range rf {
 				if _, ok := ans[k]; !ok {
 					t.Errorf("wrong %s, %x %x", fn, k.from, k.to)
@@ -216,6 +234,72 @@ func TestFromAccesses(t *testing.T) {
 				t.Errorf("missing read-from %s, len(ans): %v, len(rf): %v",
 					fn, len(ans), len(rf))
 			}
+			for _, acc := range serial {
+				if _, ok := serialAns[acc.Inst()]; !ok {
+					t.Errorf("wrong serial: missing %v", acc.Inst())
+				}
+			}
 		}
+	}
+}
+
+var testAcc = []Access{
+	{timestamp: 0, inst: 1},
+	{timestamp: 3, inst: 2},
+	{timestamp: 2, inst: 3, thread: 1},
+	{timestamp: 6, inst: 3, thread: 0},
+	{timestamp: 1, inst: 5},
+}
+
+var serializedAcc = []Access{
+	{timestamp: 0, inst: 1},
+	{timestamp: 1, inst: 5},
+	{timestamp: 2, inst: 3, thread: 1},
+	{timestamp: 3, inst: 2},
+	{timestamp: 6, inst: 3, thread: 0},
+}
+
+func TestSerialAccessAdd(t *testing.T) {
+	serial := SerialAccess{}
+	for _, acc := range testAcc {
+		serial.Add(acc)
+	}
+	if len(serial) != len(serializedAcc) {
+		t.Errorf("wrong length, expected %v, got %v", len(serializedAcc), len(serial))
+	}
+	for i, acc := range serial {
+		if acc.inst != serializedAcc[i].inst {
+			t.Errorf("wrong #%d, expected %v, got %v", i, serializedAcc[i].inst, acc.inst)
+		}
+	}
+}
+
+func TestSerializeAccess(t *testing.T) {
+	serial := serializeAccess(testAcc)
+	if len(serial) != len(serializedAcc) {
+		t.Errorf("wrong length, expected %v, got %v", len(serializedAcc), len(serial))
+	}
+	for i, acc := range serial {
+		if acc.inst != serializedAcc[i].inst {
+			t.Errorf("wrong #%d, expected %v, got %v", i, serializedAcc[i].inst, acc.inst)
+		}
+	}
+}
+
+func TestSerialAccessFind(t *testing.T) {
+	serial := serializeAccess(testAcc)
+	found := serial.Find(3, 1)
+	if len(found) != 2 {
+		t.Errorf("wrong length, expected 2, got %v", len(found))
+	}
+	if found[0].timestamp != 2 || found[1].timestamp != 6 {
+		t.Errorf("wrong %v", found)
+	}
+	found = serial.Find(2, 1)
+	if len(found) != 1 {
+		t.Errorf("wrong length, expected 1, got %v", len(found))
+	}
+	if found[0].timestamp != 3 {
+		t.Errorf("wrong %v", found)
 	}
 }

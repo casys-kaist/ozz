@@ -1,12 +1,18 @@
 package signal
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
+
+type key struct{ from, to uint32 }
+
+func makeKey(from, to uint32) key { return key{from: from, to: to} }
 
 // ReadFrom represents read-from coverage for two instructions. For
 // given two instructions inst1 and inst2, if ok is true where _, ok
 // := rf[inst1][inst2], inst1 affects inst2 which means inst2 reads
 // from inst1.
-type key struct{ from, to uint32 }
 type ReadFrom map[key]struct{}
 
 func NewReadFrom() ReadFrom { return make(map[key]struct{}) }
@@ -65,6 +71,22 @@ func (rf ReadFrom) Len() int {
 	return len(rf)
 }
 
+func (rf ReadFrom) Flatting() []uint32 {
+	r := []uint32{}
+	c := make(map[uint32]struct{})
+	for k := range rf {
+		if _, ok := c[k.from]; !ok {
+			c[k.from] = struct{}{}
+			r = append(r, k.from)
+		}
+		if _, ok := c[k.to]; !ok {
+			c[k.to] = struct{}{}
+			r = append(r, k.to)
+		}
+	}
+	return r
+}
+
 type Order uint32
 
 const (
@@ -87,11 +109,11 @@ func FromEpoch(i1, i2 uint64) Order {
 // and acc2
 // TODO: signal uses prio describing priority of each element. I
 // have no idea that we need it too.
-func FromAccesses(acc1, acc2 []Access, order Order) ReadFrom {
+func FromAccesses(acc1, acc2 []Access, order Order) (ReadFrom, SerialAccess) {
 	if order == After {
 		// if acc1 happened after acc2, nothing from acc2 could be
 		// affected by acc1.
-		return nil
+		return nil, nil
 	}
 
 	const (
@@ -99,7 +121,8 @@ func FromAccesses(acc1, acc2 []Access, order Order) ReadFrom {
 		load  = 1
 	)
 
-	res := NewReadFrom()
+	rf := NewReadFrom()
+	used := []Access{}
 
 	for _, a1 := range acc1 {
 		if a1.typ == load {
@@ -116,12 +139,15 @@ func FromAccesses(acc1, acc2 []Access, order Order) ReadFrom {
 			}
 			if order == Before || a1.timestamp < a2.timestamp {
 				// a1 is store which executed before a2
-				res.Add(a1.inst, a2.inst)
+				rf.Add(a1.inst, a2.inst)
+				used = append(used, a1, a2)
 			}
 		}
 	}
 
-	return res
+	serial := serializeAccess(used)
+
+	return rf, serial
 }
 
 type Access struct {
@@ -130,15 +156,82 @@ type Access struct {
 	size      uint32
 	typ       uint32
 	timestamp uint32
+	// TODO: do we need to keep epoch?
+	thread uint64
 }
 
-func NewAccess(inst, addr, size, typ, timestamp uint32) Access {
-	return Access{inst: inst, addr: addr, size: size, typ: typ, timestamp: timestamp}
+func NewAccess(inst, addr, size, typ, timestamp uint32, thread, epoch uint64) Access {
+	return Access{inst, addr, size, typ, timestamp, thread}
 }
 
 func (acc Access) String() string {
-	return fmt.Sprintf("%x accesses %x (size: %d, type: %d, timestamp: %d)",
-		acc.inst, acc.addr, acc.size, acc.typ, acc.timestamp)
+	return fmt.Sprintf("thread #%d: %x accesses %x (size: %d, type: %d, timestamp: %d)",
+		acc.thread, acc.inst, acc.addr, acc.size, acc.typ, acc.timestamp)
 }
 
-func makeKey(from, to uint32) key { return key{from: from, to: to} }
+func (acc Access) ExecutedBy(thread uint64) bool {
+	return acc.thread == thread
+}
+
+// TODO: expose each fields
+func (acc Access) Thread() uint64 {
+	return acc.thread
+}
+
+func (acc Access) Inst() uint32 {
+	return acc.inst
+}
+
+func (acc Access) Owned(inst uint64, thread uint64) bool {
+	// TODO: possibly temporary. used by only scheduler.findAccess()
+	// (i.e., prog/schedule.go)
+	return acc.inst == uint32(inst) && acc.thread == thread
+}
+
+type SerialAccess []Access
+
+func serializeAccess(acc []Access) SerialAccess {
+	// NOTE: acc is not sorted when this function is called by
+	// FromAcesses. Although SerialAccess will sort them, it is too
+	// slow since moving elements need to copy lots of memory
+	// objects. To take advantage of the fast path (i.e., idx == n in
+	// Add()), we sort acc here and then hand it to serial.Add().
+	sort.Slice(acc, func(i, j int) bool { return acc[i].timestamp < acc[j].timestamp })
+	serial := SerialAccess{}
+	for _, acc := range acc {
+		serial.Add(acc)
+	}
+	return serial
+}
+
+func (serial *SerialAccess) Add(acc Access) {
+	n := len(*serial)
+	idx := sort.Search(n, func(i int) bool {
+		return (*serial)[i].timestamp >= acc.timestamp
+	})
+	if idx == n {
+		*serial = append(*serial, acc)
+	} else {
+		*serial = append((*serial)[:idx+1], (*serial)[idx:]...)
+		(*serial)[idx] = acc
+	}
+}
+
+func (serial SerialAccess) Find(inst uint32, max int) SerialAccess {
+	// Find at most max Accesses for each thread that are executed at inst
+	chk := make(map[uint64]int)
+	res := SerialAccess{}
+	for _, acc := range serial {
+		if cnt := chk[acc.thread]; acc.inst == inst && cnt < max {
+			res.Add(acc)
+			chk[acc.thread]++
+		}
+		if len(res) == max*2 {
+			// TODO: Razzer's mechanism. We execute at most two
+			// syscalls in parallel (i.e., the maximum length of res
+			// is max*2).
+			break
+		}
+	}
+	return res
+}

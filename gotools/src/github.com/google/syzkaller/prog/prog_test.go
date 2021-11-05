@@ -148,11 +148,7 @@ func TestCrossTarget(t *testing.T) {
 	t.Parallel()
 	const OS = "linux"
 	var archs []string
-	for _, target := range AllTargets() {
-		if target.OS == OS {
-			archs = append(archs, target.Arch)
-		}
-	}
+	archs = append(archs, "linux")
 	for _, arch := range archs {
 		target, err := GetTarget(OS, arch)
 		if err != nil {
@@ -471,4 +467,48 @@ func TestSanitizeRandom(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestFixupEpoch(t *testing.T) {
+	p := &Prog{Calls: []*Call{
+		{Thread: 0, Epoch: 0},
+		{Thread: 0, Epoch: 0},
+		{Thread: 0, Epoch: 0},
+		{Thread: 0, Epoch: 0},
+	}}
+	p.fixupEpoch()
+	for i, c := range p.Calls {
+		if c.Epoch != uint64(i) {
+			t.Errorf("wrong epoch, expected %v, got %v", i, c.Epoch)
+		}
+	}
+}
+
+func TestFixupEpochRazzer(t *testing.T) {
+	p0 := &Prog{Calls: []*Call{
+		{Thread: 0, Epoch: 0},
+		{Thread: 0, Epoch: 2},
+		{Thread: 1, Epoch: 1},
+		{Thread: 1, Epoch: 2},
+	},
+		Threaded: true,
+	}
+	p1 := &Prog{Calls: []*Call{
+		{Thread: 0, Epoch: 0},
+		{Thread: 0, Epoch: 2},
+		{Thread: 1, Epoch: 1},
+		{Thread: 1, Epoch: 2},
+	},
+		Threaded: true,
+	}
+	p0.fixupEpoch()
+	for i := 0; i < len(p0.Calls); i++ {
+		c0, c1 := p0.Calls[i], p1.Calls[i]
+		if c0.Thread != c1.Thread {
+			t.Errorf("wrong thread %v, %v", c0.Thread, c1.Thread)
+		}
+		if c0.Epoch != c1.Epoch {
+			t.Errorf("wrong epoch %v, %v", c0.Epoch, c1.Epoch)
+		}
+	}
 }

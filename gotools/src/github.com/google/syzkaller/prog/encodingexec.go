@@ -63,7 +63,9 @@ var ErrExecBufferTooSmall = errors.New("encodingexec: provided buffer is too sma
 // Returns number of bytes written to the buffer.
 // If the provided buffer is too small for the program an error is returned.
 func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
-	p.fixupEpoch()
+	if err := p.sanitizeRazzer(); err != nil {
+		return 0, err
+	}
 	p.debugValidate()
 	w := &execContext{
 		target: p.Target,
@@ -76,7 +78,7 @@ func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
 		w.writeEpoch(c)
 		w.csumMap, w.csumUses = calcChecksumsCall(c)
 		w.serializeCall(c)
-		w.writeEpoch(c)
+		w.writeSchedule(c, p.Schedule)
 	}
 	w.write(execInstrEOF)
 	if w.eof || w.copyoutSeq > execMaxCommands {
@@ -85,12 +87,21 @@ func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
 	return len(buffer) - len(w.buf), nil
 }
 
-func (w *execContext) writeEpoch(c *Call) {
-	if w.epoch == c.Epoch {
-		return
+func (w *execContext) writeSchedule(c *Call, sched Schedule) {
+	match := sched.Match(c)
+	w.write(uint64(match.Len()))
+	for _, point := range match.points {
+		w.write(point.call.Thread)
+		w.write(point.addr)
+		w.write(point.order)
 	}
-	w.write(execInstrEpoch)
-	w.epoch = c.Epoch
+}
+
+func (w *execContext) writeEpoch(c *Call) {
+	if w.epoch+1 == c.Epoch {
+		w.write(execInstrEpoch)
+		w.epoch++
+	}
 }
 
 func (w *execContext) serializeCall(c *Call) {

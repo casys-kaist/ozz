@@ -13,6 +13,7 @@ func (p *Prog) Clone() *Prog {
 		Calls:     make([]*Call, len(p.Calls)),
 		Threaded:  p.Threaded,
 		Contender: p.Contender,
+		Schedule:  p.Schedule,
 	}
 	newargs := make(map[*ResultArg]*ResultArg)
 	for ci, c := range p.Calls {

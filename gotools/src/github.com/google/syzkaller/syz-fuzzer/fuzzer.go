@@ -50,11 +50,13 @@ type Fuzzer struct {
 	faultInjectionEnabled    bool
 	comparisonTracingEnabled bool
 
-	corpusMu     sync.RWMutex
-	corpus       []*prog.Prog
-	corpusHashes map[hash.Sig]struct{}
-	corpusPrios  []int64
-	sumPrios     int64
+	corpusMu       sync.RWMutex
+	corpus         []*prog.Prog
+	corpusHashes   map[hash.Sig]struct{}
+	corpusPrios    []int64
+	sumPrios       int64
+	threadedCorpus []*prog.ThreadedProg
+	staleCount     map[uint32]int
 
 	signalMu       sync.RWMutex
 	corpusSignal   signal.Signal // signal of inputs in corpus
@@ -67,9 +69,10 @@ type Fuzzer struct {
 }
 
 type FuzzerSnapshot struct {
-	corpus      []*prog.Prog
-	corpusPrios []int64
-	sumPrios    int64
+	corpus         []*prog.Prog
+	threadedCorpus []*prog.ThreadedProg
+	corpusPrios    []int64
+	sumPrios       int64
 }
 
 type Stat int
@@ -84,6 +87,7 @@ const (
 	StatHint
 	StatSeed
 	StatThreading
+	StatSchedule
 	StatCount
 )
 
@@ -97,6 +101,7 @@ var statNames = [StatCount]string{
 	StatHint:      "exec hints",
 	StatSeed:      "exec seeds",
 	StatThreading: "exec threadings",
+	StatSchedule:  "exec schedulings",
 }
 
 type OutputType int
@@ -264,6 +269,7 @@ func main() {
 		comparisonTracingEnabled: r.CheckResult.Features[host.FeatureComparisons].Enabled,
 		corpusHashes:             make(map[hash.Sig]struct{}),
 		corpusReadFrom:           signal.NewReadFrom(),
+		staleCount:               make(map[uint32]int),
 		checkResult:              r.CheckResult,
 	}
 	gateCallback := fuzzer.useBugFrames(r, *flagProcs)
@@ -507,6 +513,18 @@ func (fuzzer *FuzzerSnapshot) chooseProgram(r *rand.Rand) *prog.Prog {
 	return fuzzer.corpus[idx]
 }
 
+func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.ThreadedProg {
+	// TODO: Unlike corpus, Current ThreadedCorpus does not consider
+	// priorities of ThreadedProgs. It is fine for now (i.e., testing
+	// our fuzzer), but we may require to come back here to improve
+	// our fuzzer.
+	if len(fuzzer.threadedCorpus) == 0 {
+		return nil
+	}
+	idx := r.Int63n(int64(len(fuzzer.threadedCorpus)))
+	return fuzzer.threadedCorpus[idx]
+}
+
 func (fuzzer *Fuzzer) __addInputToCorpus(p *prog.Prog, sig hash.Sig, prio int64) {
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()
@@ -533,22 +551,37 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 	}
 }
 
+func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, readfrom signal.ReadFrom, serial signal.SerialAccess) {
+	// TODO: priority
+	fuzzer.corpusMu.Lock()
+	defer fuzzer.corpusMu.Unlock()
+	fuzzer.threadedCorpus = append(fuzzer.threadedCorpus, &prog.ThreadedProg{
+		P:        p,
+		ReadFrom: readfrom,
+		Serial:   serial,
+	})
+}
+
 func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, info *ipc.ProgInfo, sig hash.Sig) {
 	// TODO: how to set the priority of threaded input?
+	c := p.Contender.Calls
+	readfrom := info.RFInfo[c[0]][c[1]]
+	serial := info.Serial[c[0]][c[1]]
+
 	const threadedPrio = 1000
 	fuzzer.__addInputToCorpus(p, sig, threadedPrio)
+	fuzzer.addInputToThreadedCorpus(p, readfrom, serial)
 
 	fuzzer.signalMu.Lock()
 	defer fuzzer.signalMu.Unlock()
 
-	c := p.Contender.Calls
-	fuzzer.corpusReadFrom.Merge(info.RFInfo[c[0]][c[1]])
+	fuzzer.corpusReadFrom.Merge(readfrom)
 }
 
 func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
 	fuzzer.corpusMu.RLock()
 	defer fuzzer.corpusMu.RUnlock()
-	return FuzzerSnapshot{fuzzer.corpus, fuzzer.corpusPrios, fuzzer.sumPrios}
+	return FuzzerSnapshot{fuzzer.corpus, fuzzer.threadedCorpus, fuzzer.corpusPrios, fuzzer.sumPrios}
 }
 
 func (fuzzer *Fuzzer) addMaxSignal(sign signal.Signal) {
@@ -625,6 +658,32 @@ func (fuzzer *Fuzzer) identifyContenders(p *prog.Prog, info *ipc.ProgInfo) (res 
 		}
 	}
 	return
+}
+
+func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog, calls prog.Contender, info *ipc.ProgInfo, r *rand.Rand) bool {
+	// Threading a given input requires at most O(n*n) re-execution to
+	// collect read-from inside an epoch (i.e., conflicts), so the
+	// threading queue may explode very quickly. To avoid that
+	// situation, we shut off the threading work if
+	if len(fuzzer.workQueue.threading) > maxWorkThreading {
+		// 1) the threading workqueue already contains lots of
+		// threading work. It is fine even if info contains
+		// interesting read-froms. We don't lose a chance to find
+		// threaded p because we don't collect the interesting
+		// read-froms so we will eventually find similar threaded p in
+		// the future.
+		return true
+	}
+	if rf := info.RFInfo[calls.Calls[0]][calls.Calls[1]]; fuzzer.corpusReadFrom.Diff(rf).Empty() && r.Intn(100) == 0 {
+		// 2) obtained read-from (i.e., depends relationship) does not
+		// give a clue for interesting read-from (i.e., conflicts). It
+		// might provide interesting results if we execute the
+		// threaded p, but it is somewhat unlikely. Give this case
+		// very low chance (i.e., 1%) to go into the threading
+		// workqueue.
+		return true
+	}
+	return false
 }
 
 func signalPrio(p *prog.Prog, info *ipc.CallInfo, call int) (prio uint8) {

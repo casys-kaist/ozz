@@ -4,6 +4,7 @@
 package main
 
 import (
+	"math/rand"
 	"sync"
 
 	"github.com/google/syzkaller/pkg/ipc"
@@ -71,6 +72,8 @@ type WorkThreading struct {
 	info  *ipc.ProgInfo
 }
 
+const maxWorkThreading = 10000
+
 func newWorkQueue(procs int, needCandidates chan struct{}) *WorkQueue {
 	return &WorkQueue{
 		procs:          procs,
@@ -119,16 +122,18 @@ func (wq *WorkQueue) dequeue() (item interface{}) {
 		item = wq.candidate[last]
 		wq.candidate = wq.candidate[:last]
 		wantCandidates = len(wq.candidate) < wq.procs
-	} else if len(wq.threading) != 0 {
-		// TODO: need to think about the priority of the threading
+	} else if len(wq.threading) != 0 || len(wq.triage) != 0 {
+		// We equally prioritize the triage queue and the threading
 		// queue.
-		last := len(wq.threading) - 1
-		item = wq.threading[last]
-		wq.threading = wq.threading[:last]
-	} else if len(wq.triage) != 0 {
-		last := len(wq.triage) - 1
-		item = wq.triage[last]
-		wq.triage = wq.triage[:last]
+		if len(wq.threading) != 0 && rand.Intn(2) == 0 {
+			last := len(wq.threading) - 1
+			item = wq.threading[last]
+			wq.threading = wq.threading[:last]
+		} else {
+			last := len(wq.triage) - 1
+			item = wq.triage[last]
+			wq.triage = wq.triage[:last]
+		}
 	} else if len(wq.smash) != 0 {
 		last := len(wq.smash) - 1
 		item = wq.smash[last]

@@ -16,6 +16,7 @@ type Prog struct {
 	// limittation of Razzer. Improve this if possible.
 	Threaded bool
 	Contender
+	Schedule
 }
 
 type Call struct {
@@ -441,6 +442,13 @@ func (ctx *epochContext) useThread(thr uint64) {
 }
 
 func (p *Prog) fixupEpoch() {
+	// XXX: we don't really need this. The only case that epochs are
+	// incorrect is p is a sequential program. Otherwise, our
+	// implmenetaion is somewhere incorrect.
+	if p.Threaded {
+		return
+	}
+
 	const undefined = ^uint64(0)
 	// TODO: fix maxThr
 	maxThr := 3

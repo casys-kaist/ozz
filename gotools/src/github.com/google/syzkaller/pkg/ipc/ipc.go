@@ -111,6 +111,9 @@ type ProgInfo struct {
 	// Calls[i2]. Note that it is not limited to two calls inside the
 	// same epoch, meaning two calls possibly reside in other epochs.
 	RFInfo [][]signal.ReadFrom
+	// Serial are accesses that are used to build ReadFrom and sorted
+	// according to Accesses' timestamps
+	Serial [][]signal.SerialAccess
 }
 
 type Env struct {
@@ -382,7 +385,7 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 			return nil, fmt.Errorf("call %v/%v/%v: cover overflow: %v/%v",
 				i, reply.index, reply.num, reply.coverSize, len(out))
 		}
-		if inf.Access, ok = readReadFromCoverages(&out, reply.rfCoverSize); !ok {
+		if inf.Access, ok = readReadFromCoverages(&out, reply.rfCoverSize, inf); !ok {
 			return nil, fmt.Errorf("call %v/%v%v: rfcover overflow: %v%v",
 				i, reply.index, reply.num, reply.rfCoverSize, len(out))
 		}
@@ -392,7 +395,7 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 		}
 		inf.Comps = comps
 	}
-	info.RFInfo = analyzeReadFromInfo(p, info.Calls)
+	info.RFInfo, info.Serial = analyzeReadFromInfo(p, info.Calls)
 	if len(extraParts) == 0 {
 		return info, nil
 	}
@@ -418,18 +421,14 @@ func convertExtra(extraParts []CallInfo) CallInfo {
 	return extra
 }
 
-func analyzeReadFromInfo(p *prog.Prog, calls []CallInfo) (rfinfo [][]signal.ReadFrom) {
-	n := len(p.Calls)
-	rfinfo = make([][]signal.ReadFrom, n)
-	for i := 0; i < n; i++ {
-		rfinfo[i] = make([]signal.ReadFrom, n)
-	}
+func analyzeReadFromInfo(p *prog.Prog, calls []CallInfo) (rfinfo [][]signal.ReadFrom, serial [][]signal.SerialAccess) {
+	initReadFromInfo(p, &rfinfo, &serial)
 	for i1, c1 := range calls {
 		for i2, c2 := range calls {
 			if i1 == i2 {
 				continue
 			}
-			rfinfo[i1][i2] = signal.FromAccesses(
+			rfinfo[i1][i2], serial[i1][i2] = signal.FromAccesses(
 				c1.Access,
 				c2.Access,
 				signal.FromEpoch(c1.Epoch, c2.Epoch),
@@ -437,6 +436,16 @@ func analyzeReadFromInfo(p *prog.Prog, calls []CallInfo) (rfinfo [][]signal.Read
 		}
 	}
 	return
+}
+
+func initReadFromInfo(p *prog.Prog, rfinfo *[][]signal.ReadFrom, serial *[][]signal.SerialAccess) {
+	n := len(p.Calls)
+	*rfinfo = make([][]signal.ReadFrom, n)
+	*serial = make([][]signal.SerialAccess, n)
+	for i := 0; i < n; i++ {
+		(*rfinfo)[i] = make([]signal.ReadFrom, n)
+		(*serial)[i] = make([]signal.SerialAccess, n)
+	}
 }
 
 func readComps(outp *[]byte, compsSize uint32) (prog.CompMap, error) {
@@ -519,7 +528,7 @@ func readUint32Array(outp *[]byte, size uint32) ([]uint32, bool) {
 	return res, true
 }
 
-func readReadFromCoverages(outp *[]byte, size uint32) ([]signal.Access, bool) {
+func readReadFromCoverages(outp *[]byte, size uint32, inf *CallInfo) ([]signal.Access, bool) {
 	array, ok := readUint32Array(outp, size*5)
 	if !ok {
 		return nil, false
@@ -535,6 +544,8 @@ func readReadFromCoverages(outp *[]byte, size uint32) ([]signal.Access, bool) {
 			array[i+2],
 			array[i+3],
 			array[i+4],
+			inf.Thread,
+			inf.Epoch,
 		))
 	}
 	return res, true
