@@ -197,6 +197,10 @@ private:
   bool isSoftIRQEntryOfTargetArch(Function &F);
   bool isIRQEntryOfTargetArch(Function &F);
   bool isSyscallEntryOfTargetArch(Function &F);
+  void SetNoSanitizeMetadata(Instruction *I) {
+    I->setMetadata(I->getModule()->getMDKindID("nosanitize"),
+                   MDNode::get(I->getContext(), None));
+  }
   /* Collected instructions */
   SmallVector<Instruction *, 8> AllLoadsAndStores;
   SmallVector<Instruction *, 8> LocalLoadsAndStores;
@@ -570,7 +574,9 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
     NumInstrumentedReads++;
 
   // Check we can use the fastpath
-  Value *DoEmulate = IRB.CreateLoad(SSBDoEmulate);
+  auto *DoEmulate = IRB.CreateLoad(SSBDoEmulate);
+  SetNoSanitizeMetadata(DoEmulate);
+
   // If __do_emulate != 1
   Value *CmpInst = IRB.CreateICmpNE(DoEmulate, IRB.getInt8(1));
   Instruction *ThenTerm, *ElseTerm;
@@ -620,7 +626,8 @@ bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
   LLVM_DEBUG(dbgs() << "Instrumenting a membarrier callback at " << *I << "\n");
   NumInstrumentedFlushes++;
 
-  Value *DoEmulate = IRB.CreateLoad(SSBDoEmulate);
+  auto *DoEmulate = IRB.CreateLoad(SSBDoEmulate);
+  SetNoSanitizeMetadata(DoEmulate);
   // If __do_emulate == 1
   Value *CmpInst = IRB.CreateICmpEQ(DoEmulate, IRB.getInt8(1));
   MDBuilder MDB(I->getContext());
