@@ -573,6 +573,8 @@ static void reply_handshake();
 
 // #define __DEBUG_THROUGHPUT
 
+static event_t* exit_notify;
+
 static void loop(void)
 {
 #if SYZ_HAVE_SETUP_LOOP
@@ -590,6 +592,9 @@ static void loop(void)
 		fail("pipe failed");
 #endif
 	int iter = 0;
+	exit_notify = (event_t*)mmap(NULL, sizeof(*exit_notify), PROT_READ | PROT_WRITE,
+				     MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	event_init(exit_notify);
 #if SYZ_REPEAT_TIMES
 	for (; iter < /*{{{REPEAT_TIMES}}}*/; iter++) {
 #else
@@ -608,6 +613,7 @@ static void loop(void)
 #if SYZ_EXECUTOR
 		receive_execute();
 #endif
+		event_reset(exit_notify);
 		int pid = fork();
 		if (pid < 0)
 			fail("clone failed");
@@ -641,6 +647,7 @@ static void loop(void)
 #ifdef __DEBUG_THROUGHPUT
 			debug("      do_exit: %llx\n", current_time_ms());
 #endif
+			event_set(exit_notify);
 			doexit(0);
 #endif
 		}
@@ -662,6 +669,18 @@ static void loop(void)
 #endif
 		for (;;) {
 			if (waitpid(-1, &status, WNOHANG | WAIT_FLAGS) == pid)
+				break;
+			// XXX: Possibly because of store buffer
+			// emulation, waitpid() returns pid a long
+			// time after the worker thread executes
+			// doexit(0) (see event_set(exit_notify)
+			// above). This severly harms the throughput
+			// of our fuzzer, such that the executor
+			// executes only 1~2 programs for a second. To
+			// workaroung this issue, we use exit_notify
+			// to let the loop thread knows the worker
+			// threads are going to exit.
+			if (event_isset(exit_notify))
 				break;
 			sleep_ms(1);
 #if SYZ_EXECUTOR && SYZ_EXECUTOR_USES_SHMEM
