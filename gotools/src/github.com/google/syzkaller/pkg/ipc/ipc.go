@@ -389,6 +389,11 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 			return nil, fmt.Errorf("call %v/%v%v: rfcover overflow: %v%v",
 				i, reply.index, reply.num, reply.rfCoverSize, len(out))
 		}
+		if p.Threaded && !p.IsContender(int(reply.index)) {
+			// If p is threaded, and the call is not a contender, we
+			// don't need to keep Accesses.
+			inf.Access = nil
+		}
 		comps, err := readComps(&out, reply.compsSize)
 		if err != nil {
 			return nil, err

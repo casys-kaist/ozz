@@ -16,6 +16,15 @@ type Contender struct {
 	Calls []int
 }
 
+func (c Contender) IsContender(idx int) bool {
+	for _, ci := range c.Calls {
+		if idx == ci {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *Prog) Threading(calls Contender) {
 	// TODO: Current implementation is the Razzer's threading
 	// mechanism. I think we can do better. Improve
