@@ -104,14 +104,20 @@ func (proc *Proc) loop() {
 			if tp == nil {
 				continue
 			}
-			p := tp.P.Clone()
-			ok := p.MutateSchedule(proc.rnd, proc.fuzzer.staleCount, prog.RecommendedPoints, tp.ReadFrom, tp.Serial)
-			if !ok {
-				continue
-			}
-			log.Logf(1, "proc #%v: scheduling an input", proc.pid)
-			proc.execute(proc.execOpts, p, ProgNormal, StatSchedule)
+			proc.scheduleInput(tp)
 		}
+	}
+}
+
+func (proc *Proc) scheduleInput(tp *prog.ThreadedProg) {
+	for i := 0; i < 10; i++ {
+		p := tp.P.Clone()
+		ok := p.MutateSchedule(proc.rnd, proc.fuzzer.staleCount, prog.RecommendedPoints, tp.ReadFrom, tp.Serial)
+		if !ok {
+			continue
+		}
+		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
+		proc.execute(proc.execOpts, p, ProgNormal, StatSchedule)
 	}
 }
 
