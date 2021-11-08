@@ -229,7 +229,7 @@ func (proc *Proc) smashInput(item *WorkSmash) {
 		proc.executeHintSeed(item.p, item.call)
 	}
 	fuzzerSnapshot := proc.fuzzer.snapshot()
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 30; i++ {
 		p := item.p.Clone()
 		p.Mutate(proc.rnd, prog.RecommendedCalls, proc.fuzzer.choiceTable, fuzzerSnapshot.corpus)
 		log.Logf(1, "proc #%v: smash mutated", proc.pid)
