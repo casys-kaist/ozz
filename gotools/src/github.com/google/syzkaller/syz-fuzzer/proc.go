@@ -275,16 +275,22 @@ func (proc *Proc) executeHintSeed(p *prog.Prog, call int) {
 	})
 }
 
-func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes, stat Stat) *ipc.ProgInfo {
-	info := proc.executeRaw(execOpts, p, stat)
+func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes, stat Stat) (info *ipc.ProgInfo) {
+	info = proc.executeRaw(execOpts, p, stat)
 	if info == nil {
-		return nil
+		return
 	}
 
 	// All c.Access will not used any longer.
 	for _, c := range info.Calls {
 		c.Access = nil
 	}
+	defer func() {
+		if info != nil {
+			// From this point, RFInfo and Serial will not be used.
+			info.RFInfo, info.Serial = nil, nil
+		}
+	}()
 
 	if !p.Threaded {
 		return proc.postExecute(p, flags, info)
