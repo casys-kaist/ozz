@@ -125,7 +125,14 @@ func (wq *WorkQueue) dequeue() (item interface{}) {
 	} else if len(wq.threading) != 0 || len(wq.triage) != 0 {
 		// We equally prioritize the triage queue and the threading
 		// queue.
-		if len(wq.threading) != 0 && rand.Intn(2) == 0 {
+		threading := rand.Intn(2) == 0
+		if threading && len(wq.threading) == 0 {
+			threading = false
+		}
+		if !threading && len(wq.triage) == 0 {
+			threading = true
+		}
+		if threading {
 			last := len(wq.threading) - 1
 			item = wq.threading[last]
 			wq.threading = wq.threading[:last]
