@@ -905,3 +905,13 @@ func (c *command) exec(opts *ExecOpts, progData []byte) (output []byte, hanged b
 	}
 	return
 }
+
+func (info *ProgInfo) ContenderReadFrom(contender prog.Contender) signal.ReadFrom {
+	c := contender.Calls
+	return info.RFInfo[c[0]][c[1]]
+}
+
+func (info *ProgInfo) ContenderSerialAccess(contender prog.Contender) signal.SerialAccess {
+	c := contender.Calls
+	return info.Serial[c[0]][c[1]]
+}

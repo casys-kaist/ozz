@@ -312,7 +312,7 @@ func (proc *Proc) postExecute(p *prog.Prog, flags ProgTypes, info *ipc.ProgInfo)
 
 func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.ProgInfo {
 	// looking for read-from coverage
-	if proc.fuzzer.checkNewReadFrom(p, info, p.Contender) {
+	if proc.fuzzer.checkNewReadFrom(p, p.Contender, info) {
 		// TODO: Razzer's mechanism. we don't minimize p when
 		// threading, but we can.
 		data := p.Serialize()
@@ -344,9 +344,10 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 }
 
 func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, info *ipc.ProgInfo) {
-	if proc.fuzzer.shutOffThreading(p, calls, info, proc.rnd) {
+	if proc.fuzzer.shutOffThreading(p, calls, info) {
 		return
 	}
+	proc.fuzzer.mergeMaxReadFrom(p, calls, info)
 	proc.fuzzer.workQueue.enqueue(&WorkThreading{
 		p:     p.Clone(),
 		calls: calls,

@@ -63,6 +63,7 @@ type Fuzzer struct {
 	maxSignal      signal.Signal // max signal ever observed including flakes
 	newSignal      signal.Signal // diff of maxSignal since last sync with master
 	corpusReadFrom signal.ReadFrom
+	maxReadFrom    signal.ReadFrom
 
 	checkResult *rpctype.CheckArgs
 	logMu       sync.Mutex
@@ -269,6 +270,7 @@ func main() {
 		comparisonTracingEnabled: r.CheckResult.Features[host.FeatureComparisons].Enabled,
 		corpusHashes:             make(map[hash.Sig]struct{}),
 		corpusReadFrom:           signal.NewReadFrom(),
+		maxReadFrom:              signal.NewReadFrom(),
 		staleCount:               make(map[uint32]int),
 		checkResult:              r.CheckResult,
 	}
@@ -564,18 +566,18 @@ func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, readfrom signal.Rea
 
 func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, info *ipc.ProgInfo, sig hash.Sig) {
 	// TODO: how to set the priority of threaded input?
-	c := p.Contender.Calls
-	readfrom := info.RFInfo[c[0]][c[1]]
-	serial := info.Serial[c[0]][c[1]]
+	rf := info.ContenderReadFrom(p.Contender)
+	serial := info.ContenderSerialAccess(p.Contender)
 
 	const threadedPrio = 1000
 	fuzzer.__addInputToCorpus(p, sig, threadedPrio)
-	fuzzer.addInputToThreadedCorpus(p, readfrom, serial)
+	fuzzer.addInputToThreadedCorpus(p, rf, serial)
 
 	fuzzer.signalMu.Lock()
 	defer fuzzer.signalMu.Unlock()
 
-	fuzzer.corpusReadFrom.Merge(readfrom)
+	fuzzer.corpusReadFrom.Merge(rf)
+	fuzzer.maxReadFrom.Merge(rf)
 }
 
 func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
@@ -636,12 +638,33 @@ func (fuzzer *Fuzzer) checkNewCallSignal(p *prog.Prog, info *ipc.CallInfo, call 
 	return true
 }
 
-func (fuzzer *Fuzzer) checkNewReadFrom(p *prog.Prog, info *ipc.ProgInfo, contender prog.Contender) bool {
+func (fuzzer *Fuzzer) mergeMaxReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo) {
+	fuzzer.signalMu.Lock()
+	defer fuzzer.signalMu.Unlock()
+	rf := info.ContenderReadFrom(contender)
+	fuzzer.maxReadFrom.Merge(rf)
+}
+
+func (fuzzer *Fuzzer) __checkNewReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo, readfrom signal.ReadFrom) bool {
+	rf := info.ContenderReadFrom(contender)
 	fuzzer.signalMu.RLock()
 	defer fuzzer.signalMu.RUnlock()
-	c := contender.Calls
-	diff := fuzzer.corpusReadFrom.Diff(info.RFInfo[c[0]][c[1]])
+	diff := readfrom.Diff(rf)
 	return !diff.Empty()
+}
+
+func (fuzzer *Fuzzer) checkNewReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo) bool {
+	return fuzzer.__checkNewReadFrom(p, contender, info, fuzzer.corpusReadFrom)
+}
+
+func (fuzzer *Fuzzer) checkMaxReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo) bool {
+	// if diff.Empty(), obtained read-from (i.e., depends
+	// relationship) does not give a clue for interesting read-from
+	// (i.e., conflicts). It might provide interesting results if we
+	// execute the threaded p, but it is somewhat unlikely. Give this
+	// case very low chance (i.e., 1%) to go into the threading
+	// workqueue.
+	return fuzzer.__checkNewReadFrom(p, contender, info, fuzzer.maxReadFrom) || rand.Intn(100) != 0
 }
 
 func (fuzzer *Fuzzer) identifyContenders(p *prog.Prog, info *ipc.ProgInfo) (res []prog.Contender) {
@@ -652,7 +675,7 @@ func (fuzzer *Fuzzer) identifyContenders(p *prog.Prog, info *ipc.ProgInfo) (res 
 	for call1 := 0; call1 < len(p.Calls); call1++ {
 		for call2 := call1 + 1; call2 < len(p.Calls); call2++ {
 			group := prog.Contender{Calls: []int{call1, call2}}
-			if !info.RFInfo[call1][call2].Empty() && fuzzer.checkNewReadFrom(p, info, group) {
+			if !info.RFInfo[call1][call2].Empty() && fuzzer.checkMaxReadFrom(p, group, info) {
 				res = append(res, prog.Contender{Calls: []int{call1, call2}})
 			}
 		}
@@ -660,7 +683,7 @@ func (fuzzer *Fuzzer) identifyContenders(p *prog.Prog, info *ipc.ProgInfo) (res 
 	return
 }
 
-func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog, calls prog.Contender, info *ipc.ProgInfo, r *rand.Rand) bool {
+func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog, calls prog.Contender, info *ipc.ProgInfo) bool {
 	// Threading a given input requires at most O(n*n) re-execution to
 	// collect read-from inside an epoch (i.e., conflicts), so the
 	// threading queue may explode very quickly. To avoid that
@@ -672,15 +695,6 @@ func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog, calls prog.Contender, info 
 		// threaded p because we don't collect the interesting
 		// read-froms so we will eventually find similar threaded p in
 		// the future.
-		return true
-	}
-	if rf := info.RFInfo[calls.Calls[0]][calls.Calls[1]]; fuzzer.corpusReadFrom.Diff(rf).Empty() && r.Intn(100) == 0 {
-		// 2) obtained read-from (i.e., depends relationship) does not
-		// give a clue for interesting read-from (i.e., conflicts). It
-		// might provide interesting results if we execute the
-		// threaded p, but it is somewhat unlikely. Give this case
-		// very low chance (i.e., 1%) to go into the threading
-		// workqueue.
 		return true
 	}
 	return false
