@@ -94,6 +94,7 @@ const int kCPUMask[kMaxCPU] = {
     __mask(6),
     __mask(7),
 };
+__attribute__((unused))
 const int kCPUMaskAll = 0xff;
 const int kCoverSize = 256 << 10;
 const int kFailStatus = 67;
@@ -287,6 +288,7 @@ struct thread_t {
 	cover_t cov;
 	cover_t rfcov;
 	bool soft_fail_state;
+	int cpu;
 };
 
 struct thread_set_t {
@@ -399,7 +401,7 @@ static void copyout_call_results(thread_t* th);
 static void write_call_output(thread_t* th, bool finished);
 static void write_extra_output();
 static void execute_call(thread_t* th);
-static void setup_schedule(int num_sched, schedule_t* sched, int cpu);
+static void setup_schedule(int num_sched, schedule_t* sched);
 static void clear_schedule(int num_sched);
 static int lookup_available_cpu(int id);
 static void coverage_pre_call(thread_t* th);
@@ -1357,7 +1359,8 @@ void* worker_thread(void* arg)
 	thread_t* th = (thread_t*)arg;
 	threadid = th->id;
 	current_thread = th;
-	setup_affinity_mask(kCPUMaskAll & ~kCPUMask[0]);
+	th->cpu = lookup_available_cpu(th->id);
+	setup_affinity_mask(kCPUMask[th->cpu]);
 	if (flag_coverage) {
 		cover_enable(&th->cov, flag_comparisons, false);
 		cover_enable(&th->rfcov, false, false);
@@ -1402,8 +1405,7 @@ void execute_call(thread_t* th)
 	// Arrange for res = -1 and errno = EFAULT result for such case.
 	th->res = -1;
 	errno = EFAULT;
-	int cpu = lookup_available_cpu(th->id);
-	setup_schedule(th->num_sched, th->sched, cpu);
+	setup_schedule(th->num_sched, th->sched);
 	NONFAILING(th->res = execute_syscall(call, th->args));
 	clear_schedule(th->num_sched);
 	th->reserrno = errno;
@@ -1427,11 +1429,11 @@ void execute_call(thread_t* th)
 	if (flag_fault && th->call_index == flag_fault_call)
 		debug_noprefix("fault=%d ", th->fault_injected);
 	debug_noprefix("\n");
+	setup_affinity_mask(kCPUMask[th->cpu]);
 }
 
-void setup_schedule(int num_sched, schedule_t* sched, int cpu)
+void setup_schedule(int num_sched, schedule_t* sched)
 {
-	setup_affinity_mask(kCPUMask[cpu]);
 	if (num_sched == 0)
 		return;
 	debug("installing breakpoint bp=%d\n", num_sched);
@@ -1459,7 +1461,6 @@ void clear_schedule(int num_sched)
 		hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
 		hypercall(HCALL_CLEAR_BP, 0, 0, 0);
 	}
-	setup_affinity_mask(kCPUMaskAll & ~kCPUMask[0]);
 }
 
 int lookup_available_cpu(int id)
