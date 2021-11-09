@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"runtime/debug"
@@ -33,6 +34,9 @@ type Proc struct {
 	execOptsCover     *ipc.ExecOpts
 	execOptsComps     *ipc.ExecOpts
 	execOptsNoCollide *ipc.ExecOpts
+	// To give a half of computing power for scheduling
+	executed  uint64
+	scheduled uint64
 }
 
 func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
@@ -68,6 +72,11 @@ func (proc *Proc) loop() {
 		generatePeriod = 2
 	}
 	for i := 0; ; i++ {
+		if proc.needScheduling() {
+			fuzzerSnapshot := proc.fuzzer.snapshot()
+			proc.scheduleInput(fuzzerSnapshot, false)
+			continue
+		}
 		item := proc.fuzzer.workQueue.dequeue()
 		if item != nil {
 			switch item := item.(type) {
@@ -100,17 +109,35 @@ func (proc *Proc) loop() {
 			proc.execute(proc.execOpts, p, ProgNormal, StatFuzz)
 		} else {
 			// Mutate a schedule of an existing prog.
-			tp := fuzzerSnapshot.chooseThreadedProgram(proc.rnd)
-			if tp == nil {
-				continue
-			}
-			proc.scheduleInput(tp)
+			proc.scheduleInput(fuzzerSnapshot, true)
 		}
 	}
 }
 
-func (proc *Proc) scheduleInput(tp *prog.ThreadedProg) {
-	for i := 0; i < 10; i++ {
+func (proc *Proc) needScheduling() bool {
+	if len(proc.fuzzer.threadedCorpus) < 5 {
+		return false
+	}
+	// prob = exp(-pi * 3.8133 * x^2) where x = (scheduled/executed)
+	k := math.Pi * 3.8133
+	x := float64(proc.scheduled) / float64(proc.executed)
+	prob1000 := int(math.Exp(-1*k*x*x) * 1000)
+	return prob1000 >= proc.rnd.Intn(1000)
+}
+
+func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot, force bool) {
+	// proc.scheduleInput() does not queue additional works, so
+	// executing proc.scheduleInput() does not cause the workqueues
+	// exploding.
+	for cnt := 0; cnt < 10 && (proc.needScheduling() || force); cnt++ {
+		force = false
+		// increase scheduled here so let needScheduling() know that
+		// we tried to mutate a schedule.
+		proc.scheduled++
+		tp := fuzzerSnapshot.chooseThreadedProgram(proc.rnd)
+		if tp == nil {
+			continue
+		}
 		p := tp.P.Clone()
 		ok := p.MutateSchedule(proc.rnd, proc.fuzzer.staleCount, prog.RecommendedPoints, tp.ReadFrom, tp.Serial)
 		if !ok {
@@ -282,19 +309,16 @@ func (proc *Proc) executeHintSeed(p *prog.Prog, call int) {
 }
 
 func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes, stat Stat) (info *ipc.ProgInfo) {
+	proc.executed++
 	info = proc.executeRaw(execOpts, p, stat)
 	if info == nil {
 		return
 	}
-
-	// All c.Access will not used any longer.
-	for _, c := range info.Calls {
-		c.Access = nil
-	}
 	defer func() {
-		if info != nil {
-			// From this point, RFInfo and Serial will not be used.
-			info.RFInfo, info.Serial = nil, nil
+		// From this point, all those results will not be used
+		info.RFInfo, info.Serial = nil, nil
+		for _, c := range info.Calls {
+			c.Access = nil
 		}
 	}()
 
