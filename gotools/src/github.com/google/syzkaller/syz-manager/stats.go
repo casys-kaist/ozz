@@ -19,6 +19,7 @@ type Stats struct {
 	crashSuppressed     Stat
 	vmRestarts          Stat
 	newInputs           Stat
+	newThreadedInputs   Stat
 	rotatedInputs       Stat
 	execTotal           Stat
 	hubSendProgAdd      Stat
@@ -31,6 +32,7 @@ type Stats struct {
 	corpusCover         Stat
 	corpusCoverFiltered Stat
 	corpusSignal        Stat
+	corpusReadFrom      Stat
 	maxSignal           Stat
 
 	mu         sync.Mutex
@@ -62,17 +64,19 @@ func (mgr *Manager) initStats() {
 
 func (stats *Stats) all() map[string]uint64 {
 	m := map[string]uint64{
-		"crashes":           stats.crashes.get(),
-		"crash types":       stats.crashTypes.get(),
-		"suppressed":        stats.crashSuppressed.get(),
-		"vm restarts":       stats.vmRestarts.get(),
-		"new inputs":        stats.newInputs.get(),
-		"rotated inputs":    stats.rotatedInputs.get(),
-		"exec total":        stats.execTotal.get(),
-		"coverage":          stats.corpusCover.get(),
-		"filtered coverage": stats.corpusCoverFiltered.get(),
-		"signal":            stats.corpusSignal.get(),
-		"max signal":        stats.maxSignal.get(),
+		"crashes":             stats.crashes.get(),
+		"crash types":         stats.crashTypes.get(),
+		"suppressed":          stats.crashSuppressed.get(),
+		"vm restarts":         stats.vmRestarts.get(),
+		"new inputs":          stats.newInputs.get(),
+		"new threaded inputs": stats.newThreadedInputs.get(),
+		"rotated inputs":      stats.rotatedInputs.get(),
+		"exec total":          stats.execTotal.get(),
+		"coverage":            stats.corpusCover.get(),
+		"filtered coverage":   stats.corpusCoverFiltered.get(),
+		"signal":              stats.corpusSignal.get(),
+		"readfrom":            stats.corpusReadFrom.get(),
+		"max signal":          stats.maxSignal.get(),
 	}
 	if stats.haveHub {
 		m["hub: send prog add"] = stats.hubSendProgAdd.get()

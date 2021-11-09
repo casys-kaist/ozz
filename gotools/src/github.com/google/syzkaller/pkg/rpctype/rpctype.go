@@ -18,6 +18,11 @@ type RPCInput struct {
 	Cover  []uint32
 }
 
+type RPCThreadedInput struct {
+	Prog     []byte
+	ReadFrom signal.ReadFrom
+}
+
 type RPCCandidate struct {
 	Prog      []byte
 	Minimized bool
@@ -64,6 +69,11 @@ type SyscallReason struct {
 type NewInputArgs struct {
 	Name string
 	RPCInput
+}
+
+type NewThreadedInputArgs struct {
+	Name string
+	RPCThreadedInput
 }
 
 type PollArgs struct {
