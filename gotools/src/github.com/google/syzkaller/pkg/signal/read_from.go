@@ -8,6 +8,10 @@ import (
 
 type key struct{ from, to uint32 }
 
+func (k key) String() string {
+	return fmt.Sprintf("%x -> %x", k.from, k.to)
+}
+
 func makeKey(from, to uint32) key { return key{from: from, to: to} }
 
 // ReadFrom represents read-from coverage for two instructions. For

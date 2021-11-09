@@ -664,20 +664,22 @@ func (fuzzer *Fuzzer) checkMaxReadFrom(p *prog.Prog, contender prog.Contender, i
 	// execute the threaded p, but it is somewhat unlikely. Give this
 	// case very low chance (i.e., 1%) to go into the threading
 	// workqueue.
-	return fuzzer.__checkNewReadFrom(p, contender, info, fuzzer.maxReadFrom) || rand.Intn(100) != 0
+	return fuzzer.__checkNewReadFrom(p, contender, info, fuzzer.maxReadFrom) || rand.Intn(100) == 0
 }
 
 func (fuzzer *Fuzzer) identifyContenders(p *prog.Prog, info *ipc.ProgInfo) (res []prog.Contender) {
 	// identify calls that are likely to be of interest when run
 	// in parallel.
-	// TODO: This function requires more works: it considers only two
-	// calls.
-	for call1 := 0; call1 < len(p.Calls); call1++ {
-		for call2 := call1 + 1; call2 < len(p.Calls); call2++ {
-			group := prog.Contender{Calls: []int{call1, call2}}
-			if !info.RFInfo[call1][call2].Empty() && fuzzer.checkMaxReadFrom(p, group, info) {
-				res = append(res, prog.Contender{Calls: []int{call1, call2}})
+	// TODO: Razzer's mechanism: it considers only two calls.
+	for c1 := 0; c1 < len(p.Calls); c1++ {
+		for c2 := c1 + 1; c2 < len(p.Calls); c2++ {
+			cont := prog.Contender{
+				Calls: []int{c1, c2},
 			}
+			if fuzzer.checkMaxReadFrom(p, cont, info) {
+				res = append(res, cont)
+			}
+			fuzzer.mergeMaxReadFrom(p, cont, info)
 		}
 	}
 	return
