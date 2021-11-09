@@ -516,14 +516,25 @@ func (fuzzer *FuzzerSnapshot) chooseProgram(r *rand.Rand) *prog.Prog {
 }
 
 func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.ThreadedProg {
-	// TODO: Unlike corpus, Current ThreadedCorpus does not consider
-	// priorities of ThreadedProgs. It is fine for now (i.e., testing
-	// our fuzzer), but we may require to come back here to improve
-	// our fuzzer.
 	if len(fuzzer.threadedCorpus) == 0 {
 		return nil
 	}
-	idx := r.Int63n(int64(len(fuzzer.threadedCorpus)))
+	// NOTE: we want to select a threaded program with the long legnth
+	// of read-from (i.e., the scheduling space is large), and has not
+	// been selected too many times (i.e., and we don't expore the
+	// scheduling space yet).
+	// XXX: Although the idea is straight-forward, implementing it is
+	// costly (or not. whatever.). So instead, the below is a kind of
+	// heuristic (hopefully) mimicking the idea.
+	for try := 0; try < 10; try++ {
+		idx := r.Intn(len(fuzzer.threadedCorpus))
+		tp := fuzzer.threadedCorpus[idx]
+		if tp.Prio-tp.Scheduled >= r.Intn(tp.Prio) {
+			tp.Scheduled++
+			return tp
+		}
+	}
+	idx := r.Intn(len(fuzzer.threadedCorpus))
 	return fuzzer.threadedCorpus[idx]
 }
 
@@ -554,13 +565,13 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 }
 
 func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, readfrom signal.ReadFrom, serial signal.SerialAccess) {
-	// TODO: priority
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()
 	fuzzer.threadedCorpus = append(fuzzer.threadedCorpus, &prog.ThreadedProg{
 		P:        p,
 		ReadFrom: readfrom,
 		Serial:   serial,
+		Prio:     readfrom.Len() * 2,
 	})
 }
 

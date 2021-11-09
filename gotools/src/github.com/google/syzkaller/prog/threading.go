@@ -90,9 +90,11 @@ func (p *Prog) Unthreading() {
 }
 
 type ThreadedProg struct {
-	P        *Prog
-	ReadFrom signal.ReadFrom
-	Serial   signal.SerialAccess
+	P         *Prog
+	ReadFrom  signal.ReadFrom
+	Serial    signal.SerialAccess
+	Scheduled int
+	Prio      int
 }
 
 func (p *Prog) sanitizeRazzer() error {
