@@ -22,10 +22,7 @@ const maxBlobLen = uint64(100 << 10)
 // ct:      ChoiceTable for syscalls.
 // corpus:  The entire corpus, including original program p.
 func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, corpus []*Prog) {
-	if p.Threaded {
-		// TODO: if p is threaded, we need to reserve Contenders.
-		return
-	}
+	p.Unthreading()
 	r := newRand(p.Target, rs)
 	if ncalls < len(p.Calls) {
 		ncalls = len(p.Calls)
@@ -53,6 +50,7 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, corpus []*Pro
 			ok = ctx.removeCall()
 		}
 	}
+	p.Threading(p.Contender)
 	p.fixupEpoch()
 	p.sanitizeFix()
 	p.debugValidate()
@@ -157,9 +155,20 @@ func (ctx *mutator) removeCall() bool {
 	if len(p.Calls) == 0 {
 		return false
 	}
-	idx := r.Intn(len(p.Calls))
-	p.removeCall(idx)
-	return true
+
+retry:
+	for try := 0; try < 3; try++ {
+		idx := r.Intn(len(p.Calls))
+		// don't want to remove a contender if exists
+		for i := range p.Contender.Calls {
+			if idx == p.Contender.Calls[i] {
+				continue retry
+			}
+		}
+		p.removeCall(idx)
+		return true
+	}
+	return false
 }
 
 // Mutate an argument of a random call.

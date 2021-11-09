@@ -26,6 +26,10 @@ func (c Contender) IsContender(idx int) bool {
 }
 
 func (p *Prog) Threading(calls Contender) {
+	if len(calls.Calls) == 0 {
+		return
+	}
+
 	// TODO: Current implementation is the Razzer's threading
 	// mechanism. I think we can do better. Improve
 	// Fuzzer.identifyContender() and this function together.
@@ -77,6 +81,12 @@ func (p *Prog) Contenders() []*Call {
 		res = append(res, p.Calls[ci])
 	}
 	return res
+}
+
+func (p *Prog) Unthreading() {
+	for _, c := range p.Calls {
+		c.Thread, c.Epoch = 0, 0
+	}
 }
 
 type ThreadedProg struct {

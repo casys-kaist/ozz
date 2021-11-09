@@ -325,6 +325,12 @@ func (p *Prog) insertBefore(c *Call, calls []*Call) {
 		newCalls = append(newCalls, p.Calls[idx+1:]...)
 	}
 	p.Calls = newCalls
+	inserted := len(calls)
+	for i := range p.Contender.Calls {
+		if idx <= p.Contender.Calls[i] {
+			p.Contender.Calls[i] += inserted
+		}
+	}
 }
 
 // replaceArg replaces arg with arg1 in a program.
@@ -404,6 +410,11 @@ func (p *Prog) removeCall(idx int) {
 	}
 	copy(p.Calls[idx:], p.Calls[idx+1:])
 	p.Calls = p.Calls[:len(p.Calls)-1]
+	for i := range p.Contender.Calls {
+		if idx >= p.Contender.Calls[i] {
+			p.Contender.Calls[i]--
+		}
+	}
 }
 
 func (p *Prog) sanitizeFix() {
