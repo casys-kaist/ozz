@@ -145,7 +145,7 @@ func TestFlatting(t *testing.T) {
 	}
 }
 
-func TestFromAccesses(t *testing.T) {
+func testFromAccesses(t *testing.T) {
 	dat, err := ioutil.ReadFile("testdata/accesses.dat")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -301,5 +301,34 @@ func TestSerialAccessFind(t *testing.T) {
 	}
 	if found[0].timestamp != 3 {
 		t.Errorf("wrong %v", found)
+	}
+}
+
+func TestSplit(t *testing.T) {
+	rf := NewReadFrom()
+	data := [][2]uint32{
+		{1, 2},
+		{2, 3},
+		{4, 5},
+		{7, 6},
+	}
+	initReadFrom(rf, data)
+	splited := rf.Split(2)
+	if len(splited) != 2 {
+		t.Errorf("wrong splited: length %d", len(splited))
+	}
+	if len(rf) != 2 {
+		t.Errorf("wrong rf: length %d", len(rf))
+	}
+	merged := NewReadFrom()
+	merged.Merge(rf)
+	merged.Merge(splited)
+	if len(merged) != len(data) {
+		t.Errorf("wrong merged: length %d", len(merged))
+	}
+	for _, d := range data {
+		if !merged.Contain(d[0], d[1]) {
+			t.Errorf("merged does not contain %d %d", d[0], d[1])
+		}
 	}
 }

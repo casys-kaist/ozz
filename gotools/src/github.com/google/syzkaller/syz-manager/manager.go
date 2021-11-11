@@ -76,6 +76,7 @@ type Manager struct {
 	candidates       []rpctype.RPCCandidate // untriaged inputs from corpus and hub
 	disabledHashes   map[string]struct{}
 	corpus           map[string]rpctype.RPCInput
+	threadedCorpus   map[string]rpctype.RPCThreadedInput
 	seeds            [][]byte
 	newRepros        [][]byte
 	lastMinCorpus    int
@@ -1134,6 +1135,28 @@ func (mgr *Manager) newInput(inp rpctype.RPCInput, sign signal.Signal) bool {
 		mgr.corpus[sig] = old
 	} else {
 		mgr.corpus[sig] = inp
+		mgr.corpusDB.Save(sig, inp.Prog, 0)
+		if err := mgr.corpusDB.Flush(); err != nil {
+			log.Logf(0, "failed to save corpus database: %v", err)
+		}
+	}
+	return true
+}
+
+func (mgr *Manager) newThreadedInput(inp rpctype.RPCThreadedInput, readfrom signal.ReadFrom) bool {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	// XXX: we maintain the threaded corpus independent to the corpus
+	// as I am not sure that threaded inputs are subject to the
+	// minimization of the corpus (see .minimizeCorpus()). Merge the
+	// two corpus once I'm sure that the two corpuses can actually be
+	// handled in a same way.
+	sig := hash.String(inp.Prog)
+	if old, ok := mgr.threadedCorpus[sig]; ok {
+		old.ReadFrom.Merge(readfrom)
+		mgr.threadedCorpus[sig] = old
+	} else {
+		mgr.threadedCorpus[sig] = inp
 		mgr.corpusDB.Save(sig, inp.Prog, 0)
 		if err := mgr.corpusDB.Flush(); err != nil {
 			log.Logf(0, "failed to save corpus database: %v", err)

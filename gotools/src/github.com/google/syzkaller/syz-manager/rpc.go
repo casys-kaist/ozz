@@ -29,24 +29,28 @@ type RPCServer struct {
 	stats                 *Stats
 	batchSize             int
 
-	mu            sync.Mutex
-	fuzzers       map[string]*Fuzzer
-	checkResult   *rpctype.CheckArgs
-	maxSignal     signal.Signal
-	corpusSignal  signal.Signal
-	corpusCover   cover.Cover
-	rotator       *prog.Rotator
-	rnd           *rand.Rand
-	checkFailures int
+	mu             sync.Mutex
+	fuzzers        map[string]*Fuzzer
+	checkResult    *rpctype.CheckArgs
+	maxSignal      signal.Signal
+	maxReadFrom    signal.ReadFrom
+	corpusSignal   signal.Signal
+	corpusCover    cover.Cover
+	corpusReadFrom signal.ReadFrom
+	rotator        *prog.Rotator
+	rnd            *rand.Rand
+	checkFailures  int
 }
 
 type Fuzzer struct {
-	name          string
-	rotated       bool
-	inputs        []rpctype.RPCInput
-	newMaxSignal  signal.Signal
-	rotatedSignal signal.Signal
-	machineInfo   []byte
+	name           string
+	rotated        bool
+	inputs         []rpctype.RPCInput
+	threadedInputs []rpctype.RPCThreadedInput
+	newMaxSignal   signal.Signal
+	newMaxReadFrom signal.ReadFrom
+	rotatedSignal  signal.Signal
+	machineInfo    []byte
 }
 
 type BugFrames struct {
@@ -60,17 +64,20 @@ type RPCManagerView interface {
 		[]rpctype.RPCInput, BugFrames, map[uint32]uint32, []byte, error)
 	machineChecked(result *rpctype.CheckArgs, enabledSyscalls map[*prog.Syscall]bool)
 	newInput(inp rpctype.RPCInput, sign signal.Signal) bool
+	newThreadedInput(inp rpctype.RPCThreadedInput, readfrom signal.ReadFrom) bool
 	candidateBatch(size int) []rpctype.RPCCandidate
 	rotateCorpus() bool
 }
 
 func startRPCServer(mgr *Manager) (*RPCServer, error) {
 	serv := &RPCServer{
-		mgr:     mgr,
-		cfg:     mgr.cfg,
-		stats:   mgr.stats,
-		fuzzers: make(map[string]*Fuzzer),
-		rnd:     rand.New(rand.NewSource(time.Now().UnixNano())),
+		mgr:            mgr,
+		cfg:            mgr.cfg,
+		stats:          mgr.stats,
+		fuzzers:        make(map[string]*Fuzzer),
+		rnd:            rand.New(rand.NewSource(time.Now().UnixNano())),
+		corpusReadFrom: signal.NewReadFrom(),
+		maxReadFrom:    signal.NewReadFrom(),
 	}
 	serv.batchSize = 5
 	if serv.batchSize < mgr.cfg.Procs {
@@ -101,8 +108,9 @@ func (serv *RPCServer) Connect(a *rpctype.ConnectArgs, r *rpctype.ConnectRes) er
 	defer serv.mu.Unlock()
 
 	f := &Fuzzer{
-		name:        a.Name,
-		machineInfo: a.MachineInfo,
+		name:           a.Name,
+		machineInfo:    a.MachineInfo,
+		newMaxReadFrom: signal.NewReadFrom(),
 	}
 	serv.fuzzers[a.Name] = f
 	r.MemoryLeakFrames = bugFrames.memoryLeaks
@@ -263,6 +271,9 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 	// but this request is already in-flight.
 	genuine := !serv.corpusSignal.Diff(inputSignal).Empty()
 	rotated := false
+	if f.rotated {
+		panic("okay")
+	}
 	if !genuine && f != nil && f.rotated {
 		rotated = !f.rotatedSignal.Diff(inputSignal).Empty()
 	}
@@ -312,6 +323,39 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 	return nil
 }
 
+func (serv *RPCServer) NewThreadedInput(a *rpctype.NewThreadedInputArgs, r *int) error {
+	log.Logf(4, "new threaded input from %v (readfrom=%v)", a.Name, a.ReadFrom.Len())
+	bad, disabled := checkProgram(serv.cfg.Target, serv.targetEnabledSyscalls, a.RPCThreadedInput.Prog)
+	if bad || disabled {
+		log.Logf(0, "rejecting program from fuzzer (bad=%v, disabled=%v):\n%s", bad, disabled, a.RPCThreadedInput.Prog)
+		return nil
+	}
+	inputReadFrom := a.ReadFrom
+	serv.mu.Lock()
+	defer serv.mu.Unlock()
+
+	diff := serv.corpusReadFrom.Diff(inputReadFrom)
+	if diff.Empty() {
+		return nil
+	}
+	f := serv.fuzzers[a.Name]
+	if !serv.mgr.newThreadedInput(a.RPCThreadedInput, inputReadFrom) {
+		return nil
+	}
+	serv.corpusReadFrom.Merge(diff)
+	serv.stats.corpusReadFrom.set(serv.corpusReadFrom.Len())
+
+	serv.stats.newThreadedInputs.inc()
+	for _, other := range serv.fuzzers {
+		if other == f {
+			continue
+		}
+		other.threadedInputs = append(other.threadedInputs, a.RPCThreadedInput)
+	}
+
+	return nil
+}
+
 func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 	serv.stats.mergeNamed(a.Stats)
 
@@ -336,11 +380,23 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 			f1.newMaxSignal.Merge(newMaxSignal)
 		}
 	}
+	newMaxReadFrom := serv.maxReadFrom.Diff(a.MaxReadFrom)
+	if !newMaxReadFrom.Empty() {
+		serv.maxReadFrom.Merge(newMaxReadFrom)
+		serv.stats.maxReadFrom.set(len(serv.maxReadFrom))
+		for _, other := range serv.fuzzers {
+			if other == f {
+				continue
+			}
+			other.newMaxReadFrom.Merge(newMaxReadFrom)
+		}
+	}
 	if f.rotated {
 		// Let rotated VMs run in isolation, don't send them anything.
 		return nil
 	}
 	r.MaxSignal = f.newMaxSignal.Split(2000).Serialize()
+	r.MaxReadFrom = f.newMaxReadFrom.Split(2000)
 	if a.NeedCandidates {
 		r.Candidates = serv.mgr.candidateBatch(serv.batchSize)
 	}

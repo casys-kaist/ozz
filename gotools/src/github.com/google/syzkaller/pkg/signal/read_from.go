@@ -1,7 +1,6 @@
 package signal
 
 import (
-	"container/heap"
 	"fmt"
 	"sort"
 )
@@ -92,6 +91,25 @@ func (rf ReadFrom) Flatting() []uint32 {
 	return r
 }
 
+func (rf *ReadFrom) Split(n int) ReadFrom {
+	if rf.Empty() {
+		return nil
+	}
+	ret := NewReadFrom()
+	for k := range *rf {
+		delete(*rf, k)
+		ret.addKey(k)
+		n--
+		if n == 0 {
+			break
+		}
+	}
+	if len(*rf) == 0 {
+		*rf = nil
+	}
+	return ret
+}
+
 type Order uint32
 
 const (
@@ -132,14 +150,25 @@ func FromAccesses(acc1, acc2 []Access, order Order) (ReadFrom, SerialAccess) {
 	rf := NewReadFrom()
 	used := []Access{}
 	m := make(map[uint32]*Access)
+	t := make(map[*Access]int)
+
+	samecall := func(acc0, acc1 *Access) bool {
+		if acc0.thread != acc1.thread {
+			return true
+		}
+		if t[acc0] != t[acc1] {
+			return true
+		}
+		return false
+	}
 
 	visitAcc := func(acc *Access) {
-		if acc0, ok := m[acc.addr]; ok && (acc0.thread != acc.thread || order != Parallel) {
+		if acc0, ok := m[acc.addr>>3]; ok && samecall(acc0, acc) {
 			rf.Add(acc0.inst, acc.inst)
 			used = append(used, *acc0, *acc)
 		}
 		if acc.typ == store {
-			m[acc.addr] = acc
+			m[acc.addr>>3] = acc
 		}
 	}
 
@@ -148,18 +177,22 @@ func FromAccesses(acc1, acc2 []Access, order Order) (ReadFrom, SerialAccess) {
 		var acc *Access
 		if acc1[i1].timestamp < acc2[i2].timestamp {
 			acc = &acc1[i1]
+			t[acc] = 1
 			i1++
 		} else {
 			acc = &acc2[i2]
+			t[acc] = 2
 			i2++
 		}
 		visitAcc(acc)
 	}
 
 	for ; i1 < len(acc1); i1++ {
+		t[&acc1[i1]] = 1
 		visitAcc(&acc1[i1])
 	}
 	for ; i2 < len(acc2); i2++ {
+		t[&acc2[i2]] = 2
 		visitAcc(&acc2[i2])
 	}
 	serial := serializeAccess(used)
@@ -207,36 +240,16 @@ func (acc Access) Owned(inst uint64, thread uint64) bool {
 type SerialAccess []Access
 
 func NewSerialAccess() SerialAccess {
-	serial := SerialAccess{}
-	heap.Init(&serial)
-	return serial
-}
-
-func (serial SerialAccess) Len() int {
-	return len(serial)
-}
-
-func (serial SerialAccess) Less(i, j int) bool {
-	return serial[i].timestamp < serial[j].timestamp
-}
-
-func (serial SerialAccess) Swap(i, j int) {
-	serial[i], serial[j] = serial[j], serial[i]
-}
-
-func (serial *SerialAccess) Push(element interface{}) {
-	*serial = append(*serial, element.(Access))
-}
-
-func (serial *SerialAccess) Pop() interface{} {
-	old := *serial
-	n := len(old)
-	access := old[n-1]
-	*serial = old[0 : n-1]
-	return access
+	return SerialAccess{}
 }
 
 func serializeAccess(acc []Access) SerialAccess {
+	// NOTE: acc is not sorted when this function is called by
+	// FromAcesses. Although SerialAccess will sort them, it is too
+	// slow since moving elements need to copy lots of memory
+	// objects. To take advantage of the fast path (i.e., idx == n in
+	// Add()), we sort acc here and then hand it to serial.Add().
+	sort.Slice(acc, func(i, j int) bool { return acc[i].timestamp < acc[j].timestamp })
 	serial := NewSerialAccess()
 	for _, acc := range acc {
 		serial.Add(acc)
@@ -245,7 +258,16 @@ func serializeAccess(acc []Access) SerialAccess {
 }
 
 func (serial *SerialAccess) Add(acc Access) {
-	serial.Push(acc)
+	n := len(*serial)
+	idx := sort.Search(n, func(i int) bool {
+		return (*serial)[i].timestamp >= acc.timestamp
+	})
+	if idx == n {
+		*serial = append(*serial, acc)
+	} else {
+		*serial = append((*serial)[:idx+1], (*serial)[idx:]...)
+		(*serial)[idx] = acc
+	}
 }
 
 func (serial SerialAccess) Find(inst uint32, max int) SerialAccess {
