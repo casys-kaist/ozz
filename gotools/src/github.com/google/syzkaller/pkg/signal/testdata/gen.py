@@ -39,20 +39,28 @@ with open("accesses.dat", "w") as f:
         access[idx].append(a)
 
 for i, acc1 in enumerate(access):
+    store0 = {}
+    for a1 in acc1:
+        if a1.typ == 0:
+            store0[a1.addr>>3] = a1
+
     for j, acc2 in enumerate(access):
         if i >= j:
             continue
+        store = store0.copy()
+        s = set()
+        for a2 in acc2:
+            # TODO: Since FromAccesses() in read_from.go does
+            # not consider size of accesses at this point,
+            # this script does not consider it too. Fix this
+            # when FromAccesses() is fixed
+            if a2.addr>>3 in store:
+                a1 = store[a2.addr>>3]
+                s.add(hex(a1.inst)[2:] + ' ' + hex(a2.inst)[2:] + '\n')
+                if a2.typ == 0:
+                    del store[a2.addr>>3]
         fn = name[i] + "_" + name[j] + "_rf.dat"
         with open(fn, 'w') as f:
-            s = set()
-            for a1 in acc1:
-                for a2 in acc2:
-                    # TODO: Since FromAccesses() in read_from.go does
-                    # not consider size of accesses at this point,
-                    # this script does not consider it too. Fix this
-                    # when FromAccesses() is fixed
-                    if a1.addr>>3 == a2.addr>>3 and a1.typ == 0:
-                        s.add(hex(a1.inst)[2:] + ' ' + hex(a2.inst)[2:] + '\n')
             for a in sorted(list(s)):
                 f.write(a)
 
