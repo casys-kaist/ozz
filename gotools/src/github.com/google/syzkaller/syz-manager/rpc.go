@@ -330,7 +330,7 @@ func (serv *RPCServer) NewThreadedInput(a *rpctype.NewThreadedInputArgs, r *int)
 		log.Logf(0, "rejecting program from fuzzer (bad=%v, disabled=%v):\n%s", bad, disabled, a.RPCThreadedInput.Prog)
 		return nil
 	}
-	inputReadFrom := a.ReadFrom
+	inputReadFrom := a.ReadFrom.Deserialize()
 	serv.mu.Lock()
 	defer serv.mu.Unlock()
 
@@ -380,7 +380,7 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 			f1.newMaxSignal.Merge(newMaxSignal)
 		}
 	}
-	newMaxReadFrom := serv.maxReadFrom.Diff(a.MaxReadFrom)
+	newMaxReadFrom := serv.maxReadFrom.Diff(a.MaxReadFrom.Deserialize())
 	if !newMaxReadFrom.Empty() {
 		serv.maxReadFrom.Merge(newMaxReadFrom)
 		serv.stats.maxReadFrom.set(len(serv.maxReadFrom))
@@ -396,7 +396,7 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 		return nil
 	}
 	r.MaxSignal = f.newMaxSignal.Split(2000).Serialize()
-	r.MaxReadFrom = f.newMaxReadFrom.Split(2000)
+	r.MaxReadFrom = f.newMaxReadFrom.Split(2000).Serialize()
 	if a.NeedCandidates {
 		r.Candidates = serv.mgr.candidateBatch(serv.batchSize)
 	}

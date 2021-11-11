@@ -20,7 +20,7 @@ type RPCInput struct {
 
 type RPCThreadedInput struct {
 	Prog     []byte
-	ReadFrom signal.ReadFrom
+	ReadFrom signal.SerialReadFrom
 	Serial   signal.SerialAccess
 }
 
@@ -81,7 +81,7 @@ type PollArgs struct {
 	Name           string
 	NeedCandidates bool
 	MaxSignal      signal.Serial
-	MaxReadFrom    signal.ReadFrom
+	MaxReadFrom    signal.SerialReadFrom
 	Stats          map[string]uint64
 }
 
@@ -90,7 +90,7 @@ type PollRes struct {
 	NewInputs         []RPCInput
 	NewThreadedInputs []RPCThreadedInput
 	MaxSignal         signal.Serial
-	MaxReadFrom       signal.ReadFrom
+	MaxReadFrom       signal.SerialReadFrom
 }
 
 type RunnerConnectArgs struct {

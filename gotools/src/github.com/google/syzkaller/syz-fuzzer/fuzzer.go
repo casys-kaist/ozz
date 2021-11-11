@@ -414,7 +414,7 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats map[string]uint64) bool {
 		Name:           fuzzer.name,
 		NeedCandidates: needCandidates,
 		MaxSignal:      fuzzer.grabNewSignal().Serialize(),
-		MaxReadFrom:    fuzzer.grabNewReadFrom(),
+		MaxReadFrom:    fuzzer.grabNewReadFrom().Serialize(),
 		Stats:          stats,
 	}
 	r := &rpctype.PollRes{}
@@ -422,7 +422,7 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats map[string]uint64) bool {
 		log.Fatalf("Manager.Poll call failed: %v", err)
 	}
 	maxSignal := r.MaxSignal.Deserialize()
-	maxReadFrom := r.MaxReadFrom
+	maxReadFrom := r.MaxReadFrom.Deserialize()
 	log.Logf(1, "poll: candidates=%v inputs=%v signal=%v readfrom=%v",
 		len(r.Candidates), len(r.NewInputs), maxSignal.Len(), maxReadFrom.Len())
 	fuzzer.addMaxSignal(maxSignal)
@@ -477,7 +477,8 @@ func (fuzzer *Fuzzer) addThreadedInputFromAnotherFuzzer(inp rpctype.RPCThreadedI
 	if p == nil {
 		return
 	}
-	fuzzer.addInputToThreadedCorpus(p, inp.ReadFrom, inp.Serial)
+	readfrom := inp.ReadFrom.Deserialize()
+	fuzzer.addInputToThreadedCorpus(p, readfrom, inp.Serial)
 }
 
 func (fuzzer *Fuzzer) addCandidateInput(candidate rpctype.RPCCandidate) {

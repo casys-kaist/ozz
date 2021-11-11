@@ -1153,7 +1153,9 @@ func (mgr *Manager) newThreadedInput(inp rpctype.RPCThreadedInput, readfrom sign
 	// handled in a same way.
 	sig := hash.String(inp.Prog)
 	if old, ok := mgr.threadedCorpus[sig]; ok {
-		old.ReadFrom.Merge(readfrom)
+		rf := old.ReadFrom.Deserialize()
+		rf.Merge(readfrom)
+		old.ReadFrom = rf.Serialize()
 		mgr.threadedCorpus[sig] = old
 	} else {
 		mgr.threadedCorpus[sig] = inp
