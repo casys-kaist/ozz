@@ -358,6 +358,7 @@ func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.Pro
 		proc.fuzzer.sendThreadedInputToManager(rpctype.RPCThreadedInput{
 			Prog:     data,
 			ReadFrom: info.ContenderReadFrom(p.Contender),
+			Serial:   info.ContenderSerialAccess(p.Contender),
 		})
 		proc.fuzzer.addThreadedInputToCorpus(p, info, sig)
 	}

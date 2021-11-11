@@ -422,11 +422,16 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats map[string]uint64) bool {
 		log.Fatalf("Manager.Poll call failed: %v", err)
 	}
 	maxSignal := r.MaxSignal.Deserialize()
-	log.Logf(1, "poll: candidates=%v inputs=%v signal=%v",
-		len(r.Candidates), len(r.NewInputs), maxSignal.Len())
+	maxReadFrom := r.MaxReadFrom
+	log.Logf(1, "poll: candidates=%v inputs=%v signal=%v readfrom=%v",
+		len(r.Candidates), len(r.NewInputs), maxSignal.Len(), maxReadFrom.Len())
 	fuzzer.addMaxSignal(maxSignal)
+	fuzzer.addMaxReadFrom(maxReadFrom)
 	for _, inp := range r.NewInputs {
 		fuzzer.addInputFromAnotherFuzzer(inp)
+	}
+	for _, inp := range r.NewThreadedInputs {
+		fuzzer.addThreadedInputFromAnotherFuzzer(inp)
 	}
 	for _, candidate := range r.Candidates {
 		fuzzer.addCandidateInput(candidate)
@@ -465,6 +470,14 @@ func (fuzzer *Fuzzer) addInputFromAnotherFuzzer(inp rpctype.RPCInput) {
 	sig := hash.Hash(inp.Prog)
 	sign := inp.Signal.Deserialize()
 	fuzzer.addInputToCorpus(p, sign, sig)
+}
+
+func (fuzzer *Fuzzer) addThreadedInputFromAnotherFuzzer(inp rpctype.RPCThreadedInput) {
+	p := fuzzer.deserializeInput(inp.Prog)
+	if p == nil {
+		return
+	}
+	fuzzer.addInputToThreadedCorpus(p, inp.ReadFrom, inp.Serial)
 }
 
 func (fuzzer *Fuzzer) addCandidateInput(candidate rpctype.RPCCandidate) {
@@ -679,6 +692,12 @@ func (fuzzer *Fuzzer) mergeMaxReadFrom(p *prog.Prog, contender prog.Contender, i
 	rf := info.ContenderReadFrom(contender)
 	fuzzer.maxReadFrom.Merge(rf)
 	fuzzer.newReadFrom.Merge(rf)
+}
+
+func (fuzzer *Fuzzer) addMaxReadFrom(rf signal.ReadFrom) {
+	fuzzer.signalMu.Lock()
+	defer fuzzer.signalMu.Unlock()
+	fuzzer.maxReadFrom.Merge(rf)
 }
 
 func (fuzzer *Fuzzer) __checkNewReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo, readfrom signal.ReadFrom) bool {

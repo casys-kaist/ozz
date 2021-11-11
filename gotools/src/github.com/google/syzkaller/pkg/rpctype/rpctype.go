@@ -21,6 +21,7 @@ type RPCInput struct {
 type RPCThreadedInput struct {
 	Prog     []byte
 	ReadFrom signal.ReadFrom
+	Serial   signal.SerialAccess
 }
 
 type RPCCandidate struct {
