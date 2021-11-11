@@ -33,6 +33,7 @@ type RPCServer struct {
 	fuzzers        map[string]*Fuzzer
 	checkResult    *rpctype.CheckArgs
 	maxSignal      signal.Signal
+	maxReadFrom    signal.ReadFrom
 	corpusSignal   signal.Signal
 	corpusCover    cover.Cover
 	corpusReadFrom signal.ReadFrom
@@ -47,6 +48,7 @@ type Fuzzer struct {
 	inputs         []rpctype.RPCInput
 	threadedInputs []rpctype.RPCThreadedInput
 	newMaxSignal   signal.Signal
+	newMaxReadFrom signal.ReadFrom
 	rotatedSignal  signal.Signal
 	machineInfo    []byte
 }
@@ -75,6 +77,7 @@ func startRPCServer(mgr *Manager) (*RPCServer, error) {
 		fuzzers:        make(map[string]*Fuzzer),
 		rnd:            rand.New(rand.NewSource(time.Now().UnixNano())),
 		corpusReadFrom: signal.NewReadFrom(),
+		maxReadFrom:    signal.NewReadFrom(),
 	}
 	serv.batchSize = 5
 	if serv.batchSize < mgr.cfg.Procs {
@@ -105,8 +108,9 @@ func (serv *RPCServer) Connect(a *rpctype.ConnectArgs, r *rpctype.ConnectRes) er
 	defer serv.mu.Unlock()
 
 	f := &Fuzzer{
-		name:        a.Name,
-		machineInfo: a.MachineInfo,
+		name:           a.Name,
+		machineInfo:    a.MachineInfo,
+		newMaxReadFrom: signal.NewReadFrom(),
 	}
 	serv.fuzzers[a.Name] = f
 	r.MemoryLeakFrames = bugFrames.memoryLeaks
@@ -376,11 +380,23 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 			f1.newMaxSignal.Merge(newMaxSignal)
 		}
 	}
+	newMaxReadFrom := serv.maxReadFrom.Diff(a.MaxReadFrom)
+	if !newMaxReadFrom.Empty() {
+		serv.maxReadFrom.Merge(newMaxReadFrom)
+		serv.stats.maxReadFrom.set(len(serv.maxReadFrom))
+		for _, other := range serv.fuzzers {
+			if other == f {
+				continue
+			}
+			other.newMaxReadFrom.Merge(newMaxReadFrom)
+		}
+	}
 	if f.rotated {
 		// Let rotated VMs run in isolation, don't send them anything.
 		return nil
 	}
 	r.MaxSignal = f.newMaxSignal.Split(2000).Serialize()
+	r.MaxReadFrom = f.newMaxReadFrom.Split(2000)
 	if a.NeedCandidates {
 		r.Candidates = serv.mgr.candidateBatch(serv.batchSize)
 	}

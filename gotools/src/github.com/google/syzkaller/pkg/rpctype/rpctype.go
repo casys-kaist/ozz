@@ -80,13 +80,16 @@ type PollArgs struct {
 	Name           string
 	NeedCandidates bool
 	MaxSignal      signal.Serial
+	MaxReadFrom    signal.ReadFrom
 	Stats          map[string]uint64
 }
 
 type PollRes struct {
-	Candidates []RPCCandidate
-	NewInputs  []RPCInput
-	MaxSignal  signal.Serial
+	Candidates        []RPCCandidate
+	NewInputs         []RPCInput
+	NewThreadedInputs []RPCThreadedInput
+	MaxSignal         signal.Serial
+	MaxReadFrom       signal.ReadFrom
 }
 
 type RunnerConnectArgs struct {

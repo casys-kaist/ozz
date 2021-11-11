@@ -34,6 +34,7 @@ type Stats struct {
 	corpusSignal        Stat
 	corpusReadFrom      Stat
 	maxSignal           Stat
+	maxReadFrom         Stat
 
 	mu         sync.Mutex
 	namedStats map[string]uint64
