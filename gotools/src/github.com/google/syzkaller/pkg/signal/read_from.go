@@ -131,14 +131,25 @@ func FromAccesses(acc1, acc2 []Access, order Order) (ReadFrom, SerialAccess) {
 	rf := NewReadFrom()
 	used := []Access{}
 	m := make(map[uint32]*Access)
+	t := make(map[*Access]int)
+
+	samecall := func(acc0, acc1 *Access) bool {
+		if acc0.thread != acc1.thread {
+			return true
+		}
+		if t[acc0] != t[acc1] {
+			return true
+		}
+		return false
+	}
 
 	visitAcc := func(acc *Access) {
-		if acc0, ok := m[acc.addr]; ok && (acc0.thread != acc.thread || order != Parallel) {
+		if acc0, ok := m[acc.addr>>3]; ok && samecall(acc0, acc) {
 			rf.Add(acc0.inst, acc.inst)
 			used = append(used, *acc0, *acc)
 		}
 		if acc.typ == store {
-			m[acc.addr] = acc
+			m[acc.addr>>3] = acc
 		}
 	}
 
@@ -147,18 +158,22 @@ func FromAccesses(acc1, acc2 []Access, order Order) (ReadFrom, SerialAccess) {
 		var acc *Access
 		if acc1[i1].timestamp < acc2[i2].timestamp {
 			acc = &acc1[i1]
+			t[acc] = 1
 			i1++
 		} else {
 			acc = &acc2[i2]
+			t[acc] = 2
 			i2++
 		}
 		visitAcc(acc)
 	}
 
 	for ; i1 < len(acc1); i1++ {
+		t[&acc1[i1]] = 1
 		visitAcc(&acc1[i1])
 	}
 	for ; i2 < len(acc2); i2++ {
+		t[&acc2[i2]] = 2
 		visitAcc(&acc2[i2])
 	}
 	serial := serializeAccess(used)
