@@ -355,6 +355,10 @@ func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.Pro
 		sig := hash.Hash(data)
 		log.Logf(2, "added new threaded input for %v, %v to corpus:\n%s",
 			p.Contender.Calls[0], p.Contender.Calls[1], data)
+		proc.fuzzer.sendThreadedInputToManager(rpctype.RPCThreadedInput{
+			Prog:     data,
+			ReadFrom: info.ContenderReadFrom(p.Contender),
+		})
 		proc.fuzzer.addThreadedInputToCorpus(p, info, sig)
 	}
 

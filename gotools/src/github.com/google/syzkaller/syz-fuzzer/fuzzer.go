@@ -444,6 +444,16 @@ func (fuzzer *Fuzzer) sendInputToManager(inp rpctype.RPCInput) {
 	}
 }
 
+func (fuzzer *Fuzzer) sendThreadedInputToManager(inp rpctype.RPCThreadedInput) {
+	a := &rpctype.NewThreadedInputArgs{
+		Name:             fuzzer.name,
+		RPCThreadedInput: inp,
+	}
+	if err := fuzzer.manager.Call("Manager.NewThreadedInput", a, nil); err != nil {
+		log.Fatalf("Manager.NewThreadedInput call failed: %v", err)
+	}
+}
+
 func (fuzzer *Fuzzer) addInputFromAnotherFuzzer(inp rpctype.RPCInput) {
 	p := fuzzer.deserializeInput(inp.Prog)
 	if p == nil {
