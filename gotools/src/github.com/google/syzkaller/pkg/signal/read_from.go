@@ -1,7 +1,6 @@
 package signal
 
 import (
-	"container/heap"
 	"fmt"
 	"sort"
 )
@@ -207,36 +206,16 @@ func (acc Access) Owned(inst uint64, thread uint64) bool {
 type SerialAccess []Access
 
 func NewSerialAccess() SerialAccess {
-	serial := SerialAccess{}
-	heap.Init(&serial)
-	return serial
-}
-
-func (serial SerialAccess) Len() int {
-	return len(serial)
-}
-
-func (serial SerialAccess) Less(i, j int) bool {
-	return serial[i].timestamp < serial[j].timestamp
-}
-
-func (serial SerialAccess) Swap(i, j int) {
-	serial[i], serial[j] = serial[j], serial[i]
-}
-
-func (serial *SerialAccess) Push(element interface{}) {
-	*serial = append(*serial, element.(Access))
-}
-
-func (serial *SerialAccess) Pop() interface{} {
-	old := *serial
-	n := len(old)
-	access := old[n-1]
-	*serial = old[0 : n-1]
-	return access
+	return SerialAccess{}
 }
 
 func serializeAccess(acc []Access) SerialAccess {
+	// NOTE: acc is not sorted when this function is called by
+	// FromAcesses. Although SerialAccess will sort them, it is too
+	// slow since moving elements need to copy lots of memory
+	// objects. To take advantage of the fast path (i.e., idx == n in
+	// Add()), we sort acc here and then hand it to serial.Add().
+	sort.Slice(acc, func(i, j int) bool { return acc[i].timestamp < acc[j].timestamp })
 	serial := NewSerialAccess()
 	for _, acc := range acc {
 		serial.Add(acc)
@@ -245,7 +224,16 @@ func serializeAccess(acc []Access) SerialAccess {
 }
 
 func (serial *SerialAccess) Add(acc Access) {
-	serial.Push(acc)
+	n := len(*serial)
+	idx := sort.Search(n, func(i int) bool {
+		return (*serial)[i].timestamp >= acc.timestamp
+	})
+	if idx == n {
+		*serial = append(*serial, acc)
+	} else {
+		*serial = append((*serial)[:idx+1], (*serial)[idx:]...)
+		(*serial)[idx] = acc
+	}
 }
 
 func (serial SerialAccess) Find(inst uint32, max int) SerialAccess {
