@@ -91,6 +91,25 @@ func (rf ReadFrom) Flatting() []uint32 {
 	return r
 }
 
+func (rf *ReadFrom) Split(n int) ReadFrom {
+	if rf.Empty() {
+		return nil
+	}
+	ret := NewReadFrom()
+	for k := range *rf {
+		delete(*rf, k)
+		ret.addKey(k)
+		n--
+		if n == 0 {
+			break
+		}
+	}
+	if len(*rf) == 0 {
+		*rf = nil
+	}
+	return ret
+}
+
 type Order uint32
 
 const (
