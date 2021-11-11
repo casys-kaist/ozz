@@ -64,6 +64,7 @@ type Fuzzer struct {
 	newSignal      signal.Signal // diff of maxSignal since last sync with master
 	corpusReadFrom signal.ReadFrom
 	maxReadFrom    signal.ReadFrom
+	newReadFrom    signal.ReadFrom
 
 	checkResult *rpctype.CheckArgs
 	logMu       sync.Mutex
@@ -271,6 +272,7 @@ func main() {
 		corpusHashes:             make(map[hash.Sig]struct{}),
 		corpusReadFrom:           signal.NewReadFrom(),
 		maxReadFrom:              signal.NewReadFrom(),
+		newReadFrom:              signal.NewReadFrom(),
 		staleCount:               make(map[uint32]int),
 		checkResult:              r.CheckResult,
 	}
@@ -412,6 +414,7 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats map[string]uint64) bool {
 		Name:           fuzzer.name,
 		NeedCandidates: needCandidates,
 		MaxSignal:      fuzzer.grabNewSignal().Serialize(),
+		MaxReadFrom:    fuzzer.grabNewReadFrom(),
 		Stats:          stats,
 	}
 	r := &rpctype.PollRes{}
@@ -627,6 +630,17 @@ func (fuzzer *Fuzzer) grabNewSignal() signal.Signal {
 	return sign
 }
 
+func (fuzzer *Fuzzer) grabNewReadFrom() signal.ReadFrom {
+	fuzzer.signalMu.Lock()
+	defer fuzzer.signalMu.Unlock()
+	rf := fuzzer.newReadFrom
+	if rf.Empty() {
+		return nil
+	}
+	fuzzer.newReadFrom = nil
+	return rf
+}
+
 func (fuzzer *Fuzzer) corpusSignalDiff(sign signal.Signal) signal.Signal {
 	fuzzer.signalMu.RLock()
 	defer fuzzer.signalMu.RUnlock()
@@ -664,6 +678,7 @@ func (fuzzer *Fuzzer) mergeMaxReadFrom(p *prog.Prog, contender prog.Contender, i
 	defer fuzzer.signalMu.Unlock()
 	rf := info.ContenderReadFrom(contender)
 	fuzzer.maxReadFrom.Merge(rf)
+	fuzzer.newReadFrom.Merge(rf)
 }
 
 func (fuzzer *Fuzzer) __checkNewReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo, readfrom signal.ReadFrom) bool {
