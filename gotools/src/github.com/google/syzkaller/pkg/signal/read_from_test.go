@@ -332,3 +332,24 @@ func TestSplit(t *testing.T) {
 		}
 	}
 }
+
+func TestSerializeReadFrom(t *testing.T) {
+	rf := NewReadFrom()
+	data := [][2]uint32{
+		{1, 2},
+		{2, 3},
+		{4, 5},
+		{7, 6},
+	}
+	initReadFrom(rf, data)
+	serial := rf.Serialize()
+	deserial := serial.Deserialize()
+	if deserial.Len() != rf.Len() {
+		t.Errorf("wrong length: %d %d", deserial.Len(), rf.Len())
+	}
+	for k := range deserial {
+		if !rf.containKey(k) {
+			t.Errorf("missing: %v", k)
+		}
+	}
+}

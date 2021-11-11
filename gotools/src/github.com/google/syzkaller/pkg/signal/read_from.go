@@ -21,6 +21,15 @@ type ReadFrom map[key]struct{}
 
 func NewReadFrom() ReadFrom { return make(map[key]struct{}) }
 
+func (rf ReadFrom) Serialize() SerialReadFrom {
+	res := SerialReadFrom{}
+	for k := range rf {
+		res.From = append(res.From, k.from)
+		res.To = append(res.To, k.to)
+	}
+	return res
+}
+
 func (rf ReadFrom) containKey(k key) bool {
 	_, ok := rf[k]
 	return ok
@@ -108,6 +117,24 @@ func (rf *ReadFrom) Split(n int) ReadFrom {
 		*rf = nil
 	}
 	return ret
+}
+
+type SerialReadFrom struct {
+	From []uint32
+	To   []uint32
+}
+
+func (s SerialReadFrom) Len() int {
+	return len(s.From)
+}
+
+func (s SerialReadFrom) Deserialize() ReadFrom {
+	res := ReadFrom{}
+	l := len(s.From)
+	for i := 0; i < l; i++ {
+		res.Add(s.From[i], s.To[i])
+	}
+	return res
 }
 
 type Order uint32
