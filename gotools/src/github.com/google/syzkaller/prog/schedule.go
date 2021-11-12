@@ -103,7 +103,7 @@ func (p *Prog) scheduleFromAccesses(serial signal.SerialAccess) {
 		if acc.ExecutedBy(prev) {
 			continue
 		}
-		thread := acc.Thread()
+		thread := acc.Thread
 		var call *Call
 		for _, c := range calls {
 			if c.Thread == thread {
@@ -115,7 +115,7 @@ func (p *Prog) scheduleFromAccesses(serial signal.SerialAccess) {
 		}
 		sched.points = append(sched.points, Point{
 			call:  call,
-			addr:  0xffffffff00000000 | uint64(acc.Inst()),
+			addr:  0xffffffff00000000 | uint64(acc.Inst),
 			order: order,
 		})
 		prev = thread
@@ -147,7 +147,7 @@ func (ctx *scheduler) initialize() {
 			continue
 		}
 		ctx.schedule.Add(acc)
-		ctx.selected[acc.Inst()] = struct{}{}
+		ctx.selected[acc.Inst] = struct{}{}
 	}
 }
 
@@ -190,7 +190,7 @@ func (ctx *scheduler) makePoint(inst uint32) {
 	idx := ctx.r.Intn(len(accesses))
 	acc := accesses[idx]
 	ctx.schedule.Add(acc)
-	ctx.selected[acc.Inst()] = struct{}{}
+	ctx.selected[acc.Inst] = struct{}{}
 }
 
 func (ctx *scheduler) overused(addr uint32) bool {

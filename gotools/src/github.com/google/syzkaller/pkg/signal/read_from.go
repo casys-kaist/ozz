@@ -171,8 +171,8 @@ func FromAccesses(acc1, acc2 []Access, order Order) (ReadFrom, SerialAccess) {
 		load  = 1
 	)
 
-	sort.Slice(acc1, func(i, j int) bool { return acc1[i].timestamp < acc1[j].timestamp })
-	sort.Slice(acc2, func(i, j int) bool { return acc2[i].timestamp < acc2[j].timestamp })
+	sort.Slice(acc1, func(i, j int) bool { return acc1[i].Timestamp < acc1[j].Timestamp })
+	sort.Slice(acc2, func(i, j int) bool { return acc2[i].Timestamp < acc2[j].Timestamp })
 
 	rf := NewReadFrom()
 	used := []Access{}
@@ -180,7 +180,7 @@ func FromAccesses(acc1, acc2 []Access, order Order) (ReadFrom, SerialAccess) {
 	t := make(map[*Access]int)
 
 	samecall := func(acc0, acc1 *Access) bool {
-		if acc0.thread != acc1.thread {
+		if acc0.Thread != acc1.Thread {
 			return true
 		}
 		if t[acc0] != t[acc1] {
@@ -190,19 +190,19 @@ func FromAccesses(acc1, acc2 []Access, order Order) (ReadFrom, SerialAccess) {
 	}
 
 	visitAcc := func(acc *Access) {
-		if acc0, ok := m[acc.addr>>3]; ok && samecall(acc0, acc) {
-			rf.Add(acc0.inst, acc.inst)
+		if acc0, ok := m[acc.Addr>>3]; ok && samecall(acc0, acc) {
+			rf.Add(acc0.Inst, acc.Inst)
 			used = append(used, *acc0, *acc)
 		}
-		if acc.typ == store {
-			m[acc.addr>>3] = acc
+		if acc.Typ == store {
+			m[acc.Addr>>3] = acc
 		}
 	}
 
 	var i1, i2 int
 	for i1, i2 = 0, 0; i1 < len(acc1) && i2 < len(acc2); {
 		var acc *Access
-		if acc1[i1].timestamp < acc2[i2].timestamp {
+		if acc1[i1].Timestamp < acc2[i2].Timestamp {
 			acc = &acc1[i1]
 			t[acc] = 1
 			i1++
@@ -227,13 +227,13 @@ func FromAccesses(acc1, acc2 []Access, order Order) (ReadFrom, SerialAccess) {
 }
 
 type Access struct {
-	inst      uint32
-	addr      uint32
-	size      uint32
-	typ       uint32
-	timestamp uint32
+	Inst      uint32
+	Addr      uint32
+	Size      uint32
+	Typ       uint32
+	Timestamp uint32
 	// TODO: do we need to keep epoch?
-	thread uint64
+	Thread uint64
 }
 
 func NewAccess(inst, addr, size, typ, timestamp uint32, thread, epoch uint64) Access {
@@ -242,26 +242,17 @@ func NewAccess(inst, addr, size, typ, timestamp uint32, thread, epoch uint64) Ac
 
 func (acc Access) String() string {
 	return fmt.Sprintf("thread #%d: %x accesses %x (size: %d, type: %d, timestamp: %d)",
-		acc.thread, acc.inst, acc.addr, acc.size, acc.typ, acc.timestamp)
+		acc.Thread, acc.Inst, acc.Addr, acc.Size, acc.Typ, acc.Timestamp)
 }
 
 func (acc Access) ExecutedBy(thread uint64) bool {
-	return acc.thread == thread
-}
-
-// TODO: expose each fields
-func (acc Access) Thread() uint64 {
-	return acc.thread
-}
-
-func (acc Access) Inst() uint32 {
-	return acc.inst
+	return acc.Thread == thread
 }
 
 func (acc Access) Owned(inst uint64, thread uint64) bool {
 	// TODO: possibly temporary. used by only scheduler.findAccess()
 	// (i.e., prog/schedule.go)
-	return acc.inst == uint32(inst) && acc.thread == thread
+	return acc.Inst == uint32(inst) && acc.Thread == thread
 }
 
 type SerialAccess []Access
@@ -276,7 +267,7 @@ func serializeAccess(acc []Access) SerialAccess {
 	// slow since moving elements need to copy lots of memory
 	// objects. To take advantage of the fast path (i.e., idx == n in
 	// Add()), we sort acc here and then hand it to serial.Add().
-	sort.Slice(acc, func(i, j int) bool { return acc[i].timestamp < acc[j].timestamp })
+	sort.Slice(acc, func(i, j int) bool { return acc[i].Timestamp < acc[j].Timestamp })
 	serial := NewSerialAccess()
 	for _, acc := range acc {
 		serial.Add(acc)
@@ -287,7 +278,7 @@ func serializeAccess(acc []Access) SerialAccess {
 func (serial *SerialAccess) Add(acc Access) {
 	n := len(*serial)
 	idx := sort.Search(n, func(i int) bool {
-		return (*serial)[i].timestamp >= acc.timestamp
+		return (*serial)[i].Timestamp >= acc.Timestamp
 	})
 	if idx == n {
 		*serial = append(*serial, acc)
@@ -302,9 +293,9 @@ func (serial SerialAccess) Find(inst uint32, max int) SerialAccess {
 	chk := make(map[uint64]int)
 	res := NewSerialAccess()
 	for _, acc := range serial {
-		if cnt := chk[acc.thread]; acc.inst == inst && cnt < max {
+		if cnt := chk[acc.Thread]; acc.Inst == inst && cnt < max {
 			res.Add(acc)
-			chk[acc.thread]++
+			chk[acc.Thread]++
 		}
 		if len(res) == max*2 {
 			// TODO: Razzer's mechanism. We execute at most two

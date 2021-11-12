@@ -235,8 +235,8 @@ func testFromAccesses(t *testing.T) {
 					fn, len(ans), len(rf))
 			}
 			for _, acc := range serial {
-				if _, ok := serialAns[acc.Inst()]; !ok {
-					t.Errorf("wrong serial: missing %v", acc.Inst())
+				if _, ok := serialAns[acc.Inst]; !ok {
+					t.Errorf("wrong serial: missing %v", acc.Inst)
 				}
 			}
 		}
@@ -244,19 +244,19 @@ func testFromAccesses(t *testing.T) {
 }
 
 var testAcc = []Access{
-	{timestamp: 0, inst: 1},
-	{timestamp: 3, inst: 2},
-	{timestamp: 2, inst: 3, thread: 1},
-	{timestamp: 6, inst: 3, thread: 0},
-	{timestamp: 1, inst: 5},
+	{Timestamp: 0, Inst: 1},
+	{Timestamp: 3, Inst: 2},
+	{Timestamp: 2, Inst: 3, Thread: 1},
+	{Timestamp: 6, Inst: 3, Thread: 0},
+	{Timestamp: 1, Inst: 5},
 }
 
 var serializedAcc = []Access{
-	{timestamp: 0, inst: 1},
-	{timestamp: 1, inst: 5},
-	{timestamp: 2, inst: 3, thread: 1},
-	{timestamp: 3, inst: 2},
-	{timestamp: 6, inst: 3, thread: 0},
+	{Timestamp: 0, Inst: 1},
+	{Timestamp: 1, Inst: 5},
+	{Timestamp: 2, Inst: 3, Thread: 1},
+	{Timestamp: 3, Inst: 2},
+	{Timestamp: 6, Inst: 3, Thread: 0},
 }
 
 func TestSerialAccessAdd(t *testing.T) {
@@ -268,8 +268,8 @@ func TestSerialAccessAdd(t *testing.T) {
 		t.Errorf("wrong length, expected %v, got %v", len(serializedAcc), len(serial))
 	}
 	for i, acc := range serial {
-		if acc.inst != serializedAcc[i].inst {
-			t.Errorf("wrong #%d, expected %v, got %v", i, serializedAcc[i].inst, acc.inst)
+		if acc.Inst != serializedAcc[i].Inst {
+			t.Errorf("wrong #%d, expected %v, got %v", i, serializedAcc[i].Inst, acc.Inst)
 		}
 	}
 }
@@ -280,8 +280,8 @@ func TestSerializeAccess(t *testing.T) {
 		t.Errorf("wrong length, expected %v, got %v", len(serializedAcc), len(serial))
 	}
 	for i, acc := range serial {
-		if acc.inst != serializedAcc[i].inst {
-			t.Errorf("wrong #%d, expected %v, got %v", i, serializedAcc[i].inst, acc.inst)
+		if acc.Inst != serializedAcc[i].Inst {
+			t.Errorf("wrong #%d, expected %v, got %v", i, serializedAcc[i].Inst, acc.Inst)
 		}
 	}
 }
@@ -292,14 +292,14 @@ func TestSerialAccessFind(t *testing.T) {
 	if len(found) != 2 {
 		t.Errorf("wrong length, expected 2, got %v", len(found))
 	}
-	if found[0].timestamp != 2 || found[1].timestamp != 6 {
+	if found[0].Timestamp != 2 || found[1].Timestamp != 6 {
 		t.Errorf("wrong %v", found)
 	}
 	found = serial.Find(2, 1)
 	if len(found) != 1 {
 		t.Errorf("wrong length, expected 1, got %v", len(found))
 	}
-	if found[0].timestamp != 3 {
+	if found[0].Timestamp != 3 {
 		t.Errorf("wrong %v", found)
 	}
 }
