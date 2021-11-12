@@ -168,6 +168,7 @@ func RunManager(cfg *mgrconfig.Config) {
 		stats:            &Stats{haveHub: cfg.HubClient != ""},
 		crashTypes:       make(map[string]bool),
 		corpus:           make(map[string]rpctype.RPCInput),
+		threadedCorpus:   make(map[string]rpctype.RPCThreadedInput),
 		disabledHashes:   make(map[string]struct{}),
 		memoryLeakFrames: make(map[string]bool),
 		dataRaceFrames:   make(map[string]bool),
