@@ -651,7 +651,7 @@ func (fuzzer *Fuzzer) grabNewReadFrom() signal.ReadFrom {
 	if rf.Empty() {
 		return nil
 	}
-	fuzzer.newReadFrom = nil
+	fuzzer.newReadFrom = signal.NewReadFrom()
 	return rf
 }
 
