@@ -143,6 +143,7 @@ func createIPCConfig(features *host.Features, config *ipc.Config) {
 func main() {
 	golog.SetPrefix("[FUZZER] ")
 	debug.SetGCPercent(50)
+	resetKSSB()
 
 	var (
 		flagName    = flag.String("name", "test", "unique name for manager")
