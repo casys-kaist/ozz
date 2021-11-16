@@ -1134,6 +1134,10 @@ thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 cop
 			// normally.
 			th = unhand_worker_thread(th);
 	}
+	if (th == NULL)
+		// unhand_worker_thread failed to find a fallback
+		// thread. drop the call.
+		return NULL;
 	if (event_isset(&th->ready) || !event_isset(&th->done) || th->executing)
 		failmsg("bad thread state in schedule", "ready=%d done=%d executing=%d",
 			event_isset(&th->ready), event_isset(&th->done), th->executing);
@@ -1280,6 +1284,10 @@ thread_t* unhand_worker_thread(thread_t* th)
 		// thread to replace the previous one.
 		int idx, id = th->id;
 		thread_set_t* set = &threads[id];
+		if (set->blocked == kMaxFallbackThreads) {
+			debug("failed to unhand the worker thread %d (out of threads), drop the call\n", id);
+			return NULL;
+		}
 		idx = ++set->blocked;
 		debug("unhand the worker thread %d, blocked=%d\n", id, set->blocked);
 		th = &set->set[idx];
