@@ -4323,8 +4323,8 @@ static void kill_and_wait(int pid, int* status)
 {
 	kill(-pid, SIGKILL);
 	kill(pid, SIGKILL);
-	// First, give it up to 100 ms to surrender.
-	for (int i = 0; i < 100; i++) {
+	// First, give it up to 600 ms to surrender.
+	for (int i = 0; i < 600; i++) {
 		if (waitpid(-1, status, WNOHANG | __WALL) == pid)
 			return;
 		usleep(1000);
