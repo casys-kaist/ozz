@@ -148,6 +148,7 @@ static uint32* write_output_64(uint64 v);
 static void write_completed(uint32 completed);
 static uint32 hash(uint32 a);
 static bool dedup(uint32 sig);
+static bool dedup2(uint32 inst, uint32 addr);
 #endif
 
 uint64 start_time_ms = 0;
@@ -1125,8 +1126,12 @@ void write_read_from_coverage_signal(cover_t* cov, uint32* signal_count_pos, uin
 			"signal_count_pos=%p", signal_count_pos);
 
 	uint32 cover_size = cov->size;
+	uint32 nwritten = 0;
 	struct kmemcov_access* cover_data = &((struct kmemcov_access*)cov->data)[1];
 	for (uint32 i = 0; i < cover_size; i++) {
+		if (dedup2(cover_data[i].inst, cover_data[i].addr))
+			continue;
+		nwritten++;
 		// Truncate all fields into uint32. This is fine for
 		// inst, size, type, and timestamp, but truncating
 		// addr may introduce the possibility that for two
@@ -1139,7 +1144,7 @@ void write_read_from_coverage_signal(cover_t* cov, uint32* signal_count_pos, uin
 		write_output(cover_data[i].type);
 		write_output(cover_data[i].timestamp);
 	}
-	*cover_count_pos = cover_size;
+	*cover_count_pos = nwritten;
 }
 
 template <typename cover_data_t>
@@ -1521,6 +1526,23 @@ static bool dedup(uint32 sig)
 		}
 	}
 	dedup_table[sig % dedup_table_size] = sig;
+	return false;
+}
+
+uint32 dedup_table2[dedup_table_size];
+static bool dedup2(uint32 inst, uint32 addr)
+{
+	uint32 sig = inst ^ addr;
+	for (uint32 i = 0; i < 4; i++) {
+		uint32 pos = (sig + i) % dedup_table_size;
+		if (dedup_table2[pos] == sig)
+			return true;
+		if (dedup_table2[pos] == 0) {
+			dedup_table2[pos] = sig;
+			return false;
+		}
+	}
+	dedup_table2[sig % dedup_table_size] = sig;
 	return false;
 }
 #endif
