@@ -78,6 +78,7 @@ const int kMaxFd = 250;
 const int kMaxThreads = 4;
 const int kMaxSchedule = 4;
 const int kMaxFallbackThreads = 3;
+const int kMaxPendingThreads = 1;
 const int kInPipeFd = kMaxFd - 1; // remapped from stdin
 const int kOutPipeFd = kMaxFd - 2; // remapped from stdout
 const int kCoverFd = kOutPipeFd - (kMaxThreads * kMaxFallbackThreads) * nr_cov_type;
@@ -214,7 +215,7 @@ const uint64 binary_format_stroct = 4;
 
 const uint64 no_copyout = -1;
 
-static int epoch;
+static int global_epoch;
 static int running;
 static bool collide;
 uint32 completed;
@@ -290,11 +291,16 @@ struct thread_t {
 	cover_t rfcov;
 	bool soft_fail_state;
 	int cpu;
+	bool pending;
 };
 
 struct thread_set_t {
+	// threads running a call
 	struct thread_t set[kMaxFallbackThreads];
+	// threads pending a call
+	struct thread_t pended[kMaxPendingThreads];
 	int blocked;
+	int pending;
 };
 
 static thread_set_t threads[kMaxThreads];
@@ -395,7 +401,9 @@ struct feature_t {
 };
 
 static thread_t* get_thread(int thread);
+static void prepare_thread(thread_t* th, int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos);
 static thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos);
+static thread_t* pending_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos);
 static void handle_completion(thread_t* th);
 static thread_t* unhand_worker_thread(thread_t* th);
 static void copyout_call_results(thread_t* th);
@@ -419,6 +427,7 @@ static bool copyout(char* addr, uint64 size, uint64* res);
 static void setup_control_pipes();
 static void setup_features(char** enable, int n);
 static void setup_affinity_mask(int mask);
+static bool __run_in_epoch(uint32 epoch, uint32 global);
 static bool run_in_epoch(thread_t* th);
 
 #include "syscalls.h"
@@ -513,6 +522,9 @@ int main(int argc, char** argv)
 	if (flag_coverage) {
 		for (int i = 0; i < kMaxThreads; i++) {
 			thread_set_t* set = &threads[i];
+			// No need to init covers for pending
+			// threads. We don't run a call in pending
+			// threads.
 			for (int j = 0; j < kMaxFallbackThreads; j++) {
 				thread_t* th = &set->set[j];
 				int fd = kCoverFd + ((i * kMaxFallbackThreads) + j) * nr_cov_type;
@@ -736,6 +748,34 @@ int count_contenders()
 	return num;
 }
 
+void resume_pending_call(int thread, thread_t* pended)
+{
+	debug("resume a call %d@%d\n", thread, pended->epoch);
+	pended->pending = false;
+	schedule_call(pended->call_index, pended->call_num, pended->colliding, pended->copyout_index,
+		      pended->num_args, (uint64*)pended->args, thread, pended->epoch, pended->num_sched, pended->sched, pended->copyout_pos);
+}
+
+void resume_pending_calls()
+{
+	for (int i = 0; i < kMaxThreads; i++) {
+		thread_set_t* set = &threads[i];
+		if (set->pending == 0)
+			continue;
+		int idx;
+		for (idx = 0; idx < kMaxPendingThreads; idx++)
+			if (set->pended[idx].pending)
+				break;
+		if (idx == kMaxPendingThreads)
+			// This should be an error
+			continue;
+		thread_t* th = &set->pended[idx];
+		if (!run_in_epoch(th))
+			continue;
+		resume_pending_call(i, th);
+	}
+}
+
 // start_epoch() assumes schedule_call() gracefully handles a blocking
 // thread, and the forefront thread can execute an assigned call.
 void start_epoch()
@@ -743,7 +783,7 @@ void start_epoch()
 	uint64_t timeout = 0;
 	// Signal threads that are ready to execute. Each thread will
 	// reset th->ready after th->start is set.
-	debug("start epoch %d\n", epoch);
+	debug("start epoch %d\n", global_epoch);
 	int num_contender = count_contenders();
 	if (num_contender != 0)
 		hypercall(HCALL_PREPARE_BP, num_contender, 0, 0);
@@ -779,7 +819,7 @@ void start_epoch()
 				timeout_ms = 1;
 		}
 	}
-	epoch++;
+	global_epoch++;
 }
 
 void wait_epoch(thread_t* th)
@@ -791,10 +831,15 @@ void wait_epoch(thread_t* th)
 	} while (!run_in_epoch(th));
 }
 
+bool __run_in_epoch(uint32 epoch, uint32 global)
+{
+	return epoch <= global;
+}
+
 bool run_in_epoch(thread_t* th)
 {
 	// return true if th can execute a call in the global epoch
-	return th->epoch <= epoch;
+	return __run_in_epoch(th->epoch, global_epoch);
 }
 
 // execute_one executes program stored in input_data.
@@ -830,6 +875,7 @@ retry:
 	for (; !stop;) {
 		uint64 call_num = read_input(&input_pos);
 		if (call_num == instr_epoch || call_num == instr_eof) {
+			resume_pending_calls();
 			start_epoch();
 			stop = call_num == instr_eof;
 			continue;
@@ -963,6 +1009,8 @@ retry:
 		wait_end = std::max(wait_end, wait_start + prog_extra_timeout);
 		while (running > 0 && current_time_ms() <= wait_end) {
 			sleep_ms(1 * slowdown_scale);
+			// Do not handle completion of pending
+			// threads. they don't run a call.
 			for (int i = 0; i < kMaxThreads; i++) {
 				thread_set_t* set = &threads[i];
 				for (int j = 0; j < kMaxFallbackThreads; j++) {
@@ -978,6 +1026,7 @@ retry:
 		if (running > 0) {
 			for (int i = 0; i < kMaxThreads; i++) {
 				thread_set_t* set = &threads[i];
+				// Pending threads don't run a call
 				for (int j = 0; j < kMaxFallbackThreads; j++) {
 					thread_t* th = &set->set[j];
 					if (th->executing) {
@@ -1015,9 +1064,9 @@ retry:
 	hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
 }
 
-// NOTE: get_thread() should be called in the main thread
-// get_thread() does not care that the forefront thread is blocked or
-// not.
+// Get a thread to run a call
+// NOTE: get_thread() should be called in the main thread get_thread()
+// does not care that the forefront thread is blocked or not.
 thread_t* get_thread(int thread)
 {
 	thread_set_t* set = &threads[thread];
@@ -1027,9 +1076,48 @@ thread_t* get_thread(int thread)
 	return &set->set[idx];
 }
 
+void prepare_thread(thread_t* th, int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos)
+{
+	th->colliding = colliding;
+	th->copyout_pos = pos;
+	th->copyout_index = copyout_index;
+	event_reset(&th->done);
+	th->executing = true;
+	th->call_index = call_index;
+	th->call_num = call_num;
+	th->num_args = num_args;
+	for (int i = 0; i < kMaxArgs; i++)
+		th->args[i] = args[i];
+	th->epoch = epoch;
+	th->num_sched = num_sched;
+	for (uint64 i = 0; i < num_sched; i++)
+		th->sched[i] = sched[i];
+}
+
+thread_t* pending_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos)
+{
+	thread_set_t* set = &threads[thread];
+	if (set->pending == kMaxPendingThreads)
+		// We reach the maximum number of pending calls. Drop
+		// the call.
+		return NULL;
+	int idx = set->pending++;
+	thread_t* th = &set->pended[idx];
+	prepare_thread(th, call_index, call_num, colliding, copyout_index,
+		       num_args, args, epoch, num_sched, sched, pos);
+	th->pending = true;
+	return th;
+}
+
 thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos)
 {
 	debug("schedule a call to thread %llu@%llu\n", thread, epoch);
+	if (!__run_in_epoch(epoch, global_epoch)) {
+		// It is too early to schedule this call. Let's
+		// pending the call
+		debug("pending a call %llu@%llu\n", thread, epoch);
+		return pending_call(call_index, call_num, colliding, copyout_index, num_args, args, thread, epoch, num_sched, sched, pos);
+	}
 	thread_t* th = get_thread(thread);
 	if (!th->created)
 		thread_create(th, thread);
@@ -1050,20 +1138,9 @@ thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 cop
 		failmsg("bad thread state in schedule", "ready=%d done=%d executing=%d",
 			event_isset(&th->ready), event_isset(&th->done), th->executing);
 	last_scheduled = th;
-	th->colliding = colliding;
-	th->copyout_pos = pos;
-	th->copyout_index = copyout_index;
-	event_reset(&th->done);
-	th->executing = true;
-	th->call_index = call_index;
-	th->call_num = call_num;
-	th->num_args = num_args;
-	for (int i = 0; i < kMaxArgs; i++)
-		th->args[i] = args[i];
-	th->epoch = epoch;
-	th->num_sched = num_sched;
-	for (uint64 i = 0; i < num_sched; i++)
-		th->sched[i] = sched[i];
+	prepare_thread(th, call_index, call_num, colliding, copyout_index,
+		       num_args, args, epoch, num_sched, sched, pos);
+
 	event_set(&th->ready);
 	running++;
 	return th;
