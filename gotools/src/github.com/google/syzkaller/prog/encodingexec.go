@@ -74,11 +74,11 @@ func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
 		args:   make(map[Arg]argInfo),
 		epoch:  0,
 	}
-	for _, c := range p.Calls {
-		w.writeEpoch(c)
+	for i, c := range p.Calls {
 		w.csumMap, w.csumUses = calcChecksumsCall(c)
 		w.serializeCall(c)
 		w.writeSchedule(c, p.Schedule)
+		w.writeEpoch(c, i, p.Calls)
 	}
 	w.write(execInstrEOF)
 	if w.eof || w.copyoutSeq > execMaxCommands {
@@ -97,11 +97,19 @@ func (w *execContext) writeSchedule(c *Call, sched Schedule) {
 	}
 }
 
-func (w *execContext) writeEpoch(c *Call) {
-	if w.epoch+1 == c.Epoch {
-		w.write(execInstrEpoch)
-		w.epoch++
+func (w *execContext) writeEpoch(c *Call, ci int, calls []*Call) {
+	// TODO: Razzer's mechanism.
+	for i := ci + 1; i < len(calls); i++ {
+		c0 := calls[i]
+		if c.Epoch == c0.Epoch {
+			// There is another Call that will run in the same epoch
+			// with c. Wait for the call and do not write
+			// execInstrEpoch.
+			return
+		}
 	}
+	// c is the last call in this epoch. Let's start the epoch.
+	w.write(execInstrEpoch)
 }
 
 func (w *execContext) serializeCall(c *Call) {
