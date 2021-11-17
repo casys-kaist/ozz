@@ -139,6 +139,13 @@ static target_ulong qcsched_deactivate_breakpoint(CPUState *cpu0)
 
     total = sched.total;
 
+    // NOTE: two reasons for falsifying sched.activated here: 1) the
+    // same reason for qcsched_activate_breakpoint(), and 2) let the
+    // trampoled CPUs see sched.activated as false so it can resume
+    // (see. qcsched_vmi_can_progress() called in
+    // __handle_breakpoint_hook()).
+    sched.activated = false;
+
     CPU_FOREACH(cpu)
     {
         for (i = 0; i < total; i++) {
@@ -149,7 +156,6 @@ static target_ulong qcsched_deactivate_breakpoint(CPUState *cpu0)
         }
         qcsched_escape_if_trampoled(cpu0, cpu);
     }
-    sched.activated = false;
     return 0;
 }
 

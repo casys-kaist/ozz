@@ -122,5 +122,5 @@ bool qcsched_vmi_can_progress(CPUState *cpu)
     qcsched_vmi_task(cpu, &running);
     return !__vmi_scheduling_subject(&running) ||
            vmi_same_task(&running, &entry->t) || sched.total == sched.current ||
-           cpu->qcsched_force_wakeup;
+           cpu->qcsched_force_wakeup || !sched.activated;
 }
