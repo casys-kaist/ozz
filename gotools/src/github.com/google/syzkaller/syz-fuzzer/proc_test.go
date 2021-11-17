@@ -4,14 +4,14 @@ import (
 	"math/rand"
 	"testing"
 	"time"
+
+	"github.com/google/syzkaller/prog"
 )
 
 func TestNeedScheduling(t *testing.T) {
 	proc := &Proc{
 		fuzzer: &Fuzzer{
-			workQueue: &WorkQueue{
-				threading: make([]*WorkThreading, 100),
-			},
+			threadedCorpus: make([]*prog.ThreadedProg, 100),
 		},
 		rnd: rand.New(rand.NewSource(time.Now().UnixNano() + int64(0)*1e12)),
 	}
