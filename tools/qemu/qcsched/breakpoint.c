@@ -169,7 +169,17 @@ static void __handle_breakpoint_schedpoint(CPUState *cpu)
 int qcsched_handle_breakpoint(CPUState *cpu)
 {
     // Remove the breakpoint first
-    ASSERT(!kvm_remove_breakpoint_cpu(cpu, RIP(cpu), 1, GDB_BREAKPOINT_HW),
+    int err = kvm_remove_breakpoint_cpu(cpu, RIP(cpu), 1, GDB_BREAKPOINT_HW);
+    // When removing a breakpoint on another CPU,
+    // kvm_remove_breakpoint_cpu() temporary releases the iolock. This
+    // opens a chance of race condition between this function and a
+    // function removing a breakpoint on this CPU, and consequently,
+    // kvm_remove_breakpoint_cpu() can return -ENOENT. Since the only
+    // location that removes breakpoints on other CPUs is
+    // qcsched_deacitavte_breakpoint() which falsify sched.activated,
+    // we can check sched.activated to confirm that the error code is
+    // actually benign.
+    ASSERT(!err || (err == -ENOENT && sched.activated == false),
            "failed to remove breakpoint\n");
 
     qemu_mutex_lock_iothread();
