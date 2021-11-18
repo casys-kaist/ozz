@@ -72,6 +72,7 @@ func (proc *Proc) loop() {
 		generatePeriod = 2
 	}
 	for i := 0; ; i++ {
+		log.Logf(2, "executed=%v scheduled=%v", proc.executed, proc.scheduled)
 		if proc.needScheduling() {
 			fuzzerSnapshot := proc.fuzzer.snapshot()
 			proc.scheduleInput(fuzzerSnapshot, false)
@@ -118,10 +119,12 @@ func (proc *Proc) needScheduling() bool {
 	if len(proc.fuzzer.threadedCorpus) < 5 {
 		return false
 	}
-	// prob = exp(-pi * 3.8133 * x^2) where x = (scheduled/executed)
-	k := math.Pi * 3.8133
+	// prob = 1 / (1 + exp(-25 * (-x + 0.25))) where x = (scheduled/executed)
 	x := float64(proc.scheduled) / float64(proc.executed)
-	prob1000 := int(math.Exp(-1*k*x*x) * 1000)
+	prob1000 := int(1 / (1 + math.Exp(-30*(-1*x+0.25))) * 1000)
+	if prob1000 < 50 {
+		prob1000 = 50
+	}
 	return prob1000 >= proc.rnd.Intn(1000)
 }
 
@@ -309,7 +312,6 @@ func (proc *Proc) executeHintSeed(p *prog.Prog, call int) {
 }
 
 func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes, stat Stat) (info *ipc.ProgInfo) {
-	proc.executed++
 	info = proc.executeRaw(execOpts, p, stat)
 	if info == nil {
 		return
@@ -397,6 +399,7 @@ func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, info *ipc
 }
 
 func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.ProgInfo {
+	proc.executed++
 	if opts.Flags&ipc.FlagDedupCover == 0 {
 		log.Fatalf("dedup cover is not enabled")
 	}
@@ -440,6 +443,9 @@ func (proc *Proc) logProgram(opts *ipc.ExecOpts, p *prog.Prog) {
 	strOpts := ""
 	if opts.Flags&ipc.FlagInjectFault != 0 {
 		strOpts = fmt.Sprintf(" (fault-call:%v fault-nth:%v)", opts.FaultCall, opts.FaultNth)
+	}
+	if p.Threaded {
+		strOpts += fmt.Sprintf(" (threaded %v) ", p.Contender.Calls)
 	}
 
 	// The following output helps to understand what program crashed kernel.
