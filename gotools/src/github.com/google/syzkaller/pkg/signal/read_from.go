@@ -288,7 +288,7 @@ func (serial *SerialAccess) Add(acc Access) {
 	}
 }
 
-func (serial SerialAccess) Find(inst uint32, max int) SerialAccess {
+func (serial SerialAccess) FindForeachThread(inst uint32, max int) SerialAccess {
 	// Find at most max Accesses for each thread that are executed at inst
 	chk := make(map[uint64]int)
 	res := NewSerialAccess()
@@ -305,4 +305,13 @@ func (serial SerialAccess) Find(inst uint32, max int) SerialAccess {
 		}
 	}
 	return res
+}
+
+func (serial SerialAccess) FindIndex(acc Access) int {
+	for i, acc0 := range serial {
+		if acc == acc0 {
+			return i
+		}
+	}
+	return -1
 }

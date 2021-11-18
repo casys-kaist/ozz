@@ -286,21 +286,33 @@ func TestSerializeAccess(t *testing.T) {
 	}
 }
 
-func TestSerialAccessFind(t *testing.T) {
+func TestSerialAccessFindForeachThread(t *testing.T) {
 	serial := serializeAccess(testAcc)
-	found := serial.Find(3, 1)
+	found := serial.FindForeachThread(3, 1)
 	if len(found) != 2 {
 		t.Errorf("wrong length, expected 2, got %v", len(found))
 	}
 	if found[0].Timestamp != 2 || found[1].Timestamp != 6 {
 		t.Errorf("wrong %v", found)
 	}
-	found = serial.Find(2, 1)
+	found = serial.FindForeachThread(2, 1)
 	if len(found) != 1 {
 		t.Errorf("wrong length, expected 1, got %v", len(found))
 	}
 	if found[0].Timestamp != 3 {
 		t.Errorf("wrong %v", found)
+	}
+}
+
+func TestFindIndex(t *testing.T) {
+	serial := SerialAccess{}
+	for _, acc := range testAcc {
+		serial.Add(acc)
+	}
+	for i, acc := range serializedAcc {
+		if idx := serial.FindIndex(acc); idx != i {
+			t.Errorf("wrong, expected %v, got %v", i, idx)
+		}
 	}
 }
 

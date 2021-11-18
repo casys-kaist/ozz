@@ -161,7 +161,7 @@ func (ctx *scheduler) addPoint() {
 func (ctx *scheduler) makePoint(inst uint32) {
 	// We may have multiple Accesses executing inst. Select any of
 	// them.
-	accesses := ctx.serial.Find(inst, 1)
+	accesses := ctx.serial.FindForeachThread(inst, 1)
 	if len(accesses) == 0 {
 		// TODO: something wrong in this case.
 		return
