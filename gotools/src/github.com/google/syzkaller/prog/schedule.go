@@ -59,6 +59,20 @@ func (p *Prog) appendDummyPoints() {
 	}
 }
 
+func (p *Prog) removeDummyPoints() {
+	if !p.Threaded {
+		return
+	}
+	i := len(p.Schedule.points) - 1
+	for ; i >= 0; i-- {
+		pnt := p.Schedule.points[i]
+		if pnt.addr != ^uint64(0) {
+			break
+		}
+	}
+	p.Schedule.points = p.Schedule.points[:i+1]
+}
+
 func (p *Prog) MutateSchedule(rs rand.Source, staleCount map[uint32]int, nPoints int, readfrom signal.ReadFrom, serial signal.SerialAccess) bool {
 	if len(p.Contenders()) != 2 {
 		return false
@@ -149,6 +163,7 @@ func (ctx *scheduler) initialize() {
 		ctx.schedule.Add(acc)
 		ctx.selected[acc.Inst] = struct{}{}
 	}
+	ctx.p.removeDummyPoints()
 }
 
 func (ctx *scheduler) findAccess(point Point) (found signal.Access, ok bool) {
