@@ -13,7 +13,6 @@ func (p *Prog) Clone() *Prog {
 		Calls:     make([]*Call, len(p.Calls)),
 		Threaded:  p.Threaded,
 		Contender: p.Contender,
-		Schedule:  p.Schedule,
 	}
 	newargs := make(map[*ResultArg]*ResultArg)
 	for ci, c := range p.Calls {
@@ -29,8 +28,25 @@ func (p *Prog) Clone() *Prog {
 		c1.Thread, c1.Epoch = c.Thread, c.Epoch
 		p1.Calls[ci] = c1
 	}
+	scheduleClone(p, p1)
 	p1.debugValidate()
 	return p1
+}
+
+func scheduleClone(p, p1 *Prog) {
+	for _, pnt := range p.Schedule.points {
+		pnt1 := Point{
+			addr:  pnt.addr,
+			order: pnt.order,
+		}
+		for ci, c := range p.Calls {
+			if pnt.call == c {
+				pnt1.call = p1.Calls[ci]
+				break
+			}
+		}
+		p1.Schedule.points = append(p1.Schedule.points, pnt1)
+	}
 }
 
 func clone(arg Arg, newargs map[*ResultArg]*ResultArg) Arg {
