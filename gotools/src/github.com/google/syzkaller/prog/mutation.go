@@ -22,7 +22,6 @@ const maxBlobLen = uint64(100 << 10)
 // ct:      ChoiceTable for syscalls.
 // corpus:  The entire corpus, including original program p.
 func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, corpus []*Prog) {
-	p.Unthreading()
 	r := newRand(p.Target, rs)
 	if ncalls < len(p.Calls) {
 		ncalls = len(p.Calls)
@@ -50,6 +49,7 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, corpus []*Pro
 			ok = ctx.removeCall()
 		}
 	}
+	p.Unthreading()
 	p.Threading(p.Contender)
 	p.fixupEpoch()
 	p.sanitizeFix()
@@ -81,7 +81,16 @@ func (ctx *mutator) splice() bool {
 	p0c := p0.Clone()
 	idx := r.Intn(len(p.Calls))
 	p.Calls = append(p.Calls[:idx], append(p0c.Calls, p.Calls[idx:]...)...)
-	for i := len(p.Calls) - 1; i >= ctx.ncalls; i-- {
+	inserted := len(p0c.Calls)
+	for i := range p.Contender.Calls {
+		if idx <= p.Contender.Calls[i] {
+			p.Contender.Calls[i] += inserted
+		}
+	}
+	for i := len(p.Calls) - 1; len(p.Calls) >= ctx.ncalls; i-- {
+		if p.IsContender(i) {
+			continue
+		}
 		p.removeCall(i)
 	}
 	return true
@@ -144,6 +153,8 @@ func (ctx *mutator) insertCall() bool {
 	calls := r.generateCall(s, p, idx)
 	p.insertBefore(c, calls)
 	for len(p.Calls) > ctx.ncalls {
+		// NOTE: no need to check idx is a contender because after
+		// this loop can be repeated until removing all inserted call.
 		p.removeCall(idx)
 	}
 	return true
@@ -156,14 +167,11 @@ func (ctx *mutator) removeCall() bool {
 		return false
 	}
 
-retry:
 	for try := 0; try < 3; try++ {
 		idx := r.Intn(len(p.Calls))
 		// don't want to remove a contender if exists
-		for i := range p.Contender.Calls {
-			if idx == p.Contender.Calls[i] {
-				continue retry
-			}
+		if p.IsContender(idx) {
+			continue
 		}
 		p.removeCall(idx)
 		return true
