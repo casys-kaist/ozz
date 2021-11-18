@@ -190,7 +190,27 @@ func (ctx *scheduler) overused(addr uint32) bool {
 }
 
 func (ctx *scheduler) movePoint() {
-	// TODO:
+	if len(ctx.schedule) == 0 {
+		// We don't have any scheduling point. Just add a random
+		// point.
+		ctx.addPoint()
+		return
+	}
+	idx := ctx.r.Intn(len(ctx.schedule))
+	// Inclusive range of the new scheduling point
+	lower, upper := 0, len(ctx.serial)-1
+	if idx != 0 {
+		prev := ctx.schedule[idx-1]
+		lower = ctx.serial.FindIndex(prev) + 1
+	}
+	if idx != len(ctx.schedule)-1 {
+		next := ctx.schedule[idx+1]
+		upper = ctx.serial.FindIndex(next) - 1
+	}
+	selected := ctx.r.Intn(upper-lower+1) + lower
+	acc0 := ctx.serial[selected]
+	ctx.schedule = append(ctx.schedule[:idx], ctx.schedule[idx+1:]...)
+	ctx.schedule.Add(acc0)
 }
 
 func (ctx *scheduler) removePoint() {
