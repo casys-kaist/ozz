@@ -810,7 +810,9 @@ void start_epoch()
 		if (!th->created)
 			continue;
 		if (th->executing) {
-			if (event_timedwait(&th->done, timeout_ms) && run_in_epoch(th))
+			// Let's wait more if calls are racing.
+			int scheduling_scale = (th->num_sched != 0 ? 3 : 1);
+			if (event_timedwait(&th->done, timeout_ms * scheduling_scale) && run_in_epoch(th))
 				handle_completion(th);
 			else
 				// since we waited for this syscall
