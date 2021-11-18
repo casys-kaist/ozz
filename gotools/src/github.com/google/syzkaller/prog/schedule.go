@@ -88,7 +88,6 @@ func (p *Prog) MutateSchedule(rs rand.Source, staleCount map[uint32]int, nPoints
 		serial:     serial,
 	}
 	ctx.initialize()
-
 	for stop := false; !stop; stop = r.oneOf(3) {
 		switch {
 		case r.nOutOf(2, 5): // 40%
@@ -100,42 +99,7 @@ func (p *Prog) MutateSchedule(rs rand.Source, staleCount map[uint32]int, nPoints
 		}
 	}
 	ctx.finalize()
-
-	if !ctx.mutated {
-		return false
-	}
-	p.scheduleFromAccesses(ctx.schedule)
-	return true
-}
-
-func (p *Prog) scheduleFromAccesses(serial signal.SerialAccess) {
-	prev := ^uint64(0)
-	order := uint64(0)
-	sched := Schedule{}
-	calls := p.Contenders()
-	for _, acc := range serial {
-		if acc.ExecutedBy(prev) {
-			continue
-		}
-		thread := acc.Thread
-		var call *Call
-		for _, c := range calls {
-			if c.Thread == thread {
-				call = c
-			}
-		}
-		if call == nil {
-			continue
-		}
-		sched.points = append(sched.points, Point{
-			call:  call,
-			addr:  0xffffffff00000000 | uint64(acc.Inst),
-			order: order,
-		})
-		prev = thread
-		order++
-	}
-	p.Schedule = sched
+	return ctx.mutated
 }
 
 type scheduler struct {
@@ -242,5 +206,36 @@ func (ctx *scheduler) finalize() {
 	// some calls may not have scheduling points. append dummy
 	// scheduling points to let QEMU know the execution order of
 	// remaining Calls.
+	ctx.shapeScheduleFromAccesses()
 	ctx.p.appendDummyPoints()
+}
+
+func (ctx *scheduler) shapeScheduleFromAccesses() {
+	prev := ^uint64(0)
+	order := uint64(0)
+	sched := Schedule{}
+	calls := ctx.p.Contenders()
+	for _, acc := range ctx.schedule {
+		if acc.ExecutedBy(prev) {
+			continue
+		}
+		thread := acc.Thread
+		var call *Call
+		for _, c := range calls {
+			if c.Thread == thread {
+				call = c
+			}
+		}
+		if call == nil {
+			continue
+		}
+		sched.points = append(sched.points, Point{
+			call:  call,
+			addr:  0xffffffff00000000 | uint64(acc.Inst),
+			order: order,
+		})
+		prev = thread
+		order++
+	}
+	ctx.p.Schedule = sched
 }
