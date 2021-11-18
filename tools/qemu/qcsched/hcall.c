@@ -165,6 +165,15 @@ static target_ulong qcsched_clear_breakpoint(CPUState *cpu0)
 
     DRPRINTF(cpu0, "%s\n", __func__);
 
+    // To prevent two vCPUs from trying to remove breakpoints at the
+    // same time (which may cause a deadlock), one sets sched.total 0
+    // before removing breakpoints (with iolock held), and the later
+    // one check whether sched.total is 0 or not.
+    if (sched.total == 0)
+        return 0;
+
+    sched.total = 0;
+
     CPU_FOREACH(cpu) { kvm_remove_all_breakpoints_cpu(cpu); }
     memset(&sched, 0, sizeof(struct qcsched));
     return 0;
