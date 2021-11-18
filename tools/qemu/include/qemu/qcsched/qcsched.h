@@ -32,6 +32,7 @@ struct qcsched {
     struct qcsched_entry entries[MAX_SCHEDPOINTS];
     int total, current;
     bool activated;
+    bool used;
 };
 
 void qcsched_init_vcpu(CPUState *cpu);

@@ -45,6 +45,7 @@ static target_ulong qcsched_prepare_breakpoint(CPUState *cpu, unsigned int num)
         return -EINVAL;
 
     sched.total = num;
+    sched.used = false;
 
     return 0;
 }
@@ -83,7 +84,7 @@ static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
 
     DRPRINTF(cpu0, "%s\n", __func__);
 
-    if (sched.activated)
+    if (sched.activated || sched.used)
         return -EBUSY;
 
     if (!vmi_info.hook_addr)
@@ -146,6 +147,9 @@ static target_ulong qcsched_deactivate_breakpoint(CPUState *cpu0)
     // __handle_breakpoint_hook()).
     sched.activated = false;
 
+    // We don't want to reuse the schedule.
+    sched.used = true;
+
     CPU_FOREACH(cpu)
     {
         for (i = 0; i < total; i++) {
@@ -162,8 +166,12 @@ static target_ulong qcsched_deactivate_breakpoint(CPUState *cpu0)
 static target_ulong qcsched_clear_breakpoint(CPUState *cpu0)
 {
     CPUState *cpu;
+    bool used = sched.used;
 
     DRPRINTF(cpu0, "%s\n", __func__);
+
+    if (sched.activated)
+        return -EBUSY;
 
     // To prevent two vCPUs from trying to remove breakpoints at the
     // same time (which may cause a deadlock), one sets sched.total 0
@@ -176,6 +184,7 @@ static target_ulong qcsched_clear_breakpoint(CPUState *cpu0)
 
     CPU_FOREACH(cpu) { kvm_remove_all_breakpoints_cpu(cpu); }
     memset(&sched, 0, sizeof(struct qcsched));
+    sched.used = used;
     return 0;
 }
 
