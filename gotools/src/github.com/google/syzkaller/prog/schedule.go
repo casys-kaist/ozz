@@ -194,6 +194,8 @@ func (ctx *scheduler) overused(addr uint32) bool {
 }
 
 func (ctx *scheduler) movePoint() {
+	// TODO: Is this really helpful? Why not just remove a point and
+	// then add another one?
 	if len(ctx.schedule) == 0 {
 		// We don't have any scheduling point. Just add a random
 		// point.
@@ -211,7 +213,17 @@ func (ctx *scheduler) movePoint() {
 		next := ctx.schedule[idx+1]
 		upper = ctx.serial.FindIndex(next) - 1
 	}
+	if (upper - lower + 1) <= 0 {
+		// XXX: This should not happen. I observed the this once, but
+		// cannot reproduce it. To be safe, reset lower and upper (and
+		// this is actually fine).
+		lower, upper = 0, len(ctx.serial)-1
+	}
 	selected := ctx.r.Intn(upper-lower+1) + lower
+	if selected >= len(ctx.serial) {
+		// XXX: I have not observed this. Just to be safe.
+		selected = ctx.r.Intn(len(ctx.serial))
+	}
 	acc0 := ctx.serial[selected]
 	ctx.schedule = append(ctx.schedule[:idx], ctx.schedule[idx+1:]...)
 	ctx.schedule.Add(acc0)
