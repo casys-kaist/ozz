@@ -142,7 +142,7 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot, force bool) {
 			continue
 		}
 		p := tp.P.Clone()
-		ok := p.MutateSchedule(proc.rnd, proc.fuzzer.staleCount, prog.RecommendedPoints, tp.ReadFrom, tp.Serial)
+		ok := p.MutateSchedule(proc.rnd, proc.fuzzer.staleCount, prog.MaximalPoints, prog.MinimalPoints, tp.ReadFrom, tp.Serial)
 		if !ok {
 			continue
 		}

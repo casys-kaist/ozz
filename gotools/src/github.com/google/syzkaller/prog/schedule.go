@@ -73,7 +73,7 @@ func (p *Prog) removeDummyPoints() {
 	p.Schedule.points = p.Schedule.points[:i+1]
 }
 
-func (p *Prog) MutateSchedule(rs rand.Source, staleCount map[uint32]int, nPoints int, readfrom signal.ReadFrom, serial signal.SerialAccess) bool {
+func (p *Prog) MutateSchedule(rs rand.Source, staleCount map[uint32]int, maxPoints, minPoints int, readfrom signal.ReadFrom, serial signal.SerialAccess) bool {
 	if len(p.Contenders()) != 2 {
 		return false
 	}
@@ -81,14 +81,17 @@ func (p *Prog) MutateSchedule(rs rand.Source, staleCount map[uint32]int, nPoints
 	ctx := &scheduler{
 		p:          p,
 		r:          r,
-		nPoints:    nPoints,
+		maxPoints:  maxPoints,
+		minPoints:  minPoints,
 		readfrom:   readfrom,
 		staleCount: staleCount,
 		selected:   make(map[uint32]struct{}),
 		serial:     serial,
 	}
 	ctx.initialize()
-	for stop := false; !stop; stop = r.oneOf(3) {
+	// If the length of actual scheduling point is 1, try to
+	// mutate more to increase the diversity of interleavings.
+	for stop := false; !stop; stop = r.oneOf(3) || (len(ctx.schedule) < ctx.minPoints && !r.oneOf(5)) {
 		switch {
 		case r.nOutOf(2, 5): // 40%
 			ctx.addPoint()
@@ -105,7 +108,8 @@ func (p *Prog) MutateSchedule(rs rand.Source, staleCount map[uint32]int, nPoints
 type scheduler struct {
 	p          *Prog
 	r          *randGen
-	nPoints    int
+	maxPoints  int
+	minPoints  int
 	readfrom   signal.ReadFrom
 	serial     signal.SerialAccess
 	staleCount map[uint32]int
@@ -147,7 +151,7 @@ func (ctx *scheduler) addPoint() {
 		// we don't have any candidate point
 		return
 	}
-	for try := 0; try < 10 && ctx.p.Schedule.Len() < ctx.nPoints; try++ {
+	for try := 0; try < 10 && ctx.p.Schedule.Len() < ctx.maxPoints; try++ {
 		idx := ctx.r.Intn(len(ctx.candidate))
 		inst := ctx.candidate[idx]
 		if _, selected := ctx.selected[inst]; !selected && !ctx.overused(inst) {
