@@ -847,6 +847,7 @@ bool run_in_epoch(thread_t* th)
 // execute_one executes program stored in input_data.
 void execute_one()
 {
+	hypercall(HCALL_RESET, 0, 0, 0);
 	hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
 	// Duplicate global collide variable on stack.
 	// Fuzzer once come up with ioctl(fd, FIONREAD, 0x920000),
