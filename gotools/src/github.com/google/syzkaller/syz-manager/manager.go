@@ -44,7 +44,7 @@ var (
 	flagConfig = flag.String("config", "", "configuration file")
 	flagDebug  = flag.Bool("debug", false, "dump all VM output to console")
 	flagBench  = flag.String("bench", "", "write execution statistics into this file periodically")
-	flagSeed   = flag.String("seed", "normal", "seed type (normal, cve)")
+	flagSeed   = flag.String("seed", "normal", "seed type (normal, cve, test)")
 )
 
 type Manager struct {
@@ -459,6 +459,9 @@ func (mgr *Manager) preloadCorpus() {
 	if *flagSeed == "cve" {
 		log.Logf(0, "loading seeds for CVEs...")
 		seedDir = filepath.Join(seedDir, "cve")
+	} else if *flagSeed == "test" {
+		log.Logf(0, "loading seeds for testing...")
+		seedDir = filepath.Join(seedDir, "test")
 	}
 	if osutil.IsExist(seedDir) {
 		seeds, err := ioutil.ReadDir(seedDir)
@@ -531,13 +534,15 @@ func (mgr *Manager) loadCorpus() {
 	// in such case it will also lost all cached candidates. Or, the input can be somewhat flaky
 	// and doesn't give the coverage on first try. So we give each input the second chance.
 	// Shuffling should alleviate deterministically losing the same inputs on fuzzer crashing.
-	mgr.candidates = append(mgr.candidates, mgr.candidates...)
-	shuffle := mgr.candidates[len(mgr.candidates)/2:]
-	rand.Shuffle(len(shuffle), func(i, j int) {
-		shuffle[i], shuffle[j] = shuffle[j], shuffle[i]
-	})
-	if mgr.phase != phaseInit {
-		panic(fmt.Sprintf("loadCorpus: bad phase %v", mgr.phase))
+	if *flagSeed == "normal" {
+		mgr.candidates = append(mgr.candidates, mgr.candidates...)
+		shuffle := mgr.candidates[len(mgr.candidates)/2:]
+		rand.Shuffle(len(shuffle), func(i, j int) {
+			shuffle[i], shuffle[j] = shuffle[j], shuffle[i]
+		})
+		if mgr.phase != phaseInit {
+			panic(fmt.Sprintf("loadCorpus: bad phase %v", mgr.phase))
+		}
 	}
 	mgr.phase = phaseLoadedCorpus
 }
