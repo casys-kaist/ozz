@@ -168,6 +168,8 @@ static void __handle_breakpoint_schedpoint(CPUState *cpu)
 
 int qcsched_handle_breakpoint(CPUState *cpu)
 {
+    qemu_mutex_lock_iothread();
+
     // Remove the breakpoint first
     int err = kvm_remove_breakpoint_cpu(cpu, RIP(cpu), 1, GDB_BREAKPOINT_HW);
     // When removing a breakpoint on another CPU,
@@ -182,7 +184,6 @@ int qcsched_handle_breakpoint(CPUState *cpu)
     ASSERT(!err || (err == -ENOENT && sched.activated == false),
            "failed to remove breakpoint\n");
 
-    qemu_mutex_lock_iothread();
     if (breakpoint_on_hook(cpu)) {
         __handle_breakpoint_hook(cpu);
     } else if (breakpoint_on_trampoline(cpu)) {

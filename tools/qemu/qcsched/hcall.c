@@ -33,6 +33,53 @@ static bool sanitize_breakpoint(struct qcsched *sched)
     return true;
 }
 
+static void __remove_breakpoints_and_escape_cpu(CPUState *this,
+                                                CPUState *remote)
+{
+    ASSERT(!sched.activated,
+           "trying to remove breakpoints while the schedule is activated");
+    // Do not remove all breakpoints since some may be installed on
+    // the trampoline.
+    for (int i = 0; i < sched.total; i++) {
+        struct qcsched_entry *entry = &sched.entries[i];
+        if (entry->cpu == remote->cpu_index)
+            kvm_remove_breakpoint_cpu(remote, entry->schedpoint.addr, 1,
+                                      GDB_BREAKPOINT_HW);
+    }
+    qcsched_escape_if_trampoled(this, remote);
+}
+
+static target_ulong qcsched_reset(CPUState *cpu)
+{
+    CPUState *cpu0;
+    DRPRINTF(cpu, "%s\n", __func__);
+
+    // This hcall hard reset a previous schedule. If a executor thread
+    // abnormally exited, a garbage schedule still resides in the
+    // hypervisor. Fuzzer need to reset it before executing the next
+    // schedule.
+
+    if (!sched.activated && !sched.total)
+        return 0;
+
+    sched.used = true;
+    sched.activated = false;
+
+    // NOTE: qcsched_reset() should be executed in CPU with the index
+    // 0, and all other worker CPUs should be executed in CPU with the
+    // index other than 0. Otherwise, qcsched_reset() and other hcalls
+    // can race causing a deadlock.
+    CPU_FOREACH(cpu0)
+    {
+        if (cpu0->cpu_index == 0)
+            continue;
+        __remove_breakpoints_and_escape_cpu(cpu, cpu0);
+    }
+    sched.total = sched.current = 0;
+    memset(&sched.entries, 0, sizeof(struct qcsched_entry) * MAX_SCHEDPOINTS);
+    return 0;
+}
+
 static target_ulong qcsched_prepare_breakpoint(CPUState *cpu, unsigned int num)
 {
     DRPRINTF(cpu, "%s\n", __func__);
@@ -106,6 +153,8 @@ static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
 
     CPU_FOREACH(cpu)
     {
+        if (cpu->cpu_index == 0)
+            continue;
         need_hook = false;
         for (i = 0; i < total; i++) {
             entry = &sched.entries[i];
@@ -127,18 +176,14 @@ static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
     return 0;
 }
 
-static target_ulong qcsched_deactivate_breakpoint(CPUState *cpu0)
+static target_ulong qcsched_deactivate_breakpoint(CPUState *cpu)
 {
-    int total, i;
-    CPUState *cpu;
-    struct qcsched_entry *entry;
+    CPUState *cpu0;
 
-    DRPRINTF(cpu0, "%s\n", __func__);
+    DRPRINTF(cpu, "%s\n", __func__);
 
     if (!sched.activated)
         return -EINVAL;
-
-    total = sched.total;
 
     // NOTE: two reasons for falsifying sched.activated here: 1) the
     // same reason for qcsched_activate_breakpoint(), and 2) let the
@@ -150,41 +195,27 @@ static target_ulong qcsched_deactivate_breakpoint(CPUState *cpu0)
     // We don't want to reuse the schedule.
     sched.used = true;
 
-    CPU_FOREACH(cpu)
+    CPU_FOREACH(cpu0)
     {
-        for (i = 0; i < total; i++) {
-            entry = &sched.entries[i];
-            if (entry->cpu == cpu->cpu_index)
-                kvm_remove_breakpoint_cpu(cpu, entry->schedpoint.addr, 1,
-                                          GDB_BREAKPOINT_HW);
-        }
-        qcsched_escape_if_trampoled(cpu0, cpu);
+        if (cpu0->cpu_index == 0)
+            continue;
+        __remove_breakpoints_and_escape_cpu(cpu, cpu0);
     }
     return 0;
 }
 
-static target_ulong qcsched_clear_breakpoint(CPUState *cpu0)
+static target_ulong qcsched_clear_breakpoint(CPUState *cpu)
 {
-    CPUState *cpu;
-    bool used = sched.used;
-
-    DRPRINTF(cpu0, "%s\n", __func__);
+    DRPRINTF(cpu, "%s\n", __func__);
 
     if (sched.activated)
         return -EBUSY;
 
-    // To prevent two vCPUs from trying to remove breakpoints at the
-    // same time (which may cause a deadlock), one sets sched.total 0
-    // before removing breakpoints (with iolock held), and the later
-    // one check whether sched.total is 0 or not.
     if (sched.total == 0)
         return 0;
 
-    sched.total = 0;
-
-    CPU_FOREACH(cpu) { kvm_remove_all_breakpoints_cpu(cpu); }
-    memset(&sched, 0, sizeof(struct qcsched));
-    sched.used = used;
+    sched.total = sched.current = 0;
+    memset(&sched.entries, 0, sizeof(struct qcsched_entry) * MAX_SCHEDPOINTS);
     return 0;
 }
 
@@ -199,6 +230,9 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
 
     qemu_mutex_lock_iothread();
     switch (cmd) {
+    case HCALL_RESET:
+        qcsched_reset(cpu);
+        break;
     case HCALL_PREPARE_BP:
         num = args[1];
         hcall_ret = qcsched_prepare_breakpoint(cpu, num);
