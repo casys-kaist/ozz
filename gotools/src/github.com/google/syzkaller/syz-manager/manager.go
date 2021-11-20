@@ -44,7 +44,7 @@ var (
 	flagConfig = flag.String("config", "", "configuration file")
 	flagDebug  = flag.Bool("debug", false, "dump all VM output to console")
 	flagBench  = flag.String("bench", "", "write execution statistics into this file periodically")
-	flagSeed   = flag.String("seed", "normal", "seed type (normal, cve, test)")
+	flagSeed   = flag.String("seed", "normal", "seed type (normal, threaded-cve, cve, test)")
 	flagGen    = flag.Bool("gen", true, "generate/mutate inputs")
 )
 
@@ -448,6 +448,28 @@ func (mgr *Manager) vmLoop() {
 	}
 }
 
+func (mgr *Manager) seedDir() (dir string) {
+	dir = filepath.Join(mgr.cfg.Syzkaller, "sys", mgr.cfg.TargetOS, "test")
+	if *flagSeed == "normal" {
+		return
+	}
+	options := []struct {
+		typ, path, misc string
+	}{
+		{"cve", "cve", "loading seeds for CVEs..."},
+		{"test", "test", "loading seeds for testing..."},
+		{"threaded-cve", "threaded-cve", "loading threaded seeds for CVEs..."},
+	}
+	for _, o := range options {
+		if o.typ == *flagSeed {
+			log.Logf(0, "%s", o.misc)
+			dir = filepath.Join(dir, o.path)
+			break
+		}
+	}
+	return dir
+}
+
 func (mgr *Manager) preloadCorpus() {
 	log.Logf(0, "loading corpus...")
 	corpusDB, err := db.Open(filepath.Join(mgr.cfg.Workdir, "corpus.db"))
@@ -456,14 +478,8 @@ func (mgr *Manager) preloadCorpus() {
 	}
 	mgr.corpusDB = corpusDB
 
-	seedDir := filepath.Join(mgr.cfg.Syzkaller, "sys", mgr.cfg.TargetOS, "test")
-	if *flagSeed == "cve" {
-		log.Logf(0, "loading seeds for CVEs...")
-		seedDir = filepath.Join(seedDir, "cve")
-	} else if *flagSeed == "test" {
-		log.Logf(0, "loading seeds for testing...")
-		seedDir = filepath.Join(seedDir, "test")
-	}
+	seedDir := mgr.seedDir()
+
 	if osutil.IsExist(seedDir) {
 		seeds, err := ioutil.ReadDir(seedDir)
 		if err != nil {
