@@ -66,6 +66,10 @@ type Fuzzer struct {
 	maxReadFrom    signal.ReadFrom
 	newReadFrom    signal.ReadFrom
 
+	// Mostly for debugging scheduling mutation. If generate is true,
+	// procs do not generate/mutate inputs but schedule
+	generate bool
+
 	checkResult *rpctype.CheckArgs
 	logMu       sync.Mutex
 }
@@ -154,6 +158,7 @@ func main() {
 		flagOutput  = flag.String("output", "stdout", "write programs to none/stdout/dmesg/file")
 		flagTest    = flag.Bool("test", false, "enable image testing mode")      // used by syz-ci
 		flagRunTest = flag.Bool("runtest", false, "enable program testing mode") // used by pkg/runtest
+		flagGen     = flag.Bool("gen", true, "generate/mutate inputs")
 	)
 	defer tool.Init()()
 	outputType := parseOutputType(*flagOutput)
@@ -276,6 +281,7 @@ func main() {
 		newReadFrom:              signal.NewReadFrom(),
 		staleCount:               make(map[uint32]int),
 		checkResult:              r.CheckResult,
+		generate:                 *flagGen,
 	}
 	gateCallback := fuzzer.useBugFrames(r, *flagProcs)
 	fuzzer.gate = ipc.NewGate(2**flagProcs, gateCallback)
@@ -297,6 +303,9 @@ func main() {
 	}
 
 	log.Logf(0, "starting %v fuzzer processes", *flagProcs)
+	if !fuzzer.generate {
+		log.Logf(0, "fuzzer will not generate/mutate inputs")
+	}
 	for pid := 0; pid < *flagProcs; pid++ {
 		proc, err := newProc(fuzzer, pid)
 		if err != nil {

@@ -97,12 +97,12 @@ func (proc *Proc) loop() {
 
 		ct := proc.fuzzer.choiceTable
 		fuzzerSnapshot := proc.fuzzer.snapshot()
-		if len(fuzzerSnapshot.corpus) == 0 || i%generatePeriod == 0 {
+		if (len(fuzzerSnapshot.corpus) == 0 || i%generatePeriod == 0) && proc.fuzzer.generate {
 			// Generate a new prog.
 			p := proc.fuzzer.target.Generate(proc.rnd, prog.RecommendedCalls, ct)
 			log.Logf(1, "proc #%v: generated", proc.pid)
 			proc.execute(proc.execOpts, p, ProgNormal, StatGenerate)
-		} else if i%2 == 1 {
+		} else if i%2 == 1 && proc.fuzzer.generate {
 			// Mutate an existing prog.
 			p := fuzzerSnapshot.chooseProgram(proc.rnd).Clone()
 			p.Mutate(proc.rnd, prog.RecommendedCalls, ct, fuzzerSnapshot.corpus)
@@ -116,7 +116,11 @@ func (proc *Proc) loop() {
 }
 
 func (proc *Proc) needScheduling() bool {
-	if len(proc.fuzzer.threadedCorpus) < 5 {
+	thold := 5
+	if !proc.fuzzer.generate {
+		thold = 1
+	}
+	if len(proc.fuzzer.threadedCorpus) < thold {
 		return false
 	}
 	// prob = 1 / (1 + exp(-25 * (-x + 0.25))) where x = (scheduled/executed)
@@ -224,7 +228,7 @@ func (proc *Proc) triageInput(item *WorkTriage) {
 
 	proc.fuzzer.addInputToCorpus(item.p, inputSignal, sig)
 
-	if item.flags&ProgSmashed == 0 {
+	if item.flags&ProgSmashed == 0 && proc.fuzzer.generate {
 		proc.fuzzer.workQueue.enqueue(&WorkSmash{item.p, item.call})
 	}
 }
