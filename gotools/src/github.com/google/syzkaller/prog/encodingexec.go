@@ -76,8 +76,7 @@ func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
 	}
 	for i, c := range p.Calls {
 		w.csumMap, w.csumUses = calcChecksumsCall(c)
-		w.serializeCall(c)
-		w.writeSchedule(c, p.Schedule)
+		w.serializeCall(c, p)
 		w.writeEpoch(c, i, p.Calls)
 	}
 	w.write(execInstrEOF)
@@ -112,7 +111,7 @@ func (w *execContext) writeEpoch(c *Call, ci int, calls []*Call) {
 	w.write(execInstrEpoch)
 }
 
-func (w *execContext) serializeCall(c *Call) {
+func (w *execContext) serializeCall(c *Call, p *Prog) {
 	// Calculate arg offsets within structs.
 	// Generate copyin instructions that fill in data into pointer arguments.
 	w.writeCopyin(c)
@@ -136,6 +135,7 @@ func (w *execContext) serializeCall(c *Call) {
 		w.writeArg(arg)
 	}
 	w.writeConcurrencyInfo(c.Thread, c.Epoch)
+	w.writeSchedule(c, p.Schedule)
 	// Generate copyout instructions that persist interesting return values.
 	w.writeCopyout(c)
 }
