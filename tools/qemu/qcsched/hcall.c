@@ -74,6 +74,7 @@ static target_ulong qcsched_reset(CPUState *cpu)
         if (cpu0->cpu_index == 0)
             continue;
         __remove_breakpoints_and_escape_cpu(cpu, cpu0);
+        memset(&sched.last_breakpoint[cpu0->cpu_index], 0, sizeof(struct qcsched_breakpoint_record));
     }
     sched.total = sched.current = 0;
     memset(&sched.entries, 0, sizeof(struct qcsched_entry) * MAX_SCHEDPOINTS);

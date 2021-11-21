@@ -9,6 +9,8 @@
 #include "qemu/qcsched/vmi.h"
 
 #define MAX_SCHEDPOINTS 8
+// TODO: Do not use macro
+#define MAX_CPUS 8
 
 struct qcschedpoint {
     target_ulong addr;
@@ -28,8 +30,16 @@ struct qcsched_entry {
     int cpu;
 };
 
+struct qcsched_breakpoint_record {
+    target_ulong RIP;
+    int count;
+};
+
+#define WATCHDOG_BREAKPOINT_COUNT_MAX 10
+
 struct qcsched {
     struct qcsched_entry entries[MAX_SCHEDPOINTS];
+    struct qcsched_breakpoint_record last_breakpoint[MAX_CPUS];
     int total, current;
     bool activated;
     bool used;

@@ -166,10 +166,36 @@ static void __handle_breakpoint_schedpoint(CPUState *cpu)
     wake_others_up(cpu);
 }
 
-int qcsched_handle_breakpoint(CPUState *cpu)
+static void
+watchdog_breakpoint_check_count(CPUState *cpu,
+                                struct qcsched_breakpoint_record *record)
 {
-    qemu_mutex_lock_iothread();
+    if (record->RIP != RIP(cpu))
+        return;
+    // In this project, there is no case that a breakpoint keep being
+    // hit consecutively so far (we don't consider cases where an
+    // instruction is executed multiple times, such as a loop; this
+    // will be fixed in the future). So if a breakpoint is hit
+    // multiple times in a row, something goes wrong (e.g., race
+    // condition). This watchdog detects it early.
+    ASSERT(++record->count < WATCHDOG_BREAKPOINT_COUNT_MAX,
+           "watchdog failed: a breakpoint at %lx is hit %d times", record->RIP,
+           record->count);
+}
 
+static void watchdog_breakpoint(CPUState *cpu)
+{
+    int index = cpu->cpu_index;
+    struct qcsched_breakpoint_record *record = &sched.last_breakpoint[index];
+
+    watchdog_breakpoint_check_count(cpu, record);
+
+    record->RIP = RIP(cpu);
+    record->count = 0;
+}
+
+static int qcsched_handle_breakpoint_iolocked(CPUState *cpu)
+{
     // Remove the breakpoint first
     int err = kvm_remove_breakpoint_cpu(cpu, RIP(cpu), 1, GDB_BREAKPOINT_HW);
     // When removing a breakpoint on another CPU,
@@ -184,6 +210,8 @@ int qcsched_handle_breakpoint(CPUState *cpu)
     ASSERT(!err || (err == -ENOENT && sched.activated == false),
            "failed to remove breakpoint\n");
 
+    watchdog_breakpoint(cpu);
+
     if (breakpoint_on_hook(cpu)) {
         __handle_breakpoint_hook(cpu);
     } else if (breakpoint_on_trampoline(cpu)) {
@@ -194,9 +222,16 @@ int qcsched_handle_breakpoint(CPUState *cpu)
         // Unknown case. Might be an error.
         DRPRINTF(cpu, "Unknown breakpoint: %llx\n", RIP(cpu));
     }
-    qemu_mutex_unlock_iothread();
-
     return 0;
+}
+
+int qcsched_handle_breakpoint(CPUState *cpu)
+{
+    int ret;
+    qemu_mutex_lock_iothread();
+    ret = qcsched_handle_breakpoint_iolocked(cpu);
+    qemu_mutex_unlock_iothread();
+    return ret;
 }
 
 void qcsched_escape_if_trampoled(CPUState *cpu, CPUState *wakeup)
