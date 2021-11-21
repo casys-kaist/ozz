@@ -46,6 +46,7 @@ var (
 	flagBench  = flag.String("bench", "", "write execution statistics into this file periodically")
 	flagSeed   = flag.String("seed", "normal", "seed type (normal, threaded-cve, cve, test)")
 	flagGen    = flag.Bool("gen", true, "generate/mutate inputs")
+	flagCorpus = flag.Bool("load-corpus", true, "laod corpus")
 )
 
 type Manager struct {
@@ -530,10 +531,12 @@ func (mgr *Manager) loadCorpus() {
 	case currentDBVersion:
 	}
 	broken := 0
-	for key, rec := range mgr.corpusDB.Records {
-		if !mgr.loadProg(rec.Val, minimized, smashed) {
-			mgr.corpusDB.Delete(key)
-			broken++
+	if *flagCorpus {
+		for key, rec := range mgr.corpusDB.Records {
+			if !mgr.loadProg(rec.Val, minimized, smashed) {
+				mgr.corpusDB.Delete(key)
+				broken++
+			}
 		}
 	}
 	mgr.fresh = len(mgr.corpusDB.Records) == 0
