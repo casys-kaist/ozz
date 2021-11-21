@@ -1429,6 +1429,7 @@ void write_extra_output()
 
 void thread_create(thread_t* th, int id)
 {
+	debug("creating a thread %d\n", id);
 	th->created = true;
 	th->id = id;
 	th->executing = false;

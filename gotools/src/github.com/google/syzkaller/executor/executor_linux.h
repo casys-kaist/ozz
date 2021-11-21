@@ -127,13 +127,13 @@ static void cover_open(cover_t* cov, bool extra)
 	const int cov_init_trace = (cov->type == code_coverage ? (is_kernel_64_bit ? KCOV_INIT_TRACE64 : KCOV_INIT_TRACE32) : KMEMCOV_INIT_TRACE);
 	const int cover_size = extra ? kExtraCoverSize : kCoverSize;
 	if (ioctl(cov->fd, cov_init_trace, cover_size))
-		fail("cover init trace write failed");
+		failmsg("cover init trace write failed", "fd=%d", cov->fd);
 	uint64 mmap_alloc_scale = (cov->type == code_coverage ? (is_kernel_64_bit ? 8 : 4) : sizeof(struct kmemcov_access));
 	size_t mmap_alloc_size = cover_size * mmap_alloc_scale;
 	cov->data = (char*)mmap(NULL, mmap_alloc_size,
 				PROT_READ | PROT_WRITE, MAP_SHARED, cov->fd, 0);
 	if (cov->data == MAP_FAILED)
-		fail("cover mmap failed");
+		failmsg("cover mmap failed", "fd=%d", cov->fd);
 	cov->data_end = cov->data + mmap_alloc_size;
 }
 
@@ -153,7 +153,7 @@ static void cover_kcov_enable(cover_t* cov, bool collect_comps, bool extra)
 	// so we use exitf.
 	if (!extra) {
 		if (ioctl(cov->fd, KCOV_ENABLE, kcov_mode))
-			exitf("cover enable write trace failed, mode=%d", kcov_mode);
+			exitf("cover enable write trace failed, fd=%d mode=%d", cov->fd, kcov_mode);
 		return;
 	}
 	kcov_remote_arg<1> arg = {
@@ -165,7 +165,7 @@ static void cover_kcov_enable(cover_t* cov, bool collect_comps, bool extra)
 	arg.common_handle = kcov_remote_handle(KCOV_SUBSYSTEM_COMMON, procid + 1);
 	arg.handles[0] = kcov_remote_handle(KCOV_SUBSYSTEM_USB, procid + 1);
 	if (ioctl(cov->fd, KCOV_REMOTE_ENABLE, &arg))
-		exitf("remote cover enable write trace failed");
+		exitf("remote cover enable write trace failed, fd=%d", cov->fd);
 }
 
 static void cover_kmemcov_enable(cover_t* cov, bool collect_comps, bool extra)
@@ -173,9 +173,9 @@ static void cover_kmemcov_enable(cover_t* cov, bool collect_comps, bool extra)
 	if (collect_comps || extra)
 		// extra is possibly useful, but at this point, we
 		// don't plan to use it.
-		failmsg("wrong arguments in cover_kmemcov_enable", "collect_comps=%d, extra=%d", collect_comps, extra);
+		failmsg("wrong arguments in cover_kmemcov_enable", "fd=%d, collect_comps=%d, extra=%d", cov->fd, collect_comps, extra);
 	if (ioctl(cov->fd, KMEMCOV_ENABLE, 0))
-		exitf("rfcover enable write trace failed");
+		exitf("rfcover enable write trace failed, fd=%d", cov->fd);
 }
 
 static void cover_enable(cover_t* cov, bool collect_comps, bool extra)

@@ -718,7 +718,7 @@ static void loop(void)
 			// kssb since enabling kssb incurs a large
 			// overhead without making a progress.
 			hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
-			debug("killing hanging pid %d\n", pid);
+			debug("killing hanging pid %d, executed=%d\n", pid, executed_calls);
 			kill_and_wait(pid, &status);
 			break;
 		}
