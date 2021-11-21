@@ -210,6 +210,12 @@ static int qcsched_handle_breakpoint_iolocked(CPUState *cpu)
     ASSERT(!err || (err == -ENOENT && sched.activated == false),
            "failed to remove breakpoint\n");
 
+    if (err)
+        // XXX: I'm not sure this is a correct way to fix the
+        // infinitely repeated breakpoint hit issue. Let's see what
+        // will happen.
+        kvm_update_guest_debug(cpu, 0);
+
     watchdog_breakpoint(cpu);
 
     if (breakpoint_on_hook(cpu)) {
