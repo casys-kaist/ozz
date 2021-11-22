@@ -113,9 +113,6 @@ func (rf *ReadFrom) Split(n int) ReadFrom {
 			break
 		}
 	}
-	if len(*rf) == 0 {
-		*rf = nil
-	}
 	return ret
 }
 
