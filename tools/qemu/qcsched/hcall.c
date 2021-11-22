@@ -74,7 +74,8 @@ static target_ulong qcsched_reset(CPUState *cpu)
         if (cpu0->cpu_index == 0)
             continue;
         __remove_breakpoints_and_escape_cpu(cpu, cpu0);
-        memset(&sched.last_breakpoint[cpu0->cpu_index], 0, sizeof(struct qcsched_breakpoint_record));
+        memset(&sched.last_breakpoint[cpu0->cpu_index], 0,
+               sizeof(struct qcsched_breakpoint_record));
     }
     sched.total = sched.current = 0;
     memset(&sched.entries, 0, sizeof(struct qcsched_entry) * MAX_SCHEDPOINTS);
@@ -154,6 +155,7 @@ static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
 
     CPU_FOREACH(cpu)
     {
+        int err;
         if (cpu->cpu_index == 0)
             continue;
         need_hook = false;
@@ -162,17 +164,20 @@ static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
             if (entry->cpu == cpu->cpu_index) {
                 DRPRINTF(cpu0, "Installing a breakpoint at %lx on cpu#%d\n",
                          entry->schedpoint.addr, entry->cpu);
-                ASSERT(!kvm_insert_breakpoint_cpu(cpu, entry->schedpoint.addr,
-                                                  1, GDB_BREAKPOINT_HW),
-                       "failed to insert a breakpiont at a scheduling point\n");
+                err = kvm_insert_breakpoint_cpu(cpu, entry->schedpoint.addr, 1,
+                                                GDB_BREAKPOINT_HW);
+                ASSERT(!err,
+                       "failed to insert a breakpiont at a scheduling point "
+                       "err=%d\n",
+                       err);
                 need_hook = true;
             }
         }
         if (!need_hook)
             continue;
-        ASSERT(!kvm_insert_breakpoint_cpu(cpu, vmi_info.hook_addr, 1,
-                                          GDB_BREAKPOINT_HW),
-               "failed to insert a breakpoint at the hook\n");
+        err = kvm_insert_breakpoint_cpu(cpu, vmi_info.hook_addr, 1,
+                                        GDB_BREAKPOINT_HW);
+        ASSERT(!err, "failed to insert a breakpoint at the hook err=%d\n", err);
     }
     return 0;
 }

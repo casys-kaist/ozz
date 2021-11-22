@@ -93,8 +93,8 @@ void wake_cpu_up(CPUState *cpu, CPUState *wakeup)
     // cpu up, and the one is also trying to wake up on its own. It is
     // okay in this case because we install the breakpoint anyway. So
     // ignore -EEXIST.
-    ASSERT(r == 0 || r == -EEXIST, "failing to wake cpu #%d up",
-           wakeup->cpu_index);
+    ASSERT(r == 0 || r == -EEXIST, "failing to wake cpu #%d up err=%d",
+           wakeup->cpu_index, r);
 }
 
 void wake_others_up(CPUState *cpu0)
@@ -208,7 +208,7 @@ static int qcsched_handle_breakpoint_iolocked(CPUState *cpu)
     // we can check sched.activated to confirm that the error code is
     // actually benign.
     ASSERT(!err || (err == -ENOENT && sched.activated == false),
-           "failed to remove breakpoint\n");
+           "failed to remove breakpoint err=%d\n", err);
 
     if (err)
         // XXX: I'm not sure this is a correct way to fix the
