@@ -39,7 +39,7 @@ static void kidnap_task(CPUState *cpu)
 {
     struct qcsched_trampoline_info *trampoline = get_trampoline_info(cpu);
 
-    if (sched.current == sched.total)
+    if (sched.current == sched.total || !sched.activated)
         // We hit the last breakpoint. TODO: This if statement allows
         // thread execute parallel after the last breakpoint. We may
         // want to a better scheduling mechanism.
