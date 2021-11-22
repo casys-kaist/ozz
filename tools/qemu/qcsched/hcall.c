@@ -222,6 +222,9 @@ static target_ulong qcsched_clear_breakpoint(CPUState *cpu)
 
     sched.total = sched.current = 0;
     memset(&sched.entries, 0, sizeof(struct qcsched_entry) * MAX_SCHEDPOINTS);
+    // Calling this hcall means the syscall has been finished. We can
+    // remove breakpoints
+    kvm_remove_all_breakpoints_cpu(cpu);
     return 0;
 }
 
