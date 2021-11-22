@@ -435,7 +435,7 @@ func (inst *inst) testProgram(command string, testTime time.Duration) error {
 }
 
 func FuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox string, procs, verbosity int,
-	cover, debug, test, runtest, optionalFlags bool, slowdown int, generate bool) string {
+	cover, debug, test, runtest, optionalFlags bool, slowdown int, generate, pinning bool) string {
 	osArg := ""
 	if targets.Get(OS, arch).HostFuzzer {
 		// Only these OSes need the flag, because the rest assume host OS.
@@ -457,16 +457,20 @@ func FuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox string, procs,
 			{Name: "slowdown", Value: fmt.Sprint(slowdown)},
 		})
 	}
-	return fmt.Sprintf("%v -executor=%v -name=%v -arch=%v%v -manager=%v -sandbox=%v"+
+	taskset := ""
+	if pinning {
+		taskset = "taskset 0x1"
+	}
+	return fmt.Sprintf("%v %v -executor=%v -name=%v -arch=%v%v -manager=%v -sandbox=%v"+
 		" -procs=%v -cover=%v -debug=%v -test=%v%v%v%v -gen=%v",
-		fuzzer, executor, name, arch, osArg, fwdAddr, sandbox,
+		taskset, fuzzer, executor, name, arch, osArg, fwdAddr, sandbox,
 		procs, cover, debug, test, runtestArg, verbosityArg, optionalArg, generate)
 }
 
 func OldFuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox string, procs int,
 	cover, test, optionalFlags bool, slowdown int) string {
 	return FuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox, procs, 0, cover, false, test, false,
-		optionalFlags, slowdown, true)
+		optionalFlags, slowdown, true, false)
 }
 
 func ExecprogCmd(execprog, executor, OS, arch, sandbox string, repeat, threaded, collide bool,
