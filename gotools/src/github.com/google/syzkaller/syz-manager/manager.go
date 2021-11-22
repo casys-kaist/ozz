@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,6 +49,7 @@ var (
 	flagGen    = flag.Bool("gen", true, "generate/mutate inputs")
 	flagCorpus = flag.Bool("load-corpus", true, "laod corpus")
 	flagRepro  = flag.Bool("repro", false, "reproduce crashes")
+	flagDump   = flag.Bool("dump-inputs", false, "dumping all inputs into workdir/inputs")
 )
 
 type Manager struct {
@@ -69,6 +71,8 @@ type Manager struct {
 	fresh          bool
 	numFuzzing     uint32
 	numReproducing uint32
+
+	seedType string
 
 	dash *dashapi.Dashboard
 
@@ -184,6 +188,7 @@ func RunManager(cfg *mgrconfig.Config) {
 		repro:            *flagRepro,
 		usedFiles:        make(map[string]time.Time),
 		saturatedCalls:   make(map[string]bool),
+		seedType:         *flagSeed,
 	}
 
 	mgr.preloadCorpus()
@@ -460,7 +465,8 @@ func (mgr *Manager) vmLoop() {
 
 func (mgr *Manager) seedDir() (dir string) {
 	dir = filepath.Join(mgr.cfg.Syzkaller, "sys", mgr.cfg.TargetOS, "test")
-	if *flagSeed == "normal" {
+	if mgr.seedType == "normal" || *flagDump {
+		// We don't want to dump seeds for testing
 		return
 	}
 	options := []struct {
@@ -471,7 +477,7 @@ func (mgr *Manager) seedDir() (dir string) {
 		{"threaded-cve", "threaded-cve", "loading threaded seeds for CVEs..."},
 	}
 	for _, o := range options {
-		if o.typ == *flagSeed {
+		if o.typ == mgr.seedType {
 			log.Logf(0, "%s", o.misc)
 			dir = filepath.Join(dir, o.path)
 			break
@@ -512,6 +518,11 @@ func (mgr *Manager) preloadCorpus() {
 			}
 			mgr.seeds = append(mgr.seeds, data)
 		}
+	}
+
+	if *flagDump {
+		mgr.dumpInputs()
+		os.Exit(0)
 	}
 }
 
@@ -594,6 +605,19 @@ func (mgr *Manager) loadProg(data []byte, minimized, smashed bool) bool {
 		Smashed:   smashed,
 	})
 	return true
+}
+
+func (mgr *Manager) dumpInputs() {
+	inputDir := filepath.Join(mgr.cfg.Workdir, "inputs")
+	osutil.MkdirAll(inputDir)
+	i := 0
+	for _, rec := range mgr.corpusDB.Records {
+		fn := filepath.Join(inputDir, strconv.Itoa(i))
+		if err := osutil.WriteFile(fn, rec.Val); err != nil {
+			log.Fatalf("failed to write input to %v\n%v", fn, rec.Val)
+		}
+		i++
+	}
 }
 
 func checkProgram(target *prog.Target, enabled map[*prog.Syscall]bool, data []byte) (bad, disabled bool) {
