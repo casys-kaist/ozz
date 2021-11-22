@@ -220,13 +220,15 @@ func RunManager(cfg *mgrconfig.Config) {
 			crashes := mgr.stats.crashes.get()
 			corpusCover := mgr.stats.corpusCover.get()
 			corpusSignal := mgr.stats.corpusSignal.get()
+			corpusReadFrom := mgr.stats.corpusReadFrom.get()
 			maxSignal := mgr.stats.maxSignal.get()
+			maxReadFrom := mgr.stats.maxReadFrom.get()
 			mgr.mu.Unlock()
 			numReproducing := atomic.LoadUint32(&mgr.numReproducing)
 			numFuzzing := atomic.LoadUint32(&mgr.numFuzzing)
 
-			log.Logf(0, "VMs %v, executed %v, cover %v, signal %v/%v, crashes %v, repro %v",
-				numFuzzing, executed, corpusCover, corpusSignal, maxSignal, crashes, numReproducing)
+			log.Logf(0, "VMs %v, executed %v, cover %v, signal %v/%v, readfrom %v/%v crashes %v, repro %v",
+				numFuzzing, executed, corpusCover, corpusSignal, maxSignal, corpusReadFrom, maxReadFrom, crashes, numReproducing)
 		}
 	}()
 
