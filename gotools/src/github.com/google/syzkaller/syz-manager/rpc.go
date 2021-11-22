@@ -271,9 +271,6 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 	// but this request is already in-flight.
 	genuine := !serv.corpusSignal.Diff(inputSignal).Empty()
 	rotated := false
-	if f.rotated {
-		panic("okay")
-	}
 	if !genuine && f != nil && f.rotated {
 		rotated = !f.rotatedSignal.Diff(inputSignal).Empty()
 	}
