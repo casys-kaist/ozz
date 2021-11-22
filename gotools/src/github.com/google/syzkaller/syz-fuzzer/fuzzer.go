@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/syzkaller/pkg/affinity"
 	"github.com/google/syzkaller/pkg/csource"
 	"github.com/google/syzkaller/pkg/hash"
 	"github.com/google/syzkaller/pkg/host"
@@ -414,6 +415,9 @@ func (fuzzer *Fuzzer) pollLoop() {
 			}
 			if !fuzzer.poll(needCandidates, stats) {
 				lastPoll = time.Now()
+			}
+			if !affinity.RunOnCPU(1 << 0) {
+				log.Logf(0, "[WARN] Fuzzer goroutine runs on CPU other than 0")
 			}
 		}
 	}
