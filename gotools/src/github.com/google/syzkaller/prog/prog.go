@@ -326,8 +326,8 @@ func (p *Prog) insertBefore(c *Call, calls []*Call) {
 	}
 	p.Calls = newCalls
 	inserted := len(calls)
-	for i := range p.Contender.Calls {
-		if idx <= p.Contender.Calls[i] {
+	for i, ci := range p.Contender.Calls {
+		if idx <= ci {
 			p.Contender.Calls[i] += inserted
 		}
 	}
@@ -410,8 +410,8 @@ func (p *Prog) removeCall(idx int) {
 	}
 	copy(p.Calls[idx:], p.Calls[idx+1:])
 	p.Calls = p.Calls[:len(p.Calls)-1]
-	for i := range p.Contender.Calls {
-		if idx >= p.Contender.Calls[i] {
+	for i, ci := range p.Contender.Calls {
+		if idx <= ci {
 			p.Contender.Calls[i]--
 		}
 	}

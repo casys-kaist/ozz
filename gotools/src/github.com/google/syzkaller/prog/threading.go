@@ -40,6 +40,10 @@ func (p *Prog) Threading(calls Contender) {
 		log.Fatalf("wrong racing calls: %d", len(calls.Calls))
 	}
 
+	// If p is threaded, let's transform p into a single thread prog
+	// before threading again
+	p.unthreading()
+
 	idx1, idx2 := calls.Calls[0], calls.Calls[1]
 	epoch1, epoch2 := p.Calls[idx1].Epoch, p.Calls[idx2].Epoch
 	if epoch1 > epoch2 {
@@ -83,10 +87,12 @@ func (p *Prog) Contenders() []*Call {
 	return res
 }
 
-func (p *Prog) Unthreading() {
+func (p *Prog) unthreading() {
 	for _, c := range p.Calls {
 		c.Thread, c.Epoch = 0, 0
 	}
+	p.Threaded = false
+	p.fixupEpoch()
 }
 
 type ThreadedProg struct {
