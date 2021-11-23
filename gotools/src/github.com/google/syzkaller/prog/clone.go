@@ -12,7 +12,7 @@ func (p *Prog) Clone() *Prog {
 		Target:    p.Target,
 		Calls:     make([]*Call, len(p.Calls)),
 		Threaded:  p.Threaded,
-		Contender: p.Contender,
+		Contender: Contender{Calls: append([]int{}, p.Contender.Calls...)},
 	}
 	newargs := make(map[*ResultArg]*ResultArg)
 	for ci, c := range p.Calls {
