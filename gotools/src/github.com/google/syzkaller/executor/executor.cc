@@ -873,13 +873,13 @@ retry:
 	int call_index = 0;
 	uint64 prog_extra_timeout = 0;
 	uint64 prog_extra_cover_timeout = 0;
-	bool stop = false;
-	for (; !stop;) {
+	for (;;) {
 		uint64 call_num = read_input(&input_pos);
-		if (call_num == instr_epoch || call_num == instr_eof) {
+		if (call_num == instr_eof)
+			break;
+		if (call_num == instr_epoch) {
 			resume_pending_calls();
 			start_epoch();
-			stop = call_num == instr_eof;
 			continue;
 		}
 		if (call_num == instr_copyin) {
