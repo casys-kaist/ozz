@@ -13,7 +13,7 @@ _download() {
 
 _build() {
 	__make_dir_and_exec_cmd "$GCC_BUILD" \
-							"$GCC_PATH/configure --prefix=$GCC_INSTALL --enable-threads=posix --enable-__cxa_atexit --enable-clocale=gnu --enable-languages=c,c++" \
+							"$GCC_PATH/configure --prefix=$GCC_INSTALL --enable-threads=posix --enable-__cxa_atexit --enable-clocale=gnu --enable-languages=c,c++ --disable-multilib" \
 							"make -j`nproc`"
 }
 
