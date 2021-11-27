@@ -5,11 +5,25 @@ if [ -z "$ARCH" ]; then
 	exit 1
 fi
 
-SCRIPTS_LINUX_DIR="$SCRIPTS_DIR/linux/"
-$SCRIPTS_LINUX_DIR/__create_symlinks.sh "all"
-$SCRIPTS_LINUX_DIR/__check_suffix.sh "all"
+_GUEST=1
+if [ -n "$HOST" ]; then
+	_GUEST=
+fi
 
-OUTDIR="$PROJECT_HOME/kernels/guest/builds/$ARCH"
+if [ -n "$_GUEST" ]; then
+	SCRIPTS_LINUX_DIR="$SCRIPTS_DIR/linux/"
+	$SCRIPTS_LINUX_DIR/__create_symlinks.sh "all"
+	$SCRIPTS_LINUX_DIR/__check_suffix.sh "all"
+	OUTDIR="$PROJECT_HOME/kernels/host/builds/$ARCH"
+	echo "Building a guest kernel"
+else
+	# No need to make symlinks
+	OUTDIR="$PROJECT_HOME/kernels/guest/builds/$ARCH"
+	echo "Building a host kernel"
+fi
+
+exit 0
+
 LINUXDIR="$PROJECT_HOME/kernels/guest/linux"
 
 mkdir -p "$OUTDIR"
