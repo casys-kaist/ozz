@@ -1,5 +1,5 @@
 [submodule "kernels/guest/linux"]
-	path = kernels/guest/linux
+	path = kernels/linux
 	url = git@dragon.kaist.ac.kr:linux
 [submodule "tools/qemu/roms/seabios"]
 	path = tools/qemu/roms/seabios

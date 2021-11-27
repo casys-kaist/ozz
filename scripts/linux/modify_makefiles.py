@@ -87,7 +87,7 @@ def main(args):
             modify_makefile(args.kernel, recipe)
 
 if __name__ == "__main__":
-    kernel_path = os.path.join(os.environ['KERNELS_DIR'], 'guest', 'linux')
+    kernel_path = os.path.join(os.environ['KERNELS_DIR'], 'linux')
     recipe_path = os.path.join(os.environ['TMP_DIR'], 'instrument')
 
     import argparse

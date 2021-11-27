@@ -24,7 +24,7 @@ fi
 
 exit 0
 
-LINUXDIR="$PROJECT_HOME/kernels/guest/linux"
+LINUXDIR="$PROJECT_HOME/kernels/linux"
 
 mkdir -p "$OUTDIR"
 if [ -n "$CONFIG" ]; then
