@@ -14,15 +14,13 @@ if [ -n "$_GUEST" ]; then
 	SCRIPTS_LINUX_DIR="$SCRIPTS_DIR/linux/"
 	$SCRIPTS_LINUX_DIR/__create_symlinks.sh "all"
 	$SCRIPTS_LINUX_DIR/__check_suffix.sh "all"
-	OUTDIR="$PROJECT_HOME/kernels/host/builds/$ARCH"
+	OUTDIR="$PROJECT_HOME/kernels/guest/builds/$ARCH"
 	echo "Building a guest kernel"
 else
 	# No need to make symlinks
-	OUTDIR="$PROJECT_HOME/kernels/guest/builds/$ARCH"
+	OUTDIR="$PROJECT_HOME/kernels/host/builds/$ARCH"
 	echo "Building a host kernel"
 fi
-
-exit 0
 
 LINUXDIR="$PROJECT_HOME/kernels/linux"
 
