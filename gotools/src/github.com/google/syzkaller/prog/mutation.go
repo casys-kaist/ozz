@@ -77,6 +77,7 @@ func (ctx *mutator) splice() bool {
 	}
 	p0 := ctx.corpus[r.Intn(len(ctx.corpus))]
 	p0c := p0.Clone()
+	p0c.unthreading()
 	idx := r.Intn(len(p.Calls))
 	p.Calls = append(p.Calls[:idx], append(p0c.Calls, p.Calls[idx:]...)...)
 	inserted := len(p0c.Calls)

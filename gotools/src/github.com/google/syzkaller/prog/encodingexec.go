@@ -64,7 +64,7 @@ var ErrExecBufferTooSmall = errors.New("encodingexec: provided buffer is too sma
 // If the provided buffer is too small for the program an error is returned.
 func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
 	if err := p.sanitizeRazzer(); err != nil {
-		return 0, err
+		panic(err)
 	}
 	p.debugValidate()
 	w := &execContext{
