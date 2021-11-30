@@ -5,9 +5,12 @@ package main
 
 import (
 	"bytes"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	golog "log"
 	"math/rand"
@@ -42,14 +45,15 @@ import (
 )
 
 var (
-	flagConfig = flag.String("config", "", "configuration file")
-	flagDebug  = flag.Bool("debug", false, "dump all VM output to console")
-	flagBench  = flag.String("bench", "", "write execution statistics into this file periodically")
-	flagSeed   = flag.String("seed", "normal", "seed type (normal, threaded-cve, cve, test)")
-	flagGen    = flag.Bool("gen", true, "generate/mutate inputs")
-	flagCorpus = flag.Bool("load-corpus", true, "laod corpus")
-	flagRepro  = flag.Bool("repro", false, "reproduce crashes")
-	flagDump   = flag.Bool("dump-inputs", false, "dumping all inputs into workdir/inputs")
+	flagConfig    = flag.String("config", "", "configuration file")
+	flagDebug     = flag.Bool("debug", false, "dump all VM output to console")
+	flagBench     = flag.String("bench", "", "write execution statistics into this file periodically")
+	flagSeed      = flag.String("seed", "normal", "seed type (normal, threaded-cve, cve, test)")
+	flagGen       = flag.Bool("gen", true, "generate/mutate inputs")
+	flagCorpus    = flag.Bool("load-corpus", true, "load corpus")
+	flagRepro     = flag.Bool("repro", false, "reproduce crashes")
+	flagDump      = flag.Bool("dump-inputs", false, "dumping all inputs into workdir/inputs")
+	flagNewKernel = flag.Bool("new-kernel", false, "set true if using a new kernel version")
 )
 
 type Manager struct {
@@ -61,6 +65,8 @@ type Manager struct {
 	crashdir       string
 	serv           *RPCServer
 	corpusDB       *db.DB
+	newKernel      bool
+	kernelHash     []byte
 	startTime      time.Time
 	firstConnect   time.Time
 	fuzzingTime    time.Duration
@@ -486,6 +492,27 @@ func (mgr *Manager) seedDir() (dir string) {
 	return dir
 }
 
+func (mgr *Manager) checkKernelVersion() {
+	fn := filepath.Join(mgr.cfg.KernelObj, "vmlinux")
+	hsh, err := binaryHash(fn)
+	if err != nil {
+		log.Fatalf("Failed to hash %v", fn)
+	}
+	mgr.kernelHash = hsh
+	if *flagNewKernel {
+		mgr.newKernel = true
+		log.Logf(0, "Using a new kernel version")
+		log.Logf(0, "  Current  %v", hex.EncodeToString(hsh))
+	}
+	if rec, ok := mgr.corpusDB.Records[versionKey]; ok && !bytes.Equal(hsh, rec.Val) {
+		// Kernel version has been changed.
+		mgr.newKernel = true
+		log.Logf(0, "Kernel version has been changed")
+		log.Logf(0, "  Previous %v", hex.EncodeToString(rec.Val))
+		log.Logf(0, "  Current  %v", hex.EncodeToString(hsh))
+	}
+}
+
 func (mgr *Manager) preloadCorpus() {
 	log.Logf(0, "loading corpus...")
 	corpusDB, err := db.Open(filepath.Join(mgr.cfg.Workdir, "corpus.db"))
@@ -493,6 +520,8 @@ func (mgr *Manager) preloadCorpus() {
 		log.Fatalf("failed to open corpus database: %v", err)
 	}
 	mgr.corpusDB = corpusDB
+
+	mgr.checkKernelVersion()
 
 	seedDir := mgr.seedDir()
 
@@ -553,18 +582,24 @@ func (mgr *Manager) loadCorpus() {
 	broken := 0
 	if *flagCorpus {
 		for key, rec := range mgr.corpusDB.Records {
-			if !mgr.loadProg(rec.Val, minimized, smashed) {
+			if key == versionKey {
+				continue
+			}
+			if !mgr.loadProg(rec.Val, minimized, smashed, !mgr.newKernel) {
 				mgr.corpusDB.Delete(key)
 				broken++
 			}
 		}
 	}
+	mgr.corpusDB.Save(versionKey, mgr.kernelHash, 0)
+	mgr.corpusDB.Flush()
+	log.Logf(0, "%-24v: %v", "kernel hash", hex.EncodeToString(mgr.kernelHash))
 	mgr.fresh = len(mgr.corpusDB.Records) == 0
 	corpusSize := len(mgr.candidates)
 	log.Logf(0, "%-24v: %v (deleted %v broken)", "corpus", corpusSize, broken)
 
 	for _, seed := range mgr.seeds {
-		mgr.loadProg(seed, true, false)
+		mgr.loadProg(seed, true, false, true)
 	}
 	log.Logf(0, "%-24v: %v/%v", "seeds", len(mgr.candidates)-corpusSize, len(mgr.seeds))
 	mgr.seeds = nil
@@ -587,8 +622,8 @@ func (mgr *Manager) loadCorpus() {
 	mgr.phase = phaseLoadedCorpus
 }
 
-func (mgr *Manager) loadProg(data []byte, minimized, smashed bool) bool {
-	bad, disabled := checkProgram(mgr.target, mgr.targetEnabledSyscalls, data)
+func (mgr *Manager) loadProg(data []byte, minimized, smashed, enableThreaded bool) bool {
+	bad, disabled := checkProgram(mgr.target, mgr.targetEnabledSyscalls, enableThreaded, data)
 	if bad {
 		return false
 	}
@@ -620,7 +655,7 @@ func (mgr *Manager) dumpInputs() {
 	}
 }
 
-func checkProgram(target *prog.Target, enabled map[*prog.Syscall]bool, data []byte) (bad, disabled bool) {
+func checkProgram(target *prog.Target, enabled map[*prog.Syscall]bool, enableThreaded bool, data []byte) (bad, disabled bool) {
 	p, err := target.Deserialize(data, prog.NonStrict)
 	if err != nil {
 		return true, true
@@ -632,6 +667,9 @@ func checkProgram(target *prog.Target, enabled map[*prog.Syscall]bool, data []by
 		if !enabled[c.Meta] {
 			return false, true
 		}
+	}
+	if !enableThreaded && p.Threaded {
+		return true, true
 	}
 	return false, false
 }
@@ -1355,3 +1393,19 @@ func publicWebAddr(addr string) string {
 	}
 	return "http://" + addr
 }
+
+func binaryHash(filePath string) ([]byte, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	hash := md5.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return nil, err
+	}
+	return hash.Sum(nil), nil
+}
+
+const versionKey = "kernelversion"

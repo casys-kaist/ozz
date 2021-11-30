@@ -1,17 +1,17 @@
-From 458e41a4da5bcfea225dce9a496f8a549171d4c2 Mon Sep 17 00:00:00 2001
+From 505303463af90178226b32a45414fb9f59f595e6 Mon Sep 17 00:00:00 2001
 From: "Dae R. Jeong" <threeearcat@gmail.com>
 Date: Fri, 21 May 2021 11:47:57 +0000
-Subject: [PATCH] Disable shrinking global variables
+Subject: [PATCH 2/3] Disable shrinking global variables
 
 ---
  llvm/lib/Transforms/IPO/GlobalOpt.cpp | 22 +++++++++++-----------
  1 file changed, 11 insertions(+), 11 deletions(-)
 
 diff --git a/llvm/lib/Transforms/IPO/GlobalOpt.cpp b/llvm/lib/Transforms/IPO/GlobalOpt.cpp
-index 9524d9a36204..eea03bcbc4e8 100644
+index 223a05e8ea02..26be9cfe209f 100644
 --- a/llvm/lib/Transforms/IPO/GlobalOpt.cpp
 +++ b/llvm/lib/Transforms/IPO/GlobalOpt.cpp
-@@ -2068,20 +2068,20 @@ processInternalGlobal(GlobalVariable *GV, const GlobalStatus &GS,
+@@ -2073,20 +2073,20 @@ processInternalGlobal(GlobalVariable *GV, const GlobalStatus &GS,
  
      // Try to optimize globals based on the knowledge that only one value
      // (besides its initializer) is ever stored to the global.
@@ -42,7 +42,7 @@ index 9524d9a36204..eea03bcbc4e8 100644
 +    // }
    }
  
-   return false;
+   return Changed;
 -- 
-2.17.1
+2.25.1
 

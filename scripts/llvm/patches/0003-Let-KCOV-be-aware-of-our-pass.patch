@@ -1,17 +1,17 @@
-From 239e87765b663fe937e9e40494076ea7915f999f Mon Sep 17 00:00:00 2001
+From ca07f81e6d2a6558d64ceaeb6da2f9803bf192a9 Mon Sep 17 00:00:00 2001
 From: "Dae R. Jeong" <threeearcat@gmail.com>
 Date: Sat, 6 Nov 2021 09:03:57 +0000
-Subject: [PATCH] Let KCOV be aware of our pass
+Subject: [PATCH 3/3] Let KCOV be aware of our pass
 
 ---
  .../Instrumentation/SanitizerCoverage.cpp     | 51 +++++++++++++++++--
  1 file changed, 47 insertions(+), 4 deletions(-)
 
 diff --git a/llvm/lib/Transforms/Instrumentation/SanitizerCoverage.cpp b/llvm/lib/Transforms/Instrumentation/SanitizerCoverage.cpp
-index b6a9df57e431..11ab758d693f 100644
+index 2d4b07939463..4471b04038f3 100644
 --- a/llvm/lib/Transforms/Instrumentation/SanitizerCoverage.cpp
 +++ b/llvm/lib/Transforms/Instrumentation/SanitizerCoverage.cpp
-@@ -269,6 +269,8 @@ private:
+@@ -259,6 +259,8 @@ private:
  
    const SpecialCaseList *Allowlist;
    const SpecialCaseList *Blocklist;
@@ -20,7 +20,7 @@ index b6a9df57e431..11ab758d693f 100644
  };
  
  class ModuleSanitizerCoverageLegacyPass : public ModulePass {
-@@ -488,6 +490,8 @@ bool ModuleSanitizerCoverage::instrumentModule(
+@@ -474,6 +476,8 @@ bool ModuleSanitizerCoverage::instrumentModule(
    SanCovTracePCGuard =
        M.getOrInsertFunction(SanCovTracePCGuardName, VoidTy, Int32PtrTy);
  
@@ -29,8 +29,8 @@ index b6a9df57e431..11ab758d693f 100644
    for (auto &F : M)
      instrumentFunction(F, DTCallback, PDTCallback);
  
-@@ -548,9 +552,34 @@ static bool isFullPostDominator(const BasicBlock *BB,
-   return true;
+@@ -528,9 +532,34 @@ static bool isFullPostDominator(const BasicBlock *BB,
+   });
  }
  
 +static bool branchDependsOnConstant(const BranchInst *BI, const Constant *c) {
@@ -64,7 +64,7 @@ index b6a9df57e431..11ab758d693f 100644
                                    const SanitizerCoverageOptions &Options) {
    // Don't insert coverage for blocks containing nothing but unreachable: we
    // will never call __sanitizer_cov() for them, so counting them in
-@@ -572,6 +601,11 @@ static bool shouldInstrumentBlock(const Function &F, const BasicBlock *BB,
+@@ -552,6 +581,11 @@ static bool shouldInstrumentBlock(const Function &F, const BasicBlock *BB,
        &F.getEntryBlock() != BB)
      return false;
  
@@ -76,7 +76,7 @@ index b6a9df57e431..11ab758d693f 100644
    // Do not instrument full dominators, or full post-dominators with multiple
    // predecessors.
    return !isFullDominator(BB, DT)
-@@ -598,14 +632,23 @@ static bool IsBackEdge(BasicBlock *From, BasicBlock *To,
+@@ -578,14 +612,23 @@ static bool IsBackEdge(BasicBlock *From, BasicBlock *To,
  //
  // Note that Cmp pruning is controlled by the same flag as the
  // BB pruning.
@@ -102,7 +102,7 @@ index b6a9df57e431..11ab758d693f 100644
    return true;
  }
  
-@@ -651,7 +694,7 @@ void ModuleSanitizerCoverage::instrumentFunction(
+@@ -631,7 +674,7 @@ void ModuleSanitizerCoverage::instrumentFunction(
    bool IsLeafFunc = true;
  
    for (auto &BB : F) {
@@ -111,7 +111,7 @@ index b6a9df57e431..11ab758d693f 100644
        BlocksToInstrument.push_back(&BB);
      for (auto &Inst : BB) {
        if (Options.IndirectCalls) {
-@@ -661,7 +704,7 @@ void ModuleSanitizerCoverage::instrumentFunction(
+@@ -641,7 +684,7 @@ void ModuleSanitizerCoverage::instrumentFunction(
        }
        if (Options.TraceCmp) {
          if (ICmpInst *CMP = dyn_cast<ICmpInst>(&Inst))
@@ -121,5 +121,5 @@ index b6a9df57e431..11ab758d693f 100644
          if (isa<SwitchInst>(&Inst))
            SwitchTraceTargets.push_back(&Inst);
 -- 
-2.17.1
+2.25.1
 

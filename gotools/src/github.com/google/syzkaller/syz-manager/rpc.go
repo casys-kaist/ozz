@@ -258,7 +258,7 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 	inputSignal := a.Signal.Deserialize()
 	log.Logf(4, "new input from %v for syscall %v (signal=%v, cover=%v)",
 		a.Name, a.Call, inputSignal.Len(), len(a.Cover))
-	bad, disabled := checkProgram(serv.cfg.Target, serv.targetEnabledSyscalls, a.RPCInput.Prog)
+	bad, disabled := checkProgram(serv.cfg.Target, serv.targetEnabledSyscalls, true, a.RPCInput.Prog)
 	if bad || disabled {
 		log.Logf(0, "rejecting program from fuzzer (bad=%v, disabled=%v):\n%s", bad, disabled, a.RPCInput.Prog)
 		return nil
@@ -322,7 +322,7 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 
 func (serv *RPCServer) NewThreadedInput(a *rpctype.NewThreadedInputArgs, r *int) error {
 	log.Logf(4, "new threaded input from %v (readfrom=%v)", a.Name, a.ReadFrom.Len())
-	bad, disabled := checkProgram(serv.cfg.Target, serv.targetEnabledSyscalls, a.RPCThreadedInput.Prog)
+	bad, disabled := checkProgram(serv.cfg.Target, serv.targetEnabledSyscalls, true, a.RPCThreadedInput.Prog)
 	if bad || disabled {
 		log.Logf(0, "rejecting program from fuzzer (bad=%v, disabled=%v):\n%s", bad, disabled, a.RPCThreadedInput.Prog)
 		return nil

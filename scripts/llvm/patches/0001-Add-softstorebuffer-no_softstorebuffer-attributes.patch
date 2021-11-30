@@ -1,7 +1,7 @@
-From c349bff36549cd8e3f699ae6d7bd0ded10b7a7a8 Mon Sep 17 00:00:00 2001
+From bf0797c8ff43748201057ddf1721d69a547eb716 Mon Sep 17 00:00:00 2001
 From: "Dae R. Jeong" <threeearcat@gmail.com>
 Date: Mon, 15 Feb 2021 06:41:29 +0000
-Subject: [PATCH] Add softstorebuffer/no_softstorebuffer attributes
+Subject: [PATCH 1/3] Add softstorebuffer/no_softstorebuffer attributes
 
 Ref: http://www.cs.cmu.edu/~seth/llvm/llvmannotation.html
 ---
@@ -21,10 +21,10 @@ Ref: http://www.cs.cmu.edu/~seth/llvm/llvmannotation.html
  13 files changed, 85 insertions(+), 1 deletion(-)
 
 diff --git a/clang/include/clang/Basic/Attr.td b/clang/include/clang/Basic/Attr.td
-index 60eaee7839e2..e80c27439151 100644
+index bfd50f6a6779..b5561b18ffa4 100644
 --- a/clang/include/clang/Basic/Attr.td
 +++ b/clang/include/clang/Basic/Attr.td
-@@ -1538,7 +1538,7 @@ def ArmMveStrictPolymorphism : TypeAttr, TargetSpecificAttr<TargetARM> {
+@@ -1619,7 +1619,7 @@ def ArmMveStrictPolymorphism : TypeAttr, TargetSpecificAttr<TargetARM> {
  }
  
  def NoUniqueAddress : InheritableAttr, TargetSpecificAttr<TargetItaniumCXXABI> {
@@ -33,11 +33,10 @@ index 60eaee7839e2..e80c27439151 100644
    let Subjects = SubjectList<[NonBitField], ErrorDiag>;
    let Documentation = [NoUniqueAddressDocs];
    let SimpleHandler = 1;
-@@ -3452,3 +3452,16 @@ def Builtin : InheritableAttr {
-   let SemaHandler = 0;
+@@ -3669,6 +3669,19 @@ def Builtin : InheritableAttr {
    let Documentation = [Undocumented];
  }
-+
+ 
 +// Custom attribute for the store buffer emulation
 +def SoftStoreBuffer : InheritableAttr {
 +  let Spellings = [GNU<"softstorebuffer">];
@@ -50,26 +49,33 @@ index 60eaee7839e2..e80c27439151 100644
 +  let Subjects = SubjectList<[Function]>;
 +  let Documentation = [SoftStoreBufferDocs];
 +}
++
+ def EnforceTCB : InheritableAttr {
+   let Spellings = [Clang<"enforce_tcb">];
+   let Subjects = SubjectList<[Function]>;
 diff --git a/clang/include/clang/Basic/AttrDocs.td b/clang/include/clang/Basic/AttrDocs.td
-index 833127ed44eb..e6a3a9ddcf16 100644
+index 170a0fe3d4c4..ba8ae8f7cb13 100644
 --- a/clang/include/clang/Basic/AttrDocs.td
 +++ b/clang/include/clang/Basic/AttrDocs.td
-@@ -4947,3 +4947,10 @@ Requirements on Development Tools - Engineering Specification Documentation
- <https://developer.arm.com/docs/ecm0359818/latest/>`_ for more information.
+@@ -5718,6 +5718,13 @@ Requirements on Development Tools - Engineering Specification Documentation
    }];
  }
-+
+ 
 +def SoftStoreBufferDocs : Documentation {
 +  let Category = DocCatFunction;
 +  let Content = [{
 +This attribute declares a function that should emulate the store buffer.
 +  }];
 +}
++
+ def AlwaysInlineDocs : Documentation {
+   let Category = DocCatFunction;
+   let Content = [{
 diff --git a/clang/lib/CodeGen/CodeGenModule.cpp b/clang/lib/CodeGen/CodeGenModule.cpp
-index 4ae8ce7e5ccf..6235bc2e0eeb 100644
+index 9c9bd4e374af..fa84bfd76773 100644
 --- a/clang/lib/CodeGen/CodeGenModule.cpp
 +++ b/clang/lib/CodeGen/CodeGenModule.cpp
-@@ -1663,6 +1663,19 @@ void CodeGenModule::SetLLVMFunctionAttributesForDefinition(const Decl *D,
+@@ -1774,6 +1774,19 @@ void CodeGenModule::SetLLVMFunctionAttributesForDefinition(const Decl *D,
        B.addAttribute(llvm::Attribute::MinSize);
    }
  
@@ -90,11 +96,11 @@ index 4ae8ce7e5ccf..6235bc2e0eeb 100644
  
    unsigned alignment = D->getMaxAlignment() / Context.getCharWidth();
 diff --git a/clang/lib/Sema/SemaDeclAttr.cpp b/clang/lib/Sema/SemaDeclAttr.cpp
-index a9a2a19b4797..70b6f1d78bce 100644
+index 30d08b3d4ac0..f6abbdd3a971 100644
 --- a/clang/lib/Sema/SemaDeclAttr.cpp
 +++ b/clang/lib/Sema/SemaDeclAttr.cpp
-@@ -6792,6 +6792,23 @@ static void handleCFGuardAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
-   D->addAttr(::new (S.Context) CFGuardAttr(S.Context, AL, Arg));
+@@ -7612,6 +7612,23 @@ EnforceTCBLeafAttr *Sema::mergeEnforceTCBLeafAttr(
+       *this, D, AL);
  }
  
 +static void handleSoftStoreBufferAttr(Sema &S, Decl *D, const ParsedAttr &Attr) {
@@ -117,11 +123,10 @@ index a9a2a19b4797..70b6f1d78bce 100644
  //===----------------------------------------------------------------------===//
  // Top Level Sema Entry Points
  //===----------------------------------------------------------------------===//
-@@ -7450,6 +7467,14 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
-   case ParsedAttr::AT_UseHandle:
+@@ -8319,6 +8336,14 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
      handleHandleAttr<UseHandleAttr>(S, D, AL);
      break;
-+
+ 
 +  case ParsedAttr::AT_SoftStoreBuffer:
 +    handleSoftStoreBufferAttr(S, D, AL);
 +    break;
@@ -129,79 +134,79 @@ index a9a2a19b4797..70b6f1d78bce 100644
 +  case ParsedAttr::AT_NoSoftStoreBuffer:
 +    handleNoSoftStoreBufferAttr(S, D, AL);
 +    break;
-   }
- }
- 
++
+   case ParsedAttr::AT_EnforceTCB:
+     handleEnforceTCBAttr<EnforceTCBAttr, EnforceTCBLeafAttr>(S, D, AL);
+     break;
 diff --git a/llvm/include/llvm/Bitcode/LLVMBitCodes.h b/llvm/include/llvm/Bitcode/LLVMBitCodes.h
-index de4fe6630324..4eb451418af6 100644
+index 5b4854d6c95e..2b11272e79d1 100644
 --- a/llvm/include/llvm/Bitcode/LLVMBitCodes.h
 +++ b/llvm/include/llvm/Bitcode/LLVMBitCodes.h
-@@ -644,6 +644,8 @@ enum AttributeKindCodes {
-   ATTR_KIND_NO_MERGE = 66,
-   ATTR_KIND_NULL_POINTER_IS_VALID = 67,
-   ATTR_KIND_NOUNDEF = 68,
-+  ATTR_KIND_SoftStoreBuffer = 69,
-+  ATTR_KIND_NoSoftStoreBuffer = 70,
+@@ -657,6 +657,8 @@ enum AttributeKindCodes {
+   ATTR_KIND_NO_CALLBACK = 71,
+   ATTR_KIND_HOT = 72,
+   ATTR_KIND_NO_PROFILE = 73,
++  ATTR_KIND_SoftStoreBuffer = 74,
++  ATTR_KIND_NoSoftStoreBuffer = 75,
  };
  
  enum ComdatSelectionKindCodes {
 diff --git a/llvm/include/llvm/IR/Attributes.td b/llvm/include/llvm/IR/Attributes.td
-index 395f9dbfb176..0823054e8315 100644
+index f7ffc888c65a..5cba1f02a69e 100644
 --- a/llvm/include/llvm/IR/Attributes.td
 +++ b/llvm/include/llvm/IR/Attributes.td
-@@ -285,3 +285,7 @@ def : MergeRule<"adjustCallerStackProbes">;
- def : MergeRule<"adjustCallerStackProbeSize">;
+@@ -313,3 +313,7 @@ def : MergeRule<"adjustCallerStackProbeSize">;
  def : MergeRule<"adjustMinLegalVectorWidth">;
  def : MergeRule<"adjustNullPointerValidAttr">;
+ def : MergeRule<"setAND<MustProgressAttr>">;
 +
 +// Custom attribute for the store buffer emulation
 +def SoftStoreBuffer : EnumAttr<"softstorebuffer">;
 +def NoSoftStoreBuffer : EnumAttr<"nosoftstorebuffer">;
-\ No newline at end of file
 diff --git a/llvm/lib/AsmParser/LLLexer.cpp b/llvm/lib/AsmParser/LLLexer.cpp
-index 777ce3abdddd..05187a70f2cb 100644
+index 427de74f91ac..1ca72dbb4ef6 100644
 --- a/llvm/lib/AsmParser/LLLexer.cpp
 +++ b/llvm/lib/AsmParser/LLLexer.cpp
-@@ -651,6 +651,8 @@ lltok::Kind LLLexer::LexIdentifier() {
+@@ -653,6 +653,8 @@ lltok::Kind LLLexer::LexIdentifier() {
    KEYWORD(nest);
    KEYWORD(noalias);
    KEYWORD(nobuiltin);
 +  KEYWORD(softstorebuffer);
 +  KEYWORD(nosoftstorebuffer);
+   KEYWORD(nocallback);
    KEYWORD(nocapture);
    KEYWORD(noduplicate);
-   KEYWORD(nofree);
 diff --git a/llvm/lib/AsmParser/LLParser.cpp b/llvm/lib/AsmParser/LLParser.cpp
-index c9f21ee83826..5913f8f4ed37 100644
+index 2a3fb8fb6658..fe9753b6339f 100644
 --- a/llvm/lib/AsmParser/LLParser.cpp
 +++ b/llvm/lib/AsmParser/LLParser.cpp
-@@ -1304,6 +1304,8 @@ bool LLParser::ParseFnAttributeValuePairs(AttrBuilder &B,
-     case lltok::kw_minsize: B.addAttribute(Attribute::MinSize); break;
+@@ -1354,6 +1354,8 @@ bool LLParser::parseFnAttributeValuePairs(AttrBuilder &B,
+       break;
      case lltok::kw_naked: B.addAttribute(Attribute::Naked); break;
      case lltok::kw_nobuiltin: B.addAttribute(Attribute::NoBuiltin); break;
 +    case lltok::kw_softstorebuffer: B.addAttribute(Attribute::SoftStoreBuffer); break;
 +    case lltok::kw_nosoftstorebuffer: B.addAttribute(Attribute::NoSoftStoreBuffer); break;
-     case lltok::kw_noduplicate: B.addAttribute(Attribute::NoDuplicate); break;
-     case lltok::kw_nofree: B.addAttribute(Attribute::NoFree); break;
-     case lltok::kw_noimplicitfloat:
+     case lltok::kw_nocallback:
+       B.addAttribute(Attribute::NoCallback);
+       break;
 diff --git a/llvm/lib/AsmParser/LLToken.h b/llvm/lib/AsmParser/LLToken.h
-index 0fb3bae77dd3..9ba032b03ba3 100644
+index 5149f861837a..3b6b7bc2723f 100644
 --- a/llvm/lib/AsmParser/LLToken.h
 +++ b/llvm/lib/AsmParser/LLToken.h
-@@ -198,6 +198,8 @@ enum Kind {
+@@ -200,6 +200,8 @@ enum Kind {
    kw_noalias,
    kw_noundef,
    kw_nobuiltin,
 +  kw_softstorebuffer,
 +  kw_nosoftstorebuffer,
+   kw_nocallback,
    kw_nocapture,
    kw_noduplicate,
-   kw_nofree,
 diff --git a/llvm/lib/Bitcode/Reader/BitcodeReader.cpp b/llvm/lib/Bitcode/Reader/BitcodeReader.cpp
-index 659e26c2bd25..7675c0cefd9d 100644
+index f2800201e871..08a62bb04947 100644
 --- a/llvm/lib/Bitcode/Reader/BitcodeReader.cpp
 +++ b/llvm/lib/Bitcode/Reader/BitcodeReader.cpp
-@@ -1532,6 +1532,10 @@ static Attribute::AttrKind getAttrFromCode(uint64_t Code) {
+@@ -1535,6 +1535,10 @@ static Attribute::AttrKind getAttrFromCode(uint64_t Code) {
      return Attribute::Preallocated;
    case bitc::ATTR_KIND_NOUNDEF:
      return Attribute::NoUndef;
@@ -209,14 +214,14 @@ index 659e26c2bd25..7675c0cefd9d 100644
 +    return Attribute::SoftStoreBuffer;
 +  case bitc::ATTR_KIND_NoSoftStoreBuffer:
 +    return Attribute::NoSoftStoreBuffer;
-   }
- }
- 
+   case bitc::ATTR_KIND_BYREF:
+     return Attribute::ByRef;
+   case bitc::ATTR_KIND_MUSTPROGRESS:
 diff --git a/llvm/lib/Bitcode/Writer/BitcodeWriter.cpp b/llvm/lib/Bitcode/Writer/BitcodeWriter.cpp
-index 9c15a5f9f193..8a6129954890 100644
+index 37ecb9992e44..137a823f9056 100644
 --- a/llvm/lib/Bitcode/Writer/BitcodeWriter.cpp
 +++ b/llvm/lib/Bitcode/Writer/BitcodeWriter.cpp
-@@ -740,6 +740,10 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
+@@ -761,6 +761,10 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
    case Attribute::EmptyKey:
    case Attribute::TombstoneKey:
      llvm_unreachable("Trying to encode EmptyKey/TombstoneKey");
@@ -228,10 +233,10 @@ index 9c15a5f9f193..8a6129954890 100644
  
    llvm_unreachable("Trying to encode unknown attribute");
 diff --git a/llvm/lib/IR/Attributes.cpp b/llvm/lib/IR/Attributes.cpp
-index f67d96a854f4..e44f5a6af327 100644
+index c4629decc6d9..d59141c8ed6e 100644
 --- a/llvm/lib/IR/Attributes.cpp
 +++ b/llvm/lib/IR/Attributes.cpp
-@@ -445,6 +445,10 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
+@@ -457,6 +457,10 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
      return "immarg";
    if (hasAttribute(Attribute::NoUndef))
      return "noundef";
@@ -239,22 +244,22 @@ index f67d96a854f4..e44f5a6af327 100644
 +    return "softstorebuffer";
 +  if (hasAttribute(Attribute::NoSoftStoreBuffer))
 +    return "nosoftstorebuffer";
+   if (hasAttribute(Attribute::MustProgress))
+     return "mustprogress";
  
-   if (hasAttribute(Attribute::ByVal)) {
-     std::string Result;
 diff --git a/llvm/lib/IR/Verifier.cpp b/llvm/lib/IR/Verifier.cpp
-index c518ae87ea9b..7e10fd30f100 100644
+index 6dd299ee9845..dc9653560e14 100644
 --- a/llvm/lib/IR/Verifier.cpp
 +++ b/llvm/lib/IR/Verifier.cpp
-@@ -1585,6 +1585,8 @@ static bool isFuncOnlyAttr(Attribute::AttrKind Kind) {
+@@ -1648,6 +1648,8 @@ static bool isFuncOnlyAttr(Attribute::AttrKind Kind) {
    case Attribute::Speculatable:
    case Attribute::StrictFP:
    case Attribute::NullPointerIsValid:
 +  case Attribute::SoftStoreBuffer:
 +  case Attribute::NoSoftStoreBuffer:
+   case Attribute::MustProgress:
+   case Attribute::NoProfile:
      return true;
-   default:
-     break;
 -- 
-2.17.1
+2.25.1
 
