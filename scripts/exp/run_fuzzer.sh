@@ -13,14 +13,29 @@ if [ ${PWD#$EXP_DIR} = $PWD ]; then
 	done
 fi
 
+baseline=0
+if [ -n "$BASELINE" ]; then
+	baseline=1
+fi
+
 SCRIPTS_LINUX_DIR="$SCRIPTS_DIR/linux/"
 $SCRIPTS_LINUX_DIR/__create_symlinks.sh "linux"
 $SCRIPTS_LINUX_DIR/__check_suffix.sh "linux"
 
-SYZKALLER=$SYZKALLER_INSTALL/syz-manager
+if [ "$baseline" -eq 1 ]; then
+	SYZKALLER=$SYZKALLER_BASELINE_INSTALL/syz-manager
+	_KERNEL=$KERNEL_X86_64_BASELINE
+else
+	SYZKALLER=$SYZKALLER_INSTALL/syz-manager
+	_KERNEL=$KERNEL_X86_64
+fi
 
 if [ -z "$CONFIG" ]; then
-	CONFIG="$EXP_DIR/x86_64/syzkaller.cfg"
+	if [ "$baseline" -eq 1 ]; then
+		CONFIG="$EXP_DIR/x86_64/baseline.cfg"
+	else
+		CONFIG="$EXP_DIR/x86_64/syzkaller.cfg"
+	fi
 fi
 
 if [ -n "$DEBUG" ]; then
@@ -31,11 +46,12 @@ fi
 OPTS="$OPTS -config $CONFIG $_DEBUG"
 
 echo "Run syzkaller"
-echo "    kernel : (default) $(readlink -f $KERNEL_X86_64)"
-echo "    config : $CONFIG"
-echo "    debug  : $DEBUG"
-echo "    options: $OPTS"
-echo "    tee    : $_TEE"
+echo "    syzkaller : $SYZKALLER"
+echo "    kernel    : (default) $(readlink -f $_KERNEL)"
+echo "    config    : $CONFIG"
+echo "    debug     : $DEBUG"
+echo "    options   : $OPTS"
+echo "    tee       : $_TEE"
 
 sleep 2
 
