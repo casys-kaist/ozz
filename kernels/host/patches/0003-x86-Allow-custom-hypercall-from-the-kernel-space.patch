@@ -1,0 +1,48 @@
+From 365b1601cb88041729c235e3d51570a9d6572173 Mon Sep 17 00:00:00 2001
+From: "Dae R. Jeong" <threeearcat@gmail.com>
+Date: Mon, 20 Jan 2020 09:01:49 +0000
+Subject: [PATCH 3/3] x86: Allow custom hypercall from the kernel space
+
+---
+ arch/x86/kvm/x86.c | 23 +++++++++++------------
+ 1 file changed, 11 insertions(+), 12 deletions(-)
+
+diff --git a/arch/x86/kvm/x86.c b/arch/x86/kvm/x86.c
+index f05cdbdd8766..7d98c4f5c4a9 100644
+--- a/arch/x86/kvm/x86.c
++++ b/arch/x86/kvm/x86.c
+@@ -7503,20 +7503,19 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
+ 		a3 &= 0xFFFFFFFF;
+ 	}
+ 
+-	if (kvm_x86_ops->get_cpl(vcpu) != 0) {
+ #ifdef CONFIG_KVM_USER_HYPERCALL
+-#define LEN(x) (sizeof(x) / sizeof(x[0]))
+-		// Hypercall
+-		if (nr == HCALL_RAX_ID) {
+-			vcpu->run->hypercall.nr = HCALL_RAX_ID;
+-			vcpu->run->exit_reason = HCALL_EXIT_REASON;
+-			vcpu->run->hypercall.args[0] = a0;
+-			vcpu->run->hypercall.args[1] = a1;
+-			vcpu->run->hypercall.args[2] = a2;
+-			vcpu->run->hypercall.args[3] = a3;
+-			return 0;
+-		} else
++	// Hypercall
++	if (nr == HCALL_RAX_ID) {
++		vcpu->run->hypercall.nr = HCALL_RAX_ID;
++		vcpu->run->exit_reason = HCALL_EXIT_REASON;
++		vcpu->run->hypercall.args[0] = a0;
++		vcpu->run->hypercall.args[1] = a1;
++		vcpu->run->hypercall.args[2] = a2;
++		vcpu->run->hypercall.args[3] = a3;
++		return 0;
++	} else
+ #endif
++	if (kvm_x86_ops->get_cpl(vcpu) != 0) {
+ 		ret = -KVM_EPERM;
+ 		goto out;
+ 	}
+-- 
+2.25.1
+
