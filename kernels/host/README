@@ -1,0 +1,41 @@
+# Purpose of the host kernel modification
+
+We need to build a custom kvm module to allow hypercalls from the
+userspace. host-Ubuntu-* branches are for this purpose.
+
+# Caution
+
+For some reasons, building a custom kvm module is broken in old
+branches (i.e., host-Ubuntu-4.15.0-76.86). The following command will
+rise the "No such file or directory" error.
+```
+make -C /lib/modules/`uname -r`/build M=$PWD arch/x86/kvm/kvm.ko
+```
+
+The reason is that building KVM relied on relative pathes in
+arch/x86/kvm/Makefile and arch/x86/kvm/trace.h and these pathes are
+broken.
+
+To workaround it, I temporary modified the pathes to absolute pathes
+in my local machine. For example,
+```
+ccflags-y += -Iarch/x86/kvm
+```
+into
+```
+ccflags-y += -I/home/daeryong/workdir/relrazzer/kernels/asdf/arch/x86/kvm
+```
+, and
+
+```
+#define TRACE_INCLUDE_PATH arch/x86/kvm
+```
+into
+```
+#define TRACE_INCLUDE_PATH /home/daeryong/workdir/relrazzer/kernels/asdf/arch/x86/kvm
+```
+
+Note that I also changed the directory name of the linux source code
+(i.e., kernels/linux) to some randome name (i.e., kernels/asdf)
+because __stringify() macro somehow changes the string "linux" into
+"1".
