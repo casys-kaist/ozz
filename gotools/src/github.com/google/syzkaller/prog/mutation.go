@@ -33,6 +33,7 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, corpus []*Pro
 		ct:     ct,
 		corpus: corpus,
 	}
+	ctx.initialize()
 	for stop, ok := false, false; !stop; stop = ok && len(p.Calls) != 0 && r.oneOf(3) {
 		switch {
 		case r.oneOf(5):
@@ -49,6 +50,10 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, corpus []*Pro
 			ok = ctx.removeCall()
 		}
 	}
+	ctx.checkContenders()
+	// Unthreading p before threading to prevent epochs from being
+	// messed up.
+	p.unthreading()
 	p.Threading(p.Contender)
 	p.sanitizeFix()
 	p.debugValidate()
@@ -65,6 +70,26 @@ type mutator struct {
 	ncalls int          // The allowed maximum calls in mutated program.
 	ct     *ChoiceTable // ChoiceTable for syscalls.
 	corpus []*Prog      // The entire corpus, including original program p.
+
+	contenders []string
+}
+
+func (ctx *mutator) initialize() {
+	for _, c := range ctx.p.Contenders() {
+		ctx.contenders = append(ctx.contenders, c.Meta.Name)
+	}
+}
+
+func (ctx *mutator) checkContenders() {
+	cs := ctx.p.Contenders()
+	if len(cs) != len(ctx.contenders) {
+		panic(fmt.Sprintf("wrong length, before=%v, after=%v", len(ctx.contenders), len(cs)))
+	}
+	for i, c := range cs {
+		if ctx.contenders[i] != c.Meta.Name {
+			panic(fmt.Sprintf("wrong contender at %d, before=%v, after=%v", i, ctx.contenders[i], c.Meta.Name))
+		}
+	}
 }
 
 // This function selects a random other program p0 out of the corpus, and
@@ -77,7 +102,6 @@ func (ctx *mutator) splice() bool {
 	}
 	p0 := ctx.corpus[r.Intn(len(ctx.corpus))]
 	p0c := p0.Clone()
-	p0c.unthreading()
 	idx := r.Intn(len(p.Calls))
 	p.Calls = append(p.Calls[:idx], append(p0c.Calls, p.Calls[idx:]...)...)
 	inserted := len(p0c.Calls)
