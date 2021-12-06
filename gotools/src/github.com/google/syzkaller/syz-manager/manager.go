@@ -51,7 +51,6 @@ var (
 	flagSeed      = flag.String("seed", "normal", "seed type (normal, threaded-cve, cve, test)")
 	flagGen       = flag.Bool("gen", true, "generate/mutate inputs")
 	flagCorpus    = flag.Bool("load-corpus", true, "load corpus")
-	flagRepro     = flag.Bool("repro", false, "reproduce crashes")
 	flagDump      = flag.Bool("dump-inputs", false, "dumping all inputs into workdir/inputs")
 	flagNewKernel = flag.Bool("new-kernel", false, "set true if using a new kernel version")
 )
@@ -97,7 +96,6 @@ type Manager struct {
 	dataRaceFrames   map[string]bool
 	saturatedCalls   map[string]bool
 
-	repro          bool
 	needMoreRepros chan chan bool
 	hubReproQueue  chan *Crash
 	reproRequest   chan chan map[string]bool
@@ -191,7 +189,6 @@ func RunManager(cfg *mgrconfig.Config) {
 		hubReproQueue:    make(chan *Crash, 10),
 		needMoreRepros:   make(chan chan bool),
 		reproRequest:     make(chan chan map[string]bool),
-		repro:            *flagRepro,
 		usedFiles:        make(map[string]time.Time),
 		saturatedCalls:   make(map[string]bool),
 		seedType:         *flagSeed,
@@ -418,7 +415,7 @@ func (mgr *Manager) vmLoop() {
 			// which we detect as "lost connection". Don't save that as crash.
 			if shutdown != nil && res.crash != nil {
 				needRepro := mgr.saveCrash(res.crash)
-				if needRepro && mgr.repro {
+				if needRepro {
 					log.Logf(1, "loop: add pending repro for '%v'", res.crash.Title)
 					pendingRepro[res.crash] = true
 				}
@@ -451,9 +448,7 @@ func (mgr *Manager) vmLoop() {
 			shutdown = nil
 		case crash := <-mgr.hubReproQueue:
 			log.Logf(1, "loop: get repro from hub")
-			if mgr.repro {
-				pendingRepro[crash] = true
-			}
+			pendingRepro[crash] = true
 		case reply := <-mgr.needMoreRepros:
 			reply <- phase >= phaseTriagedHub &&
 				len(reproQueue)+len(pendingRepro)+len(reproducing) == 0
