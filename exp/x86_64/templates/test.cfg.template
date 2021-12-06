@@ -6,6 +6,7 @@
 	"image": "$IMAGE_X86_64/stretch.img",
 	"sshkey": "$IMAGE_X86_64/stretch.id_rsa",
 	"syzkaller": "$GOPATH/src/github.com/google/syzkaller",
+	"reproduce": false,
 	"procs": 8,
 	"type": "qemu",
 	"vm": {
