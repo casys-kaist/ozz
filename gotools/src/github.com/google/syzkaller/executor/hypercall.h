@@ -3,8 +3,9 @@
 
 #include "hcall_constant.h"
 
-__attribute__((noinline)) unsigned long hypercall(unsigned long cmd, unsigned long arg,
-						  unsigned long subarg, unsigned long subarg2)
+__attribute__((noinline))
+unsigned long hypercall(unsigned long cmd, unsigned long arg,
+			unsigned long subarg, unsigned long subarg2)
 {
 	unsigned long ret = -1;
 #ifdef __amd64__
