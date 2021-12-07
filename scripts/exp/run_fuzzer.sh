@@ -43,7 +43,10 @@ if [ -n "$DEBUG" ]; then
 	_TEE=${TEE:="$TMP_DIR/log"}
 fi
 
-OPTS="$OPTS -config $CONFIG $_DEBUG"
+WORKDIR=$(cat $CONFIG | grep --extended-regexp "\"workdir\": \"(.*)\"" --only-matching | cut --delimiter=":" --fields=2 | sed s/\"//g)
+WORKDIR=${WORKDIR## }
+
+OPTS="$OPTS -config $CONFIG $_DEBUG -bench $WORKDIR/bench-$(date +%y%m%d-%H%M%S).txt"
 
 echo "Run syzkaller"
 echo "    syzkaller : $SYZKALLER"
@@ -52,6 +55,7 @@ echo "    config    : $CONFIG"
 echo "    debug     : $DEBUG"
 echo "    options   : $OPTS"
 echo "    tee       : $_TEE"
+echo "    workdir   : $WORKDIR"
 
 sleep 2
 
