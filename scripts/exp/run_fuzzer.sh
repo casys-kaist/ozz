@@ -1,6 +1,6 @@
 #!/bin/sh -e
 
-if [ ${PWD#$EXP_DIR} = $PWD ]; then
+if [ "${PWD#$EXP_DIR}"/ = "$PWD/" ]; then
 	while true; do
 		echo    "[WARN] You are running the fuzzer outside of EXP_DIR"
 		echo    "       EXP_DIR: $EXP_DIR"
