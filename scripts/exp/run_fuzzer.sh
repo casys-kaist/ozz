@@ -38,15 +38,15 @@ if [ -z "$CONFIG" ]; then
 	fi
 fi
 
+WORKDIR=$(cat $CONFIG | grep --extended-regexp "\"workdir\": \"(.*)\"" --only-matching | cut --delimiter=":" --fields=2 | sed s/\"//g)
+WORKDIR=${WORKDIR## }
+
 if [ -n "$DEBUG" ]; then
 	_DEBUG="-debug"
 	_TEE=${TEE:="$TMP_DIR/log"}
 else
 	_BENCH="-bench $WORKDIR/bench-$(date +%y%m%d-%H%M%S).txt"
 fi
-
-WORKDIR=$(cat $CONFIG | grep --extended-regexp "\"workdir\": \"(.*)\"" --only-matching | cut --delimiter=":" --fields=2 | sed s/\"//g)
-WORKDIR=${WORKDIR## }
 
 OPTS="$OPTS -config $CONFIG $_DEBUG $_BENCH"
 
