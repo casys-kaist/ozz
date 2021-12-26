@@ -45,14 +45,15 @@ import (
 )
 
 var (
-	flagConfig    = flag.String("config", "", "configuration file")
-	flagDebug     = flag.Bool("debug", false, "dump all VM output to console")
-	flagBench     = flag.String("bench", "", "write execution statistics into this file periodically")
-	flagSeed      = flag.String("seed", "normal", "seed type (normal, threaded-cve, cve, test)")
-	flagGen       = flag.Bool("gen", true, "generate/mutate inputs")
-	flagCorpus    = flag.Bool("load-corpus", true, "load corpus")
-	flagDump      = flag.Bool("dump-inputs", false, "dumping all inputs into workdir/inputs")
-	flagNewKernel = flag.Bool("new-kernel", false, "set true if using a new kernel version")
+	flagConfig       = flag.String("config", "", "configuration file")
+	flagDebug        = flag.Bool("debug", false, "dump all VM output to console")
+	flagBench        = flag.String("bench", "", "write execution statistics into this file periodically")
+	flagSeed         = flag.String("seed", "normal", "seed type (normal, threaded-cve, cve, test)")
+	flagGen          = flag.Bool("gen", true, "generate/mutate inputs")
+	flagCorpus       = flag.Bool("load-corpus", true, "load corpus")
+	flagDump         = flag.Bool("dump-inputs", false, "dumping all inputs into workdir/inputs")
+	flagNewKernel    = flag.Bool("new-kernel", false, "set true if using a new kernel version")
+	flagDumpCoverage = flag.String("dump-coverage", "", "for experiments. dump both coverages periodically")
 )
 
 type Manager struct {
@@ -267,6 +268,15 @@ func RunManager(cfg *mgrconfig.Config) {
 				if _, err := f.Write(append(data, '\n')); err != nil {
 					log.Fatalf("failed to write bench data")
 				}
+			}
+		}()
+	}
+
+	if *flagDumpCoverage != "" {
+		go func() {
+			for {
+				mgr.dumpCoverage()
+				time.Sleep(time.Hour)
 			}
 		}()
 	}
@@ -1373,6 +1383,40 @@ func (mgr *Manager) dashboardReporter() {
 		lastSuppressedCrashes += req.SuppressedCrashes
 		lastExecs += req.Execs
 		mgr.mu.Unlock()
+	}
+}
+
+func (mgr *Manager) dumpCoverage() {
+	mgr.serv.mu.Lock()
+	code := mgr.serv.corpusCover.Serialize()
+	readfrom := mgr.serv.corpusReadFrom.Serialize()
+	mgr.serv.mu.Unlock()
+
+	now := time.Now().Format("2006-01-02-15:04:05")
+	dir := filepath.Join(mgr.cfg.Workdir, *flagDumpCoverage)
+	osutil.MkdirAll(dir)
+	codef, err := os.OpenFile(filepath.Join(dir, fmt.Sprintf("%s.code", now)), os.O_WRONLY|os.O_CREATE|os.O_EXCL, osutil.DefaultFilePerm)
+	if err != nil {
+		log.Fatalf("failed to open code coverage file: %v", err)
+	}
+	var codecov bytes.Buffer
+	for _, cc := range code {
+		codecov.WriteString(fmt.Sprintf("%x\n", cc))
+	}
+	if _, err := codef.Write(codecov.Bytes()); err != nil {
+		log.Fatalf("failed to write code coverage: %v", err)
+	}
+
+	readfromf, err := os.OpenFile(filepath.Join(dir, fmt.Sprintf("%s.readfrom", now)), os.O_WRONLY|os.O_CREATE|os.O_EXCL, osutil.DefaultFilePerm)
+	if err != nil {
+		log.Fatalf("failed to open read-from coverage file: %v", err)
+	}
+	var readfromcov bytes.Buffer
+	for i := 0; i < readfrom.Len(); i++ {
+		readfromcov.WriteString(fmt.Sprintf("%x %x\n", readfrom.From[i], readfrom.To[i]))
+	}
+	if _, err := readfromf.Write(readfromcov.Bytes()); err != nil {
+		log.Fatalf("failed to write read-from coverage: %v", err)
 	}
 }
 
