@@ -41,6 +41,10 @@ create_to_be_instrumented_functions_symlink() {
 	FILENAME="$TMP_DIR/to-be-instrumented-functions.lst"
 	SRC="$(__append_suffix $FILENAME)"
 
+	if [ -f "$TMP_DIR/kssb_rebuild" ]; then
+		mv "$SRC" "$SRC".old || true
+	fi
+
 	touch $SRC
 
 	__create_symlink "$SRC" "$FILENAME"
