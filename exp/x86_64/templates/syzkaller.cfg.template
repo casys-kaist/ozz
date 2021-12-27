@@ -7,7 +7,7 @@
 	"sshkey": "$IMAGE_X86_64/stretch.id_rsa",
 	"syzkaller": "$GOPATH/src/github.com/google/syzkaller",
 	"reproduce": false,
-	"procs": 8,
+	"procs": 1,
 	"type": "qemu",
 	"vm": {
 		"count": $NR_VMS,
