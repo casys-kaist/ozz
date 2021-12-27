@@ -43,10 +43,13 @@ WORKDIR=${WORKDIR## }
 
 if [ -n "$DEBUG" ]; then
 	_DEBUG="-debug"
-	_TEE=${TEE:="$TMP_DIR/log"}
 else
 	_BENCH="-bench $WORKDIR/bench-$(date +%y%m%d-%H%M%S).txt"
 fi
+
+mkdir -p "$WORKDIR"
+_TEE=${TEE:="$WORKDIR/log"}
+mv "$_TEE" "$_TEE".old || true
 
 OPTS="$OPTS -config $CONFIG $_DEBUG $_BENCH"
 
