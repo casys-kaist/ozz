@@ -18,7 +18,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -51,7 +50,6 @@ var (
 	flagSeed         = flag.String("seed", "normal", "seed type (normal, threaded-cve, cve, test)")
 	flagGen          = flag.Bool("gen", true, "generate/mutate inputs")
 	flagCorpus       = flag.Bool("load-corpus", true, "load corpus")
-	flagDump         = flag.Bool("dump-inputs", false, "dumping all inputs into workdir/inputs")
 	flagNewKernel    = flag.Bool("new-kernel", false, "set true if using a new kernel version")
 	flagDumpCoverage = flag.String("dump-coverage", "", "for experiments. dump both coverages periodically")
 )
@@ -476,7 +474,7 @@ func (mgr *Manager) vmLoop() {
 
 func (mgr *Manager) seedDir() (dir string) {
 	dir = filepath.Join(mgr.cfg.Syzkaller, "sys", mgr.cfg.TargetOS, "test")
-	if mgr.seedType == "normal" || *flagDump {
+	if mgr.seedType == "normal" {
 		// We don't want to dump seeds for testing
 		return
 	}
@@ -552,11 +550,6 @@ func (mgr *Manager) preloadCorpus() {
 			}
 			mgr.seeds = append(mgr.seeds, data)
 		}
-	}
-
-	if *flagDump {
-		mgr.dumpInputs()
-		os.Exit(0)
 	}
 }
 
@@ -645,19 +638,6 @@ func (mgr *Manager) loadProg(data []byte, minimized, smashed, enableThreaded boo
 		Smashed:   smashed,
 	})
 	return true
-}
-
-func (mgr *Manager) dumpInputs() {
-	inputDir := filepath.Join(mgr.cfg.Workdir, "inputs")
-	osutil.MkdirAll(inputDir)
-	i := 0
-	for _, rec := range mgr.corpusDB.Records {
-		fn := filepath.Join(inputDir, strconv.Itoa(i))
-		if err := osutil.WriteFile(fn, rec.Val); err != nil {
-			log.Fatalf("failed to write input to %v\n%v", fn, rec.Val)
-		}
-		i++
-	}
 }
 
 func checkProgram(target *prog.Target, enabled map[*prog.Syscall]bool, enableThreaded bool, data []byte) (bad, disabled bool) {
