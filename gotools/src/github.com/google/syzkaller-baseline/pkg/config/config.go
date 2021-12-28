@@ -10,7 +10,7 @@ import (
 	"io/ioutil"
 	"regexp"
 
-	"github.com/google/syzkaller/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
 )
 
 func LoadFile(filename string, cfg interface{}) error {

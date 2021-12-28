@@ -11,8 +11,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 type fuchsia struct{}

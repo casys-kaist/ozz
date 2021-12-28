@@ -10,7 +10,7 @@ package parser
 import (
 	"encoding/hex"
 	"fmt"
-	"github.com/google/syzkaller/pkg/log"
+	"github.com/google/syzkaller-baseline/pkg/log"
 	"strconv"
 	"strings"
 )

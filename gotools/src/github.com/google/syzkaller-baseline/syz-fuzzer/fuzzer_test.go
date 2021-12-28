@@ -8,10 +8,10 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/google/syzkaller/pkg/hash"
-	"github.com/google/syzkaller/pkg/signal"
-	"github.com/google/syzkaller/prog"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/hash"
+	"github.com/google/syzkaller-baseline/pkg/signal"
+	"github.com/google/syzkaller-baseline/prog"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 type InputTest struct {

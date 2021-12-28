@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/syzkaller/pkg/debugtracer"
-	"github.com/google/syzkaller/pkg/hash"
-	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/debugtracer"
+	"github.com/google/syzkaller-baseline/pkg/hash"
+	"github.com/google/syzkaller-baseline/pkg/log"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
 )
 
 type git struct {

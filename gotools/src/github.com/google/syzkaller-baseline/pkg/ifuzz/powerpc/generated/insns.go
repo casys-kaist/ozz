@@ -5,7 +5,7 @@
 
 package generated
 
-import "github.com/google/syzkaller/pkg/ifuzz/powerpc"
+import "github.com/google/syzkaller-baseline/pkg/ifuzz/powerpc"
 
 func init() {
 	powerpc.Register(insns)

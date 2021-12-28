@@ -10,13 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/syzkaller/pkg/cover"
-	"github.com/google/syzkaller/pkg/host"
-	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/pkg/mgrconfig"
-	"github.com/google/syzkaller/pkg/rpctype"
-	"github.com/google/syzkaller/pkg/signal"
-	"github.com/google/syzkaller/prog"
+	"github.com/google/syzkaller-baseline/pkg/cover"
+	"github.com/google/syzkaller-baseline/pkg/host"
+	"github.com/google/syzkaller-baseline/pkg/log"
+	"github.com/google/syzkaller-baseline/pkg/mgrconfig"
+	"github.com/google/syzkaller-baseline/pkg/rpctype"
+	"github.com/google/syzkaller-baseline/pkg/signal"
+	"github.com/google/syzkaller-baseline/prog"
 )
 
 type RPCServer struct {

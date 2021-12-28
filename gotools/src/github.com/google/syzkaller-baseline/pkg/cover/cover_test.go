@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/syzkaller/pkg/cover/backend"
+	"github.com/google/syzkaller-baseline/pkg/cover/backend"
 )
 
 func TestMergeDiff(t *testing.T) {

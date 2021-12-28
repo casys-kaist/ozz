@@ -18,13 +18,13 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/google/syzkaller/pkg/db"
-	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/prog"
-	_ "github.com/google/syzkaller/sys"
-	"github.com/google/syzkaller/sys/targets"
-	"github.com/google/syzkaller/tools/syz-trace2syz/proggen"
+	"github.com/google/syzkaller-baseline/pkg/db"
+	"github.com/google/syzkaller-baseline/pkg/log"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/prog"
+	_ "github.com/google/syzkaller-baseline/sys"
+	"github.com/google/syzkaller-baseline/sys/targets"
+	"github.com/google/syzkaller-baseline/tools/syz-trace2syz/proggen"
 )
 
 var (

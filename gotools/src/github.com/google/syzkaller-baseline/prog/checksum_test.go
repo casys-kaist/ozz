@@ -6,8 +6,8 @@ package prog_test
 import (
 	"testing"
 
-	. "github.com/google/syzkaller/prog"
-	_ "github.com/google/syzkaller/sys"
+	. "github.com/google/syzkaller-baseline/prog"
+	_ "github.com/google/syzkaller-baseline/sys"
 )
 
 func TestChecksumCalcRandom(t *testing.T) {

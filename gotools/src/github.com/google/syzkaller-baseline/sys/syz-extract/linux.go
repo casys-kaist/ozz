@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/syzkaller/pkg/build"
-	"github.com/google/syzkaller/pkg/compiler"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/build"
+	"github.com/google/syzkaller-baseline/pkg/compiler"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 type linux struct{}
@@ -66,7 +66,7 @@ func (*linux) prepareArch(arch *Arch) error {
 		"asm/prctl.h": "",
 		"asm/mce.h":   "",
 	} {
-		fullPath := filepath.Join(arch.buildDir, "syzkaller", hdr)
+		fullPath := filepath.Join(arch.buildDir, "syzkaller-baseline", hdr)
 		if err := osutil.MkdirAll(filepath.Dir(fullPath)); err != nil {
 			return err
 		}
@@ -145,7 +145,7 @@ func (*linux) processFile(arch *Arch, info *compiler.ConstInfo) (map[string]uint
 		"-I" + buildDir + "/include/generated/uapi",
 		"-I" + sourceDir,
 		"-I" + sourceDir + "/include/linux",
-		"-I" + buildDir + "/syzkaller",
+		"-I" + buildDir + "/syzkaller-baseline",
 		"-include", sourceDir + "/include/linux/kconfig.h",
 	}
 	args = append(args, arch.target.CFlags...)

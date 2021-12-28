@@ -12,13 +12,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/google/syzkaller/dashboard/dashapi"
-	"github.com/google/syzkaller/pkg/instance"
-	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/vcs"
-	"github.com/google/syzkaller/prog"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/dashboard/dashapi"
+	"github.com/google/syzkaller-baseline/pkg/instance"
+	"github.com/google/syzkaller-baseline/pkg/log"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/vcs"
+	"github.com/google/syzkaller-baseline/prog"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 const (

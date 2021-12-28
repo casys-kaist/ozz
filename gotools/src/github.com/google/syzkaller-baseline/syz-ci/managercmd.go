@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/log"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
 )
 
 // ManagerCmd encapsulates a single instance of syz-manager process.

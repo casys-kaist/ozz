@@ -15,8 +15,8 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/google/syzkaller/pkg/compiler"
-	"github.com/google/syzkaller/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/compiler"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
 )
 
 type extractParams struct {

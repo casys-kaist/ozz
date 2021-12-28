@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/google/syzkaller/dashboard/dashapi"
+	"github.com/google/syzkaller-baseline/dashboard/dashapi"
 	"google.golang.org/appengine/user"
 )
 

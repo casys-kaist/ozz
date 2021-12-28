@@ -8,7 +8,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/google/syzkaller/prog"
+	"github.com/google/syzkaller-baseline/prog"
 )
 
 func isSupported(c *prog.Syscall, target *prog.Target, sandbox string) (bool, string) {

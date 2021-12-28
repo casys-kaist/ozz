@@ -6,9 +6,9 @@ package openbsd_test
 import (
 	"testing"
 
-	"github.com/google/syzkaller/prog"
-	_ "github.com/google/syzkaller/sys/openbsd/gen"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/prog"
+	_ "github.com/google/syzkaller-baseline/sys/openbsd/gen"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func TestNeutralize(t *testing.T) {

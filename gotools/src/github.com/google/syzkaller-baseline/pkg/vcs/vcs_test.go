@@ -105,17 +105,17 @@ func TestCommitLink(t *testing.T) {
 		{
 			"https://github.com/google/syzkaller",
 			"76dd003f1b102b791d8b342a1f92a6486ff56a1e",
-			"https://github.com/google/syzkaller/commit/76dd003f1b102b791d8b342a1f92a6486ff56a1e",
+			"https://github.com/google/syzkaller-baseline/commit/76dd003f1b102b791d8b342a1f92a6486ff56a1e",
 		},
 		{
 			"https://github.com/google/syzkaller",
 			"master",
-			"https://github.com/google/syzkaller/commit/master",
+			"https://github.com/google/syzkaller-baseline/commit/master",
 		},
 		{
 			"https://github.com/google/syzkaller.git",
 			"76dd003f1b",
-			"https://github.com/google/syzkaller/commit/76dd003f1b",
+			"https://github.com/google/syzkaller-baseline/commit/76dd003f1b",
 		},
 		{
 			"https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git",

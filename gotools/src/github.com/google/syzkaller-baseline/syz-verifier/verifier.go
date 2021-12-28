@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"syscall"
 
-	"github.com/google/syzkaller/pkg/ipc"
-	"github.com/google/syzkaller/prog"
+	"github.com/google/syzkaller-baseline/pkg/ipc"
+	"github.com/google/syzkaller-baseline/prog"
 )
 
 // Result stores the results of executing a program.

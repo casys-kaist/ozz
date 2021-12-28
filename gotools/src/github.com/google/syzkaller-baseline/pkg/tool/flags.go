@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/syzkaller/pkg/log"
+	"github.com/google/syzkaller-baseline/pkg/log"
 )
 
 type Flag struct {

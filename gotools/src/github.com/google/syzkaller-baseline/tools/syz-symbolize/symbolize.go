@@ -11,11 +11,11 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/google/syzkaller/pkg/hash"
-	"github.com/google/syzkaller/pkg/mgrconfig"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/report"
-	"github.com/google/syzkaller/pkg/vcs"
+	"github.com/google/syzkaller-baseline/pkg/hash"
+	"github.com/google/syzkaller-baseline/pkg/mgrconfig"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/report"
+	"github.com/google/syzkaller-baseline/pkg/vcs"
 )
 
 var (

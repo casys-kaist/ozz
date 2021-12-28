@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/google/syzkaller/pkg/kconfig"
-	"github.com/google/syzkaller/pkg/vcs"
+	"github.com/google/syzkaller-baseline/pkg/kconfig"
+	"github.com/google/syzkaller-baseline/pkg/vcs"
 	"gopkg.in/yaml.v3"
 )
 

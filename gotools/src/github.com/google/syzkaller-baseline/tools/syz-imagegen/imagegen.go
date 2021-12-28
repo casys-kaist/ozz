@@ -27,11 +27,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/tool"
-	"github.com/google/syzkaller/prog"
-	_ "github.com/google/syzkaller/sys"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/tool"
+	"github.com/google/syzkaller-baseline/prog"
+	_ "github.com/google/syzkaller-baseline/sys"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 // FileSystem represents one file system.

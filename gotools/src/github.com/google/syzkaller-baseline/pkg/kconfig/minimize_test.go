@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/google/syzkaller/pkg/debugtracer"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/debugtracer"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func TestMinimize(t *testing.T) {

@@ -6,8 +6,8 @@ package backend
 import (
 	"fmt"
 
-	"github.com/google/syzkaller/pkg/host"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/host"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 type Impl struct {

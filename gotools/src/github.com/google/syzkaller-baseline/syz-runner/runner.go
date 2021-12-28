@@ -8,11 +8,11 @@ import (
 	"log"
 	"runtime"
 
-	"github.com/google/syzkaller/pkg/host"
-	"github.com/google/syzkaller/pkg/ipc"
-	"github.com/google/syzkaller/pkg/ipc/ipcconfig"
-	"github.com/google/syzkaller/pkg/rpctype"
-	"github.com/google/syzkaller/prog"
+	"github.com/google/syzkaller-baseline/pkg/host"
+	"github.com/google/syzkaller-baseline/pkg/ipc"
+	"github.com/google/syzkaller-baseline/pkg/ipc/ipcconfig"
+	"github.com/google/syzkaller-baseline/pkg/rpctype"
+	"github.com/google/syzkaller-baseline/prog"
 )
 
 // Runner is responsible of running programs sent by the host via RPC and

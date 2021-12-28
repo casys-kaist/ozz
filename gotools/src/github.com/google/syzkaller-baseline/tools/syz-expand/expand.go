@@ -12,8 +12,8 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/google/syzkaller/prog"
-	_ "github.com/google/syzkaller/sys"
+	"github.com/google/syzkaller-baseline/prog"
+	_ "github.com/google/syzkaller-baseline/sys"
 )
 
 var (

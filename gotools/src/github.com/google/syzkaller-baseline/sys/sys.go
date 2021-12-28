@@ -5,14 +5,18 @@ package sys
 
 import (
 	// Import all targets, so that users only need to import sys.
-	_ "github.com/google/syzkaller/sys/akaros/gen"
-	_ "github.com/google/syzkaller/sys/darwin/gen"
-	_ "github.com/google/syzkaller/sys/freebsd/gen"
-	_ "github.com/google/syzkaller/sys/fuchsia/gen"
-	_ "github.com/google/syzkaller/sys/linux/gen"
-	_ "github.com/google/syzkaller/sys/netbsd/gen"
-	_ "github.com/google/syzkaller/sys/openbsd/gen"
-	_ "github.com/google/syzkaller/sys/test/gen"
-	_ "github.com/google/syzkaller/sys/trusty/gen"
-	_ "github.com/google/syzkaller/sys/windows/gen"
+	_ "github.com/google/syzkaller-baseline/sys/linux/gen"
+	// DR: importing other OSes somehow breaks compiling. We meed
+	// linux only in this project, so ignore all others.
+	//
+	// "github.com/google/syzkaller/sys/akaros/gen" _
+	// "github.com/google/syzkaller/sys/darwin/gen" _
+	// "github.com/google/syzkaller/sys/freebsd/gen" _
+	// "github.com/google/syzkaller/sys/fuchsia/gen" _
+	// "github.com/google/syzkaller/sys/linux/gen" _
+	// "github.com/google/syzkaller/sys/netbsd/gen" _
+	// "github.com/google/syzkaller/sys/openbsd/gen" _
+	// "github.com/google/syzkaller/sys/test/gen" _
+	// "github.com/google/syzkaller/sys/trusty/gen" _
+	// "github.com/google/syzkaller/sys/windows/gen"
 )

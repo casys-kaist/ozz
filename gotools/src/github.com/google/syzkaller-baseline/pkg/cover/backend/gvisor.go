@@ -10,9 +10,9 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/google/syzkaller/pkg/host"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/host"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func makeGvisor(target *targets.Target, objDir, srcDir, buildDir string, modules []host.KernelModule) (*Impl, error) {

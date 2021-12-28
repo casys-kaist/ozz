@@ -13,10 +13,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/syzkaller/pkg/ifuzz/iset"
-	"github.com/google/syzkaller/pkg/ifuzz/x86"
-	"github.com/google/syzkaller/pkg/serializer"
-	"github.com/google/syzkaller/pkg/tool"
+	"github.com/google/syzkaller-baseline/pkg/ifuzz/iset"
+	"github.com/google/syzkaller-baseline/pkg/ifuzz/x86"
+	"github.com/google/syzkaller-baseline/pkg/serializer"
+	"github.com/google/syzkaller-baseline/pkg/tool"
 )
 
 // nolint: gocyclo, gocognit, funlen
@@ -172,7 +172,7 @@ nextInsn:
 
 package x86
 
-import "github.com/google/syzkaller/pkg/ifuzz/x86"
+import "github.com/google/syzkaller-baseline/pkg/ifuzz/x86"
 
 func init() {
 	x86.Register(insns_x86)

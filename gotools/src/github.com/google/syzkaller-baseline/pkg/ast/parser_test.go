@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func TestParseAll(t *testing.T) {

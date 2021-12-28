@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/syzkaller/dashboard/dashapi"
-	"github.com/google/syzkaller/pkg/email"
-	"github.com/google/syzkaller/pkg/html"
+	"github.com/google/syzkaller-baseline/dashboard/dashapi"
+	"github.com/google/syzkaller-baseline/pkg/email"
+	"github.com/google/syzkaller-baseline/pkg/html"
 	"golang.org/x/net/context"
 	"google.golang.org/appengine"
 	"google.golang.org/appengine/log"

@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/google/syzkaller/pkg/config"
-	. "github.com/google/syzkaller/pkg/mgrconfig"
-	"github.com/google/syzkaller/vm/gce"
-	"github.com/google/syzkaller/vm/qemu"
+	"github.com/google/syzkaller-baseline/pkg/config"
+	. "github.com/google/syzkaller-baseline/pkg/mgrconfig"
+	"github.com/google/syzkaller-baseline/vm/gce"
+	"github.com/google/syzkaller-baseline/vm/qemu"
 )
 
 func TestCanned(t *testing.T) {

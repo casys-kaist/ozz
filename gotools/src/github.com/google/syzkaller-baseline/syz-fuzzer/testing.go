@@ -9,14 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/syzkaller/pkg/csource"
-	"github.com/google/syzkaller/pkg/host"
-	"github.com/google/syzkaller/pkg/ipc"
-	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/rpctype"
-	"github.com/google/syzkaller/pkg/runtest"
-	"github.com/google/syzkaller/prog"
+	"github.com/google/syzkaller-baseline/pkg/csource"
+	"github.com/google/syzkaller-baseline/pkg/host"
+	"github.com/google/syzkaller-baseline/pkg/ipc"
+	"github.com/google/syzkaller-baseline/pkg/log"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/rpctype"
+	"github.com/google/syzkaller-baseline/pkg/runtest"
+	"github.com/google/syzkaller-baseline/prog"
 )
 
 type checkArgs struct {

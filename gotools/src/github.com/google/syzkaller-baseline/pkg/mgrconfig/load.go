@@ -12,11 +12,11 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/google/syzkaller/pkg/config"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/prog"
-	_ "github.com/google/syzkaller/sys" // most mgrconfig users want targets too
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/config"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/prog"
+	_ "github.com/google/syzkaller-baseline/sys" // most mgrconfig users want targets too
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 // Derived config values that are handy to keep with the config, filled after reading user config.

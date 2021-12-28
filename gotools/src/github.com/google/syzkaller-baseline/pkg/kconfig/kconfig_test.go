@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func TestParseKConfig(t *testing.T) {

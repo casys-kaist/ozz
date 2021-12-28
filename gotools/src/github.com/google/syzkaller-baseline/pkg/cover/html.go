@@ -19,9 +19,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/syzkaller/pkg/cover/backend"
-	"github.com/google/syzkaller/pkg/mgrconfig"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/cover/backend"
+	"github.com/google/syzkaller-baseline/pkg/mgrconfig"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func fixUpPCs(target string, progs []Prog, coverFilter map[uint32]uint32) []Prog {
@@ -118,7 +118,7 @@ func (rg *ReportGenerator) DoHTML(w io.Writer, progs []Prog, coverFilter map[uin
 			// We ignore individual errors of opening/locating source files
 			// because there is a number of reasons when/why it can happen.
 			// We fail only if we can't open/locate any single source file.
-			// syz-ci can mess state of source files (https://github.com/google/syzkaller/issues/1770),
+			// syz-ci can mess state of source files (https://github.com/google/syzkaller-baseline/issues/1770),
 			// or bazel lies about location of auto-generated files,
 			// or a used can update source files with git pull/checkout.
 			contents = html.EscapeString(err.Error())

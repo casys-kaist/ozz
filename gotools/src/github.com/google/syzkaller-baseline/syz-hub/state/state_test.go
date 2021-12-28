@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/syzkaller/pkg/rpctype"
+	"github.com/google/syzkaller-baseline/pkg/rpctype"
 )
 
 type TestState struct {

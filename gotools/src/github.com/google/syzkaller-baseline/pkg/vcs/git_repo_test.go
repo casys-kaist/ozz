@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/syzkaller/pkg/debugtracer"
+	"github.com/google/syzkaller-baseline/pkg/debugtracer"
 )
 
 func init() {

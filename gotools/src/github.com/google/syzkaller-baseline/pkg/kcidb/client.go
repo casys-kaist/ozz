@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/pubsub"
-	"github.com/google/syzkaller/dashboard/dashapi"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/dashboard/dashapi"
+	"github.com/google/syzkaller-baseline/sys/targets"
 	"google.golang.org/api/option"
 )
 

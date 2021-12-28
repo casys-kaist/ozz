@@ -31,8 +31,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/syzkaller/prog"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/prog"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 // Write generates C source for program p based on the provided options opt.

@@ -13,11 +13,11 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/google/syzkaller/pkg/auth"
-	"github.com/google/syzkaller/pkg/db"
-	"github.com/google/syzkaller/pkg/rpctype"
-	"github.com/google/syzkaller/prog"
-	_ "github.com/google/syzkaller/sys"
+	"github.com/google/syzkaller-baseline/pkg/auth"
+	"github.com/google/syzkaller-baseline/pkg/db"
+	"github.com/google/syzkaller-baseline/pkg/rpctype"
+	"github.com/google/syzkaller-baseline/prog"
+	_ "github.com/google/syzkaller-baseline/sys"
 )
 
 func main() {

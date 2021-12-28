@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/google/syzkaller/pkg/symbolizer"
+	"github.com/google/syzkaller-baseline/pkg/symbolizer"
 )
 
 type symbolizeLineTest struct {

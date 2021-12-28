@@ -13,17 +13,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/syzkaller/dashboard/dashapi"
-	"github.com/google/syzkaller/pkg/bisect"
-	"github.com/google/syzkaller/pkg/build"
-	"github.com/google/syzkaller/pkg/debugtracer"
-	"github.com/google/syzkaller/pkg/instance"
-	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/pkg/mgrconfig"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/report"
-	"github.com/google/syzkaller/pkg/vcs"
-	"github.com/google/syzkaller/vm"
+	"github.com/google/syzkaller-baseline/dashboard/dashapi"
+	"github.com/google/syzkaller-baseline/pkg/bisect"
+	"github.com/google/syzkaller-baseline/pkg/build"
+	"github.com/google/syzkaller-baseline/pkg/debugtracer"
+	"github.com/google/syzkaller-baseline/pkg/instance"
+	"github.com/google/syzkaller-baseline/pkg/log"
+	"github.com/google/syzkaller-baseline/pkg/mgrconfig"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/report"
+	"github.com/google/syzkaller-baseline/pkg/vcs"
+	"github.com/google/syzkaller-baseline/vm"
 )
 
 type JobProcessor struct {

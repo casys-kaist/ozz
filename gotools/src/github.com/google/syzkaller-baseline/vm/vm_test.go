@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/syzkaller/pkg/mgrconfig"
-	"github.com/google/syzkaller/pkg/report"
-	"github.com/google/syzkaller/sys/targets"
-	"github.com/google/syzkaller/vm/vmimpl"
+	"github.com/google/syzkaller-baseline/pkg/mgrconfig"
+	"github.com/google/syzkaller-baseline/pkg/report"
+	"github.com/google/syzkaller-baseline/sys/targets"
+	"github.com/google/syzkaller-baseline/vm/vmimpl"
 )
 
 type testPool struct {

@@ -6,9 +6,9 @@ package ifuzz
 import (
 	"math/rand"
 
-	"github.com/google/syzkaller/pkg/ifuzz/iset"
-	_ "github.com/google/syzkaller/pkg/ifuzz/powerpc/generated" // pull in generated instruction descriptions
-	_ "github.com/google/syzkaller/pkg/ifuzz/x86/generated"     // pull in generated instruction descriptions
+	"github.com/google/syzkaller-baseline/pkg/ifuzz/iset"
+	_ "github.com/google/syzkaller-baseline/pkg/ifuzz/powerpc/generated" // pull in generated instruction descriptions
+	_ "github.com/google/syzkaller-baseline/pkg/ifuzz/x86/generated"     // pull in generated instruction descriptions
 )
 
 type (

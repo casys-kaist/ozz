@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/syzkaller/dashboard/dashapi"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/dashboard/dashapi"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func TestReportBug(t *testing.T) {

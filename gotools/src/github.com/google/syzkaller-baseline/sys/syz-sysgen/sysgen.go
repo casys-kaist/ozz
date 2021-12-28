@@ -17,14 +17,14 @@ import (
 	"sync"
 	"text/template"
 
-	"github.com/google/syzkaller/pkg/ast"
-	"github.com/google/syzkaller/pkg/compiler"
-	"github.com/google/syzkaller/pkg/hash"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/serializer"
-	"github.com/google/syzkaller/pkg/tool"
-	"github.com/google/syzkaller/prog"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/ast"
+	"github.com/google/syzkaller-baseline/pkg/compiler"
+	"github.com/google/syzkaller-baseline/pkg/hash"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/serializer"
+	"github.com/google/syzkaller-baseline/pkg/tool"
+	"github.com/google/syzkaller-baseline/prog"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 type SyscallData struct {
@@ -194,8 +194,8 @@ func generate(target *targets.Target, prg *compiler.Prog, consts map[string]uint
 	fmt.Fprintf(out, "// +build !codeanalysis\n")
 	fmt.Fprintf(out, "// +build !syz_target %v\n\n", tag)
 	fmt.Fprintf(out, "package gen\n\n")
-	fmt.Fprintf(out, "import . \"github.com/google/syzkaller/prog\"\n")
-	fmt.Fprintf(out, "import . \"github.com/google/syzkaller/sys/%v\"\n\n", target.OS)
+	fmt.Fprintf(out, "import . \"github.com/google/syzkaller-baseline/prog\"\n")
+	fmt.Fprintf(out, "import . \"github.com/google/syzkaller-baseline/sys/%v\"\n\n", target.OS)
 
 	fmt.Fprintf(out, "func init() {\n")
 	fmt.Fprintf(out, "\tRegisterTarget(&Target{"+

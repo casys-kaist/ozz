@@ -27,10 +27,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/syzkaller/pkg/cover"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/tool"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/cover"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/tool"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func main() {

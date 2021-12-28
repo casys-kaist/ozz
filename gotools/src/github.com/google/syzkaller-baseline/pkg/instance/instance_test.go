@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/syzkaller/pkg/tool"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/tool"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func TestFuzzerCmd(t *testing.T) {

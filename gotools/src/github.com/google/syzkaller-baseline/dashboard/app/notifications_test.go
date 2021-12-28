@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/syzkaller/dashboard/dashapi"
+	"github.com/google/syzkaller-baseline/dashboard/dashapi"
 )
 
 func TestEmailNotifUpstreamEmbargo(t *testing.T) {

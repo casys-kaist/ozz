@@ -18,11 +18,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/syzkaller/pkg/kconfig"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/tool"
-	"github.com/google/syzkaller/pkg/vcs"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/kconfig"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/tool"
+	"github.com/google/syzkaller-baseline/pkg/vcs"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 const (

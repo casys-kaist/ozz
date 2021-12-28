@@ -5,7 +5,7 @@
 
 package generated
 
-import "github.com/google/syzkaller/pkg/ifuzz/x86"
+import "github.com/google/syzkaller-baseline/pkg/ifuzz/x86"
 
 func init() {
 	x86.Register(insns)

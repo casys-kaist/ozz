@@ -8,9 +8,9 @@ import (
 	"flag"
 	"io/ioutil"
 
-	"github.com/google/syzkaller/dashboard/dashapi"
-	"github.com/google/syzkaller/pkg/kcidb"
-	"github.com/google/syzkaller/pkg/tool"
+	"github.com/google/syzkaller-baseline/dashboard/dashapi"
+	"github.com/google/syzkaller-baseline/pkg/kcidb"
+	"github.com/google/syzkaller-baseline/pkg/tool"
 )
 
 func main() {

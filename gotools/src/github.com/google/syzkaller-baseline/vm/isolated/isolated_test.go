@@ -6,7 +6,7 @@ package isolated
 import (
 	"testing"
 
-	"github.com/google/syzkaller/vm/vmimpl"
+	"github.com/google/syzkaller-baseline/vm/vmimpl"
 )
 
 func TestEscapeDoubleQuotes(t *testing.T) {

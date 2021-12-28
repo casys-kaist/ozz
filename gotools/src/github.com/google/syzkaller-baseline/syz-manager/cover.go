@@ -6,10 +6,10 @@ package main
 import (
 	"sync"
 
-	"github.com/google/syzkaller/pkg/cover"
-	"github.com/google/syzkaller/pkg/host"
-	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/pkg/mgrconfig"
+	"github.com/google/syzkaller-baseline/pkg/cover"
+	"github.com/google/syzkaller-baseline/pkg/host"
+	"github.com/google/syzkaller-baseline/pkg/log"
+	"github.com/google/syzkaller-baseline/pkg/mgrconfig"
 )
 
 var getReportGenerator = func() func(cfg *mgrconfig.Config,

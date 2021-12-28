@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/syzkaller/pkg/ast"
+	"github.com/google/syzkaller-baseline/pkg/ast"
 )
 
 // ConstFile serializes/deserializes .const files.

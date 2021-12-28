@@ -10,8 +10,8 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/google/syzkaller/pkg/build"
-	"github.com/google/syzkaller/pkg/tool"
+	"github.com/google/syzkaller-baseline/pkg/build"
+	"github.com/google/syzkaller-baseline/pkg/tool"
 )
 
 var (

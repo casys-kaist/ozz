@@ -6,8 +6,8 @@ package main
 import (
 	"path/filepath"
 
-	"github.com/google/syzkaller/pkg/compiler"
-	"github.com/google/syzkaller/sys/fuchsia/layout"
+	"github.com/google/syzkaller-baseline/pkg/compiler"
+	"github.com/google/syzkaller-baseline/sys/fuchsia/layout"
 )
 
 type fuchsia struct{}

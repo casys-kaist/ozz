@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/syzkaller/dashboard/dashapi"
-	"github.com/google/syzkaller/pkg/email"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/dashboard/dashapi"
+	"github.com/google/syzkaller-baseline/pkg/email"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 // nolint: funlen

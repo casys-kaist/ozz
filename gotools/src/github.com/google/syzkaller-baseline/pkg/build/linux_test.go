@@ -14,7 +14,7 @@ import (
 	"testing"
 	"text/template"
 
-	"github.com/google/syzkaller/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
 )
 
 func TestElfBinarySignature(t *testing.T) {

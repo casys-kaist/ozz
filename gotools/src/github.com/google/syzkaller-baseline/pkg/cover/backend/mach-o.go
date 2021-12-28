@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/google/syzkaller/pkg/host"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/host"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func makeMachO(target *targets.Target, objDir, srcDir, buildDir string,

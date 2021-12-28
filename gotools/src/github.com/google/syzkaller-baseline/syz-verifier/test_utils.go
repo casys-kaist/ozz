@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/syzkaller/pkg/ipc"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/prog"
+	"github.com/google/syzkaller-baseline/pkg/ipc"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/prog"
 )
 
 func createTestServer(t *testing.T) *RPCServer {

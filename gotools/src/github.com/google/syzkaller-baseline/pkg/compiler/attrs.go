@@ -6,8 +6,8 @@ package compiler
 import (
 	"reflect"
 
-	"github.com/google/syzkaller/pkg/ast"
-	"github.com/google/syzkaller/prog"
+	"github.com/google/syzkaller-baseline/pkg/ast"
+	"github.com/google/syzkaller-baseline/prog"
 )
 
 type attrDesc struct {

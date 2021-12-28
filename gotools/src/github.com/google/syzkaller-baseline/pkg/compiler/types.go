@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/google/syzkaller/pkg/ast"
-	"github.com/google/syzkaller/prog"
+	"github.com/google/syzkaller-baseline/pkg/ast"
+	"github.com/google/syzkaller-baseline/prog"
 )
 
 // typeDesc is arg/field type descriptor.

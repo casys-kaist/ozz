@@ -24,10 +24,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/syzkaller/pkg/html"
-	"github.com/google/syzkaller/pkg/kconfig"
-	"github.com/google/syzkaller/pkg/mgrconfig"
-	"github.com/google/syzkaller/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/html"
+	"github.com/google/syzkaller-baseline/pkg/kconfig"
+	"github.com/google/syzkaller-baseline/pkg/mgrconfig"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
 )
 
 var (

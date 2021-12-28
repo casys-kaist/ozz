@@ -19,14 +19,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/syzkaller/pkg/instance"
-	"github.com/google/syzkaller/pkg/mgrconfig"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/report"
-	"github.com/google/syzkaller/pkg/rpctype"
-	"github.com/google/syzkaller/pkg/tool"
-	"github.com/google/syzkaller/prog"
-	"github.com/google/syzkaller/vm"
+	"github.com/google/syzkaller-baseline/pkg/instance"
+	"github.com/google/syzkaller-baseline/pkg/mgrconfig"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/report"
+	"github.com/google/syzkaller-baseline/pkg/rpctype"
+	"github.com/google/syzkaller-baseline/pkg/tool"
+	"github.com/google/syzkaller-baseline/prog"
+	"github.com/google/syzkaller-baseline/vm"
 )
 
 const (

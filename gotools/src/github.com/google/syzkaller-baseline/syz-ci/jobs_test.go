@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/google/syzkaller/pkg/instance"
-	"github.com/google/syzkaller/pkg/report"
+	"github.com/google/syzkaller-baseline/pkg/instance"
+	"github.com/google/syzkaller-baseline/pkg/report"
 )
 
 func TestAggregateTestResults(t *testing.T) {

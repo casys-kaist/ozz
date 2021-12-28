@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/google/syzkaller/pkg/host"
-	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/host"
+	"github.com/google/syzkaller-baseline/pkg/log"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func discoverModules(target *targets.Target, objDir string, moduleObj []string, hostModules []host.KernelModule) (

@@ -17,10 +17,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/syzkaller/pkg/host"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/symbolizer"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/host"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/symbolizer"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 type containerFns struct {

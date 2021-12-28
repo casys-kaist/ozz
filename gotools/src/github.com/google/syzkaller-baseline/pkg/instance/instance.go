@@ -15,16 +15,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/syzkaller/pkg/build"
-	"github.com/google/syzkaller/pkg/csource"
-	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/pkg/mgrconfig"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/report"
-	"github.com/google/syzkaller/pkg/tool"
-	"github.com/google/syzkaller/pkg/vcs"
-	"github.com/google/syzkaller/sys/targets"
-	"github.com/google/syzkaller/vm"
+	"github.com/google/syzkaller-baseline/pkg/build"
+	"github.com/google/syzkaller-baseline/pkg/csource"
+	"github.com/google/syzkaller-baseline/pkg/log"
+	"github.com/google/syzkaller-baseline/pkg/mgrconfig"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/report"
+	"github.com/google/syzkaller-baseline/pkg/tool"
+	"github.com/google/syzkaller-baseline/pkg/vcs"
+	"github.com/google/syzkaller-baseline/sys/targets"
+	"github.com/google/syzkaller-baseline/vm"
 )
 
 type Env interface {

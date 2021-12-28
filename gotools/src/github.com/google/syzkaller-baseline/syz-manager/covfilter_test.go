@@ -6,7 +6,7 @@ package main
 import (
 	"testing"
 
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func TestCreateBitmap(t *testing.T) {

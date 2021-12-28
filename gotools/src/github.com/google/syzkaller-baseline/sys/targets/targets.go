@@ -652,9 +652,9 @@ func initTarget(target *Target, OS, arch string) {
 	}
 	if OS == Linux && arch == runtime.GOARCH {
 		// Don't use cross-compiler for native compilation, there are cases when this does not work:
-		// https://github.com/google/syzkaller/pull/619
-		// https://github.com/google/syzkaller/issues/387
-		// https://github.com/google/syzkaller/commit/06db3cec94c54e1cf720cdd5db72761514569d56
+		// https://github.com/google/syzkaller-baseline/pull/619
+		// https://github.com/google/syzkaller-baseline/issues/387
+		// https://github.com/google/syzkaller-baseline/commit/06db3cec94c54e1cf720cdd5db72761514569d56
 		target.Triple = ""
 	}
 	if target.CCompiler == "" {

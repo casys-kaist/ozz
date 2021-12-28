@@ -13,7 +13,7 @@ import (
 	"os"
 	"regexp"
 
-	"github.com/google/syzkaller/pkg/tool"
+	"github.com/google/syzkaller-baseline/pkg/tool"
 )
 
 func main() {

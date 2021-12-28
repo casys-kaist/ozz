@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/syzkaller/dashboard/dashapi"
-	"github.com/google/syzkaller/pkg/auth"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/dashboard/dashapi"
+	"github.com/google/syzkaller-baseline/pkg/auth"
+	"github.com/google/syzkaller-baseline/sys/targets"
 	"google.golang.org/appengine/user"
 )
 

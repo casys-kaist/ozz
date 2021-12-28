@@ -1,4 +1,4 @@
-module github.com/google/syzkaller
+module github.com/google/syzkaller-baseline
 
 go 1.14
 

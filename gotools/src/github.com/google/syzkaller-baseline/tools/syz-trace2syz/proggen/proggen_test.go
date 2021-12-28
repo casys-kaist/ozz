@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/syzkaller/prog"
-	_ "github.com/google/syzkaller/sys"
-	"github.com/google/syzkaller/sys/targets"
-	"github.com/google/syzkaller/tools/syz-trace2syz/parser"
+	"github.com/google/syzkaller-baseline/prog"
+	_ "github.com/google/syzkaller-baseline/sys"
+	"github.com/google/syzkaller-baseline/sys/targets"
+	"github.com/google/syzkaller-baseline/tools/syz-trace2syz/parser"
 )
 
 func TestParse(t *testing.T) {

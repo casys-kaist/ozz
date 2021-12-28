@@ -6,7 +6,7 @@ package backend
 import (
 	"fmt"
 
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func RestorePC(pc, base uint32) uint64 {

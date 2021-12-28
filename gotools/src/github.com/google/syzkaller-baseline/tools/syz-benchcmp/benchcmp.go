@@ -19,8 +19,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/tool"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/tool"
 )
 
 var (

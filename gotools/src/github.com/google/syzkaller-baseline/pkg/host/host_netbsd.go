@@ -4,8 +4,8 @@
 package host
 
 import (
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/prog"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/prog"
 )
 
 func isSupported(c *prog.Syscall, target *prog.Target, sandbox string) (bool, string) {

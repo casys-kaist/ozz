@@ -11,8 +11,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/google/syzkaller/pkg/mgrconfig"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/mgrconfig"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 // Options control various aspects of source generation.

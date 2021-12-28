@@ -11,7 +11,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/google/syzkaller/vm/vmimpl"
+	"github.com/google/syzkaller-baseline/vm/vmimpl"
 )
 
 func main() {

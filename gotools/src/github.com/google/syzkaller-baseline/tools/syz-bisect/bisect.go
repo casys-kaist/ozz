@@ -26,12 +26,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/google/syzkaller/pkg/bisect"
-	"github.com/google/syzkaller/pkg/config"
-	"github.com/google/syzkaller/pkg/debugtracer"
-	"github.com/google/syzkaller/pkg/mgrconfig"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/vcs"
+	"github.com/google/syzkaller-baseline/pkg/bisect"
+	"github.com/google/syzkaller-baseline/pkg/config"
+	"github.com/google/syzkaller-baseline/pkg/debugtracer"
+	"github.com/google/syzkaller-baseline/pkg/mgrconfig"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/vcs"
 )
 
 var (

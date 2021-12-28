@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/syzkaller/pkg/auth"
+	"github.com/google/syzkaller-baseline/pkg/auth"
 )
 
 type Dashboard struct {

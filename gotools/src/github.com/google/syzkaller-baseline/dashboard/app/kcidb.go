@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/syzkaller/pkg/kcidb"
+	"github.com/google/syzkaller-baseline/pkg/kcidb"
 	"golang.org/x/net/context"
 	"google.golang.org/appengine"
 	db "google.golang.org/appengine/datastore"

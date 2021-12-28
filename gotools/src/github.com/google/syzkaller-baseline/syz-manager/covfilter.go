@@ -12,9 +12,9 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/google/syzkaller/pkg/cover/backend"
-	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/cover/backend"
+	"github.com/google/syzkaller-baseline/pkg/log"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func (mgr *Manager) createCoverageFilter() ([]byte, map[uint32]uint32, error) {

@@ -11,12 +11,12 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/google/syzkaller/pkg/csource"
-	"github.com/google/syzkaller/pkg/host"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/prog"
-	"github.com/google/syzkaller/sys/targets"
-	_ "github.com/google/syzkaller/sys/test/gen" // pull in the test target
+	"github.com/google/syzkaller-baseline/pkg/csource"
+	"github.com/google/syzkaller-baseline/pkg/host"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/prog"
+	"github.com/google/syzkaller-baseline/sys/targets"
+	_ "github.com/google/syzkaller-baseline/sys/test/gen" // pull in the test target
 )
 
 // Can be used as:

@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/syzkaller/pkg/config"
-	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/report"
-	"github.com/google/syzkaller/vm/vmimpl"
+	"github.com/google/syzkaller-baseline/pkg/config"
+	"github.com/google/syzkaller-baseline/pkg/log"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/report"
+	"github.com/google/syzkaller-baseline/vm/vmimpl"
 )
 
 const pstoreConsoleFile = "/sys/fs/pstore/console-ramoops-0"

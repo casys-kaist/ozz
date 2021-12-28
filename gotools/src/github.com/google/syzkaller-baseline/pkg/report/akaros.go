@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/syzkaller/pkg/symbolizer"
+	"github.com/google/syzkaller-baseline/pkg/symbolizer"
 )
 
 type akaros struct {

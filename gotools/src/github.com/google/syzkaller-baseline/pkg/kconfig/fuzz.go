@@ -4,7 +4,7 @@
 package kconfig
 
 import (
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func FuzzParseKConfig(data []byte) int {

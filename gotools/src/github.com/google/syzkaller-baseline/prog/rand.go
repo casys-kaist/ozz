@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/google/syzkaller/pkg/ifuzz"
+	"github.com/google/syzkaller-baseline/pkg/ifuzz"
 )
 
 const (

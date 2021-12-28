@@ -11,10 +11,10 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/google/syzkaller/dashboard/dashapi"
-	"github.com/google/syzkaller/pkg/auth"
-	"github.com/google/syzkaller/pkg/email"
-	"github.com/google/syzkaller/pkg/vcs"
+	"github.com/google/syzkaller-baseline/dashboard/dashapi"
+	"github.com/google/syzkaller-baseline/pkg/auth"
+	"github.com/google/syzkaller-baseline/pkg/email"
+	"github.com/google/syzkaller-baseline/pkg/vcs"
 )
 
 // There are multiple configurable aspects of the app (namespaces, reporting, API clients, etc).

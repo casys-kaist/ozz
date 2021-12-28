@@ -15,10 +15,10 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/google/syzkaller/pkg/debugtracer"
-	"github.com/google/syzkaller/pkg/kconfig"
-	"github.com/google/syzkaller/pkg/tool"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/debugtracer"
+	"github.com/google/syzkaller-baseline/pkg/kconfig"
+	"github.com/google/syzkaller-baseline/pkg/tool"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func main() {

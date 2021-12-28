@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/report"
-	"github.com/google/syzkaller/pkg/vcs"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/report"
+	"github.com/google/syzkaller-baseline/pkg/vcs"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 // Params is input arguments for the Image function.

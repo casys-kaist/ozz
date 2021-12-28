@@ -6,8 +6,8 @@ package main
 import (
 	"sync"
 
-	"github.com/google/syzkaller/pkg/ipc"
-	"github.com/google/syzkaller/prog"
+	"github.com/google/syzkaller-baseline/pkg/ipc"
+	"github.com/google/syzkaller-baseline/prog"
 )
 
 // WorkQueue holds global non-fuzzing work items (see the Work* structs below).

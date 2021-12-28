@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/google/syzkaller/pkg/ifuzz/iset"
+	"github.com/google/syzkaller-baseline/pkg/ifuzz/iset"
 )
 
 type InsnBits struct {

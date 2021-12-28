@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/syzkaller/prog"
+	"github.com/google/syzkaller-baseline/prog"
 )
 
 const (

@@ -4,8 +4,8 @@
 package test
 
 import (
-	"github.com/google/syzkaller/prog"
-	"github.com/google/syzkaller/sys/targets"
+	"github.com/google/syzkaller-baseline/prog"
+	"github.com/google/syzkaller-baseline/sys/targets"
 )
 
 func InitTarget(target *prog.Target) {

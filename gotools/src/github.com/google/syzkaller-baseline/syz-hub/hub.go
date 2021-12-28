@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/syzkaller/pkg/auth"
-	"github.com/google/syzkaller/pkg/config"
-	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/pkg/rpctype"
-	"github.com/google/syzkaller/syz-hub/state"
+	"github.com/google/syzkaller-baseline/pkg/auth"
+	"github.com/google/syzkaller-baseline/pkg/config"
+	"github.com/google/syzkaller-baseline/pkg/log"
+	"github.com/google/syzkaller-baseline/pkg/rpctype"
+	"github.com/google/syzkaller-baseline/syz-hub/state"
 )
 
 var (

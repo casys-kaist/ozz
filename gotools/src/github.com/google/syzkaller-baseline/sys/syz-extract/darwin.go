@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/google/syzkaller/pkg/compiler"
+	"github.com/google/syzkaller-baseline/pkg/compiler"
 )
 
 type darwin struct{}

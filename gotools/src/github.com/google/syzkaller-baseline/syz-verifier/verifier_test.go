@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/syzkaller/prog"
+	"github.com/google/syzkaller-baseline/prog"
 )
 
 func TestVerify(t *testing.T) {

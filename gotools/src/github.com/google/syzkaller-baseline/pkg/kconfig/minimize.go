@@ -6,8 +6,8 @@ package kconfig
 import (
 	"sort"
 
-	"github.com/google/syzkaller/pkg/debugtracer"
-	"github.com/google/syzkaller/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/debugtracer"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
 )
 
 // Minimize finds an equivalent with respect to the provided predicate, but smaller config.

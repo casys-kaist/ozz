@@ -15,23 +15,23 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/google/syzkaller/pkg/mgrconfig"
-	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/report"
-	"github.com/google/syzkaller/sys/targets"
-	"github.com/google/syzkaller/vm/vmimpl"
+	"github.com/google/syzkaller-baseline/pkg/mgrconfig"
+	"github.com/google/syzkaller-baseline/pkg/osutil"
+	"github.com/google/syzkaller-baseline/pkg/report"
+	"github.com/google/syzkaller-baseline/sys/targets"
+	"github.com/google/syzkaller-baseline/vm/vmimpl"
 
 	// Import all VM implementations, so that users only need to import vm.
-	_ "github.com/google/syzkaller/vm/adb"
-	_ "github.com/google/syzkaller/vm/bhyve"
-	_ "github.com/google/syzkaller/vm/gce"
-	_ "github.com/google/syzkaller/vm/gvisor"
-	_ "github.com/google/syzkaller/vm/isolated"
-	_ "github.com/google/syzkaller/vm/kvm"
-	_ "github.com/google/syzkaller/vm/odroid"
-	_ "github.com/google/syzkaller/vm/qemu"
-	_ "github.com/google/syzkaller/vm/vmm"
-	_ "github.com/google/syzkaller/vm/vmware"
+	_ "github.com/google/syzkaller-baseline/vm/adb"
+	_ "github.com/google/syzkaller-baseline/vm/bhyve"
+	_ "github.com/google/syzkaller-baseline/vm/gce"
+	_ "github.com/google/syzkaller-baseline/vm/gvisor"
+	_ "github.com/google/syzkaller-baseline/vm/isolated"
+	_ "github.com/google/syzkaller-baseline/vm/kvm"
+	_ "github.com/google/syzkaller-baseline/vm/odroid"
+	_ "github.com/google/syzkaller-baseline/vm/qemu"
+	_ "github.com/google/syzkaller-baseline/vm/vmm"
+	_ "github.com/google/syzkaller-baseline/vm/vmware"
 )
 
 type Pool struct {

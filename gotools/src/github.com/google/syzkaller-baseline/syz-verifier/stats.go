@@ -11,7 +11,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/google/syzkaller/prog"
+	"github.com/google/syzkaller-baseline/prog"
 )
 
 // Stats encapsulates data for creating statistics related to the results
