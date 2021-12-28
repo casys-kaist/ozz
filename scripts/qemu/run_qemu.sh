@@ -1,5 +1,8 @@
 #!/bin/sh -e
 
+$SCRIPTS_DIR/linux/__create_symlinks.sh "linux"
+$SCRIPTS_DIR/linux/__check_suffix.sh "linux"
+
 UID=$(id -u)
 
 MEMORY=2048
