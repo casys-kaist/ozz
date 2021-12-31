@@ -42,6 +42,10 @@ static cl::opt<bool>
                               "functions of IRQs and syscalls"),
                      cl::init(false));
 
+static cl::opt<bool> ClInstrumentFlush("instrument-flush",
+                                       cl::desc("instrument flush callbacks"),
+                                       cl::init(false));
+
 static cl::opt<bool> ClBuileKernel("ssb-kernel",
                                    cl::desc("Build a Linux kernel"),
                                    cl::init(false));
@@ -622,6 +626,9 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
 }
 
 bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
+  if (!ClInstrumentFlush)
+    return false;
+
   IRBuilder<> IRB(I);
   LLVM_DEBUG(dbgs() << "Instrumenting a membarrier callback at " << *I << "\n");
   NumInstrumentedFlushes++;
@@ -643,6 +650,10 @@ bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
 }
 
 bool SoftStoreBuffer::instrumentRetCheck(Instruction *I) {
+  if (!ClInstrumentFlush)
+    // Retchk is also a kind of flush callback
+    return false;
+
   IRBuilder<> IRB(I);
   LLVM_DEBUG(dbgs() << "Instrumenting a retchk callback at " << *I << "\n");
   auto Args = SmallVector<Value *, 8>();
