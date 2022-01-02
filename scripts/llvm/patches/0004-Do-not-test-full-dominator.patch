@@ -1,0 +1,43 @@
+From 6135551b4eb36b2ca1bc4985e45212cc141dd706 Mon Sep 17 00:00:00 2001
+From: "Dae R. Jeong" <threeearcat@gmail.com>
+Date: Sun, 2 Jan 2022 12:35:03 +0000
+Subject: [PATCH] Do not test full dominator
+
+Because of the SSB fast path logic, many basic blocks were not traced
+in the below cases:
+
+baicblock:
+  ; do
+  ; some
+  ; thing
+  %val = load i8, i8* @__ssb_do_emulate, align 1
+  %cond = icmp eq i8 %val, 1
+  br i1 %cond, label %fastpath, label %slowpath
+
+In this case, the "basicblock" dominates its successors, fastpath and
+slowpath which are synthetically introduced by SSB. This broke the
+coverage trace logic of the fuzzer.
+
+To solve this, simply just instrument the kcov callback even if the
+basicblock is a full dominator
+---
+ llvm/lib/Transforms/Instrumentation/SanitizerCoverage.cpp | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/llvm/lib/Transforms/Instrumentation/SanitizerCoverage.cpp b/llvm/lib/Transforms/Instrumentation/SanitizerCoverage.cpp
+index 4471b04038f3..9da4b1849d6d 100644
+--- a/llvm/lib/Transforms/Instrumentation/SanitizerCoverage.cpp
++++ b/llvm/lib/Transforms/Instrumentation/SanitizerCoverage.cpp
+@@ -588,8 +588,7 @@ static bool shouldInstrumentBlock(const Function &F, const BasicBlock *BB,
+ 
+   // Do not instrument full dominators, or full post-dominators with multiple
+   // predecessors.
+-  return !isFullDominator(BB, DT)
+-    && !(isFullPostDominator(BB, PDT) && !BB->getSinglePredecessor());
++  return !(isFullPostDominator(BB, PDT) && !BB->getSinglePredecessor());
+ }
+ 
+ 
+-- 
+2.17.1
+
