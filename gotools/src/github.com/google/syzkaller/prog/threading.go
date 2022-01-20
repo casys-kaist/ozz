@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/google/syzkaller/pkg/log"
+	"github.com/google/syzkaller/pkg/primitive"
 	"github.com/google/syzkaller/pkg/signal"
 )
 
@@ -94,7 +95,7 @@ func (p *Prog) unthreading() {
 type ThreadedProg struct {
 	P         *Prog
 	ReadFrom  signal.ReadFrom
-	Serial    signal.SerialAccess
+	Serial    primitive.SerialAccess
 	Scheduled int
 	Prio      int
 }

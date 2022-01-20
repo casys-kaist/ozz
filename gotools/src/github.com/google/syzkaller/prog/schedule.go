@@ -4,6 +4,7 @@ import (
 	"math"
 	"math/rand"
 
+	"github.com/google/syzkaller/pkg/primitive"
 	"github.com/google/syzkaller/pkg/signal"
 )
 
@@ -73,7 +74,7 @@ func (p *Prog) removeDummyPoints() {
 	p.Schedule.points = p.Schedule.points[:i+1]
 }
 
-func (p *Prog) MutateSchedule(rs rand.Source, staleCount map[uint32]int, maxPoints, minPoints int, readfrom signal.ReadFrom, serial signal.SerialAccess) bool {
+func (p *Prog) MutateSchedule(rs rand.Source, staleCount map[uint32]int, maxPoints, minPoints int, readfrom signal.ReadFrom, serial primitive.SerialAccess) bool {
 	if len(p.Contenders()) != 2 {
 		return false
 	}
@@ -111,12 +112,12 @@ type scheduler struct {
 	maxPoints  int
 	minPoints  int
 	readfrom   signal.ReadFrom
-	serial     signal.SerialAccess
+	serial     primitive.SerialAccess
 	staleCount map[uint32]int
 	candidate  []uint32
 	selected   map[uint32]struct{}
 	// schedule
-	schedule signal.SerialAccess
+	schedule primitive.SerialAccess
 	mutated  bool
 }
 
@@ -134,10 +135,10 @@ func (ctx *scheduler) initialize() {
 	ctx.p.removeDummyPoints()
 }
 
-func (ctx *scheduler) findAccess(point Point) (found signal.Access, ok bool) {
+func (ctx *scheduler) findAccess(point Point) (found primitive.Access, ok bool) {
 	// TODO: inefficient. need refactoring
 	for _, acc := range ctx.serial {
-		if acc.Owned(point.addr, point.call.Thread) {
+		if acc.Inst == uint32(point.addr) && acc.Thread == point.call.Thread {
 			found, ok = acc, true
 			return
 		}
@@ -151,6 +152,8 @@ func (ctx *scheduler) addPoint() {
 		// we don't have any candidate point
 		return
 	}
+	// TODO: IMPORTANT. The logic below is broken. We want to choose a
+	// thread along with an instruction. Fix this ASAP.
 	for try := 0; try < 10 && ctx.p.Schedule.Len() < ctx.maxPoints; try++ {
 		idx := ctx.r.Intn(len(ctx.candidate))
 		inst := ctx.candidate[idx]
@@ -252,7 +255,7 @@ func (ctx *scheduler) shapeScheduleFromAccesses() {
 	sched := Schedule{}
 	calls := ctx.p.Contenders()
 	for _, acc := range ctx.schedule {
-		if acc.ExecutedBy(prev) {
+		if acc.Thread == prev {
 			continue
 		}
 		thread := acc.Thread

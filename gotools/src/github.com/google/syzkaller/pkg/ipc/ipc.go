@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/syzkaller/pkg/cover"
 	"github.com/google/syzkaller/pkg/osutil"
+	"github.com/google/syzkaller/pkg/primitive"
 	"github.com/google/syzkaller/pkg/signal"
 	"github.com/google/syzkaller/prog"
 	"github.com/google/syzkaller/sys/targets"
@@ -92,7 +93,7 @@ type CallInfo struct {
 	Cover  []uint32 // per-call coverage, filled if FlagSignal is set and cover == true,
 	// if dedup == false, then cov effectively contains a trace, otherwise duplicates are removed
 	Comps  prog.CompMap // per-call comparison operands
-	Access []signal.Access
+	Access []primitive.Access
 	Errno  int // call errno (0 if the call was successful)
 	ConcurrencyInfo
 }
@@ -113,7 +114,7 @@ type ProgInfo struct {
 	RFInfo [][]signal.ReadFrom
 	// Serial are accesses that are used to build ReadFrom and sorted
 	// according to Accesses' timestamps
-	Serial [][]signal.SerialAccess
+	Serial [][]primitive.SerialAccess
 }
 
 type Env struct {
@@ -426,7 +427,7 @@ func convertExtra(extraParts []CallInfo) CallInfo {
 	return extra
 }
 
-func analyzeReadFromInfo(p *prog.Prog, calls []CallInfo) (rfinfo [][]signal.ReadFrom, serial [][]signal.SerialAccess) {
+func analyzeReadFromInfo(p *prog.Prog, calls []CallInfo) (rfinfo [][]signal.ReadFrom, serial [][]primitive.SerialAccess) {
 	initReadFromInfo(p, &rfinfo, &serial)
 	for i1, c1 := range calls {
 		for i2, c2 := range calls {
@@ -443,13 +444,13 @@ func analyzeReadFromInfo(p *prog.Prog, calls []CallInfo) (rfinfo [][]signal.Read
 	return
 }
 
-func initReadFromInfo(p *prog.Prog, rfinfo *[][]signal.ReadFrom, serial *[][]signal.SerialAccess) {
+func initReadFromInfo(p *prog.Prog, rfinfo *[][]signal.ReadFrom, serial *[][]primitive.SerialAccess) {
 	n := len(p.Calls)
 	*rfinfo = make([][]signal.ReadFrom, n)
-	*serial = make([][]signal.SerialAccess, n)
+	*serial = make([][]primitive.SerialAccess, n)
 	for i := 0; i < n; i++ {
 		(*rfinfo)[i] = make([]signal.ReadFrom, n)
-		(*serial)[i] = make([]signal.SerialAccess, n)
+		(*serial)[i] = make([]primitive.SerialAccess, n)
 	}
 }
 
@@ -533,7 +534,7 @@ func readUint32Array(outp *[]byte, size uint32) ([]uint32, bool) {
 	return res, true
 }
 
-func readReadFromCoverages(outp *[]byte, size uint32, inf *CallInfo) ([]signal.Access, bool) {
+func readReadFromCoverages(outp *[]byte, size uint32, inf *CallInfo) ([]primitive.Access, bool) {
 	array, ok := readUint32Array(outp, size*5)
 	if !ok {
 		return nil, false
@@ -541,17 +542,17 @@ func readReadFromCoverages(outp *[]byte, size uint32, inf *CallInfo) ([]signal.A
 	if len(array)%5 != 0 {
 		return nil, false
 	}
-	var res []signal.Access
+	var res []primitive.Access
 	for i := 0; i < len(array); i += 5 {
-		res = append(res, signal.NewAccess(
-			array[i],
-			array[i+1],
-			array[i+2],
-			array[i+3],
-			array[i+4],
-			inf.Thread,
-			inf.Epoch,
-		))
+		res = append(res, primitive.Access{
+			Inst:      array[i],
+			Addr:      array[i+1],
+			Size:      array[i+2],
+			Typ:       array[i+3],
+			Timestamp: array[i+4],
+			Thread:    inf.Thread,
+			// Epoch: inf.Epoch,
+		})
 	}
 	return res, true
 }
@@ -916,7 +917,7 @@ func (info *ProgInfo) ContenderReadFrom(contender prog.Contender) signal.ReadFro
 	return info.RFInfo[c[0]][c[1]]
 }
 
-func (info *ProgInfo) ContenderSerialAccess(contender prog.Contender) signal.SerialAccess {
+func (info *ProgInfo) ContenderSerialAccess(contender prog.Contender) primitive.SerialAccess {
 	c := contender.Calls
 	return info.Serial[c[0]][c[1]]
 }
