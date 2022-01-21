@@ -20,6 +20,11 @@ func (acc Access) String() string {
 		acc.Thread, acc.Inst, acc.Addr, acc.Size, acc.Typ, acc.Timestamp)
 }
 
+func (acc Access) Overlapped(acc2 Access) bool {
+	min, max := acc.Addr, acc.Addr+acc.Size-1
+	return !(acc2.Addr+acc2.Size-1 < min || acc2.Addr > max)
+}
+
 type SerialAccess []Access
 
 func SerializeAccess(acc []Access) SerialAccess {
@@ -59,6 +64,27 @@ func (serial SerialAccess) FindIndex(acc Access) int {
 	}
 }
 
+func Combine(s1, s2 SerialAccess) (s SerialAccess) {
+	i1, i2 := 0, 0
+	for i1 < len(s1) && i2 < len(s2) {
+		acc1, acc2 := s1[i1], s2[i2]
+		if acc1.Timestamp < acc2.Timestamp {
+			s.Add(acc1)
+			i1++
+		} else {
+			s.Add(acc2)
+			i2++
+		}
+	}
+	for ; i1 < len(s1); i1++ {
+		s.Add(s1[i1])
+	}
+	for ; i2 < len(s2); i2++ {
+		s.Add(s2[i2])
+	}
+	return
+}
+
 // TODO: This function is somehow broken and must be removed. See
 // scheduler.addPoint() and scheduler.makePoint() in prog/schedule.go
 func (serial SerialAccess) FindForeachThread(inst uint32, max int) SerialAccess {
@@ -79,3 +105,8 @@ func (serial SerialAccess) FindForeachThread(inst uint32, max int) SerialAccess 
 	}
 	return res
 }
+
+const (
+	TypeStore = iota
+	TypeLoad
+)

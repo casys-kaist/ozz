@@ -61,6 +61,46 @@ func TestFindIndex(t *testing.T) {
 	}
 }
 
+func TestCombine(t *testing.T) {
+	s1, s2 := primitive.SerialAccess{}, primitive.SerialAccess{}
+	for i, acc := range serializedAcc {
+		if i%2 == 0 {
+			s1.Add(acc)
+		} else {
+			s2.Add(acc)
+		}
+	}
+
+	s := primitive.Combine(s1, s2)
+	for i, acc := range s {
+		if acc != testAcc[i] {
+			t.Errorf("wrong, expected %v, got %v", testAcc[i], acc)
+		}
+	}
+}
+
+func TestOverlapped(t *testing.T) {
+	acc := primitive.Access{Addr: 100, Size: 8}
+	if !acc.Overlapped(primitive.Access{Addr: 100, Size: 1}) {
+		t.Errorf("wrong")
+	}
+	if !acc.Overlapped(primitive.Access{Addr: 100, Size: 8}) {
+		t.Errorf("wrong")
+	}
+	if !acc.Overlapped(primitive.Access{Addr: 104, Size: 2}) {
+		t.Errorf("wrong")
+	}
+	if !acc.Overlapped(primitive.Access{Addr: 98, Size: 4}) {
+		t.Errorf("wrong")
+	}
+	if acc.Overlapped(primitive.Access{Addr: 92, Size: 8}) {
+		t.Errorf("wrong")
+	}
+	if acc.Overlapped(primitive.Access{Addr: 108, Size: 1}) {
+		t.Errorf("wrong")
+	}
+}
+
 func TestSerialAccessFindForeachThread(t *testing.T) {
 	serial := primitive.SerializeAccess(testAcc)
 	found := serial.FindForeachThread(3, 1)
