@@ -59,16 +59,20 @@ func loadTestdata(t *testing.T, raw []byte) (threads [2]primitive.SerialAccess) 
 	return
 }
 
-func TestExcavateKnots(t *testing.T) {
-	path := filepath.Join("testdata", "data1_simple")
+func loadKnots(t *testing.T, path string) []Knot {
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 	thrs := loadTestdata(t, data)
 	knots := ExcavateKnots(thrs[:])
-
 	t.Logf("# of knots: %d", len(knots))
+	return knots
+}
+
+func TestExcavateKnots(t *testing.T) {
+	path := filepath.Join("testdata", "data1_simple")
+	knots := loadKnots(t, path)
 
 	required := Knot{
 		{{Inst: 0x8bbb79d6, Addr: 0x18a48520, Size: 4, Typ: primitive.TypeLoad, Timestamp: 6},
@@ -86,6 +90,11 @@ func TestExcavateKnots(t *testing.T) {
 			t.Logf("found")
 			found = true
 		}
+	}
+
+	totalKnots := 16
+	if len(knots) != totalKnots {
+		t.Errorf("wrong total number of knots, expected %v, got %v", totalKnots, len(knots))
 	}
 
 	if !found {
@@ -152,5 +161,28 @@ func TestKnotType(t *testing.T) {
 		if got := test.knot.Type(); test.ans != got {
 			t.Errorf("wrong, expected %v, got %v", test.ans, got)
 		}
+	}
+}
+
+func TestSelectHarmoniousKnotsIter(t *testing.T) {
+	path := filepath.Join("testdata", "data1_simple")
+	knots := loadKnots(t, path)
+
+	orch := orchestrator{knots: knots}
+	count := 0
+	for len(orch.knots) != 0 {
+		selected := orch.selectHarmoniousKnots()
+		count += len(selected)
+		t.Logf("Selected:")
+		for i, knot := range selected {
+			t.Logf("Knot #%d", i)
+			t.Logf("  %x (%v) --> %x (%v)", knot[0][0].Inst, knot[0][0].Timestamp, knot[0][1].Inst, knot[0][1].Timestamp)
+			t.Logf("  %x (%v) --> %x (%v)", knot[1][0].Inst, knot[1][0].Timestamp, knot[1][1].Inst, knot[1][1].Timestamp)
+		}
+	}
+
+	totalKnots := 16
+	if count != totalKnots {
+		t.Errorf("wrong total number of knots, expected %v, got %v", totalKnots, len(knots))
 	}
 }

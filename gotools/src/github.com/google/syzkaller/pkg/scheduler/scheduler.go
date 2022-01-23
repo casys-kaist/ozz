@@ -5,10 +5,35 @@ import (
 )
 
 // NOTE: Communicadtion[0] must/will happen before Communication[1]
+// NOTE: Assumption: Accesses's timestamps in SerialAccess have
+// the same order as the program order
 type Communication [2]primitive.Access
 
 func (comm Communication) Same(comm0 Communication) bool {
 	return comm[0].Inst == comm0[0].Inst && comm[1].Inst == comm0[1].Inst
+}
+
+func (comm0 Communication) Conflict(comm1 Communication) bool {
+	if comm0.Parallel(comm1) {
+		// Parallell comms cannot be conflict
+		return false
+	}
+	return comm0[1].Timestamp <= comm1[0].Timestamp && comm1[1].Timestamp <= comm0[0].Timestamp ||
+		comm1[1].Timestamp <= comm0[0].Timestamp && comm0[1].Timestamp <= comm1[0].Timestamp
+}
+
+func (comm0 Communication) Parallel(comm1 Communication) bool {
+	for i := 0; i < 2; i++ {
+		if comm0[i].Thread != comm1[i].Thread {
+			return false
+		}
+	}
+	return true
+}
+
+func (comm0 Communication) HappenBefore(comm1 Communication) bool {
+	return comm0[1].Timestamp < comm1[0].Timestamp &&
+		comm0[0].Timestamp < comm1[1].Timestamp
 }
 
 type Knot [2]Communication
@@ -88,41 +113,59 @@ func (knotter *knotter) formKnots(comms []Communication) {
 }
 
 func (knot Knot) Type() KnotType {
-	parallel := true
-	for i := 0; i < 2; i++ {
-		if knot[0][i].Thread != knot[1][i].Thread {
-			parallel = false
-			break
-		}
-	}
-	if parallel {
-		return KnotParallel
-	}
-
 	comm0, comm1 := knot[0], knot[1]
-
-	// NOTE: Assumption: Accesses's timestamps in SerialAccess have
-	// the same order as the program order
-	conflict := func(comm0, comm1 Communication) bool {
-		// Let's check comm1 conflicts to comm0
-		return comm0[1].Timestamp <= comm1[0].Timestamp && comm1[1].Timestamp <= comm0[0].Timestamp
-	}
-
-	happenBefore := func(comm0, comm1 Communication) bool {
-		return comm0[1].Timestamp < comm1[0].Timestamp &&
-			comm0[0].Timestamp < comm1[1].Timestamp
-	}
-
-	if conflict(comm0, comm1) || conflict(comm1, comm0) {
+	if comm0.Parallel(comm1) {
+		return KnotParallel
+	} else if comm0.Conflict(comm1) || comm1.Conflict(comm0) {
 		// Invalid program orders
 		return KnotInvalid
-	}
-
-	if happenBefore(comm0, comm1) || happenBefore(comm1, comm0) {
+	} else if comm0.HappenBefore(comm1) || comm1.HappenBefore(comm0) {
 		return KnotSeparated
 	} else {
 		return KnotOverlapped
 	}
+}
+
+type SchedPoint struct {
+}
+
+func GeneratingSchedule(knots []Knot) []SchedPoint {
+	orch := orchestrator{knots: knots}
+	target := orch.selectHarmoniousKnots()
+	_ = target
+	return nil
+}
+
+type orchestrator struct {
+	// Communications that are already selected
+	comms []Communication
+	// Input knots
+	knots []Knot
+}
+
+func (orch *orchestrator) selectHarmoniousKnots() []Knot {
+	res := []Knot{}
+	remaining := make([]Knot, 0, len(orch.knots))
+	for _, knot := range orch.knots {
+		if orch.harmoniousKnot(knot) {
+			res = append(res, knot)
+			orch.comms = append(orch.comms, knot[0], knot[1])
+		} else {
+			remaining = append(remaining, knot)
+		}
+	}
+	orch.knots = remaining
+	orch.comms = nil
+	return res
+}
+
+func (orch orchestrator) harmoniousKnot(knot Knot) bool {
+	for _, comm := range orch.comms {
+		if knot[0].Conflict(comm) || knot[1].Conflict(comm) {
+			return false
+		}
+	}
+	return true
 }
 
 type KnotType int
