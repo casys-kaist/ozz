@@ -70,10 +70,7 @@ func loadKnots(t *testing.T, path string) []Knot {
 	return knots
 }
 
-func TestExcavateKnots(t *testing.T) {
-	path := filepath.Join("testdata", "data1_simple")
-	knots := loadKnots(t, path)
-
+func testCVE20168655(t *testing.T, knots []Knot) bool {
 	required := Knot{
 		{{Inst: 0x8bbb79d6, Addr: 0x18a48520, Size: 4, Typ: primitive.TypeLoad, Timestamp: 6},
 			{Inst: 0x8bbca80b, Addr: 0x18a48520, Size: 4, Typ: primitive.TypeStore, Timestamp: 156}},
@@ -91,14 +88,31 @@ func TestExcavateKnots(t *testing.T) {
 			found = true
 		}
 	}
+	return found
+}
 
+func testExcavateKnots(t *testing.T, simple bool) []Knot {
+	filename := "data1"
+	if simple {
+		filename = "data1_simple"
+	}
+	path := filepath.Join("testdata", filename)
+	knots := loadKnots(t, path)
+	if !testCVE20168655(t, knots) {
+		t.Errorf("can't find the required knot")
+	}
+	return knots
+}
+
+func TestExcavateKnots(t *testing.T) {
+	testExcavateKnots(t, false)
+}
+
+func TestExcavateKnotsSimple(t *testing.T) {
+	knots := testExcavateKnots(t, true)
 	totalKnots := 16
 	if len(knots) != totalKnots {
 		t.Errorf("wrong total number of knots, expected %v, got %v", totalKnots, len(knots))
-	}
-
-	if !found {
-		t.Errorf("can't find the required knot")
 	}
 }
 
@@ -158,14 +172,19 @@ func TestKnotType(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		if got := test.knot.Type(); test.ans != got {
+		knot := test.knot
+		if got := knot.Type(); test.ans != got {
 			t.Errorf("wrong, expected %v, got %v", test.ans, got)
 		}
 	}
 }
 
-func TestSelectHarmoniousKnotsIter(t *testing.T) {
-	path := filepath.Join("testdata", "data1_simple")
+func testSelectHarmoniousKnotsIter(t *testing.T, simple bool) {
+	filename := "data1"
+	if simple {
+		filename = "data1_simple"
+	}
+	path := filepath.Join("testdata", filename)
 	knots := loadKnots(t, path)
 
 	orch := orchestrator{knots: knots}
@@ -174,15 +193,18 @@ func TestSelectHarmoniousKnotsIter(t *testing.T) {
 		selected := orch.selectHarmoniousKnots()
 		count += len(selected)
 		t.Logf("Selected:")
-		for i, knot := range selected {
-			t.Logf("Knot #%d", i)
-			t.Logf("  %x (%v) --> %x (%v)", knot[0][0].Inst, knot[0][0].Timestamp, knot[0][1].Inst, knot[0][1].Timestamp)
-			t.Logf("  %x (%v) --> %x (%v)", knot[1][0].Inst, knot[1][0].Timestamp, knot[1][1].Inst, knot[1][1].Timestamp)
-		}
+		testCVE20168655(t, selected)
 	}
 
-	totalKnots := 16
-	if count != totalKnots {
-		t.Errorf("wrong total number of knots, expected %v, got %v", totalKnots, len(knots))
+	if count != len(knots) {
+		t.Errorf("wrong number of selected knots, expected %v, got %v", len(knots), count)
 	}
+}
+
+func TestSelectHarmoniousKnotsIterSimple(t *testing.T) {
+	testSelectHarmoniousKnotsIter(t, true)
+}
+
+func TestSelectHarmoniousKnotsIter(t *testing.T) {
+	testSelectHarmoniousKnotsIter(t, false)
 }
