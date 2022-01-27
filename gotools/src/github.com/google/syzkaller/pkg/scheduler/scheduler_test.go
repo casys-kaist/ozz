@@ -70,14 +70,7 @@ func loadKnots(t *testing.T, path string) []Knot {
 	return knots
 }
 
-func testCVE20168655(t *testing.T, knots []Knot) bool {
-	required := Knot{
-		{{Inst: 0x8bbb79d6, Addr: 0x18a48520, Size: 4, Typ: primitive.TypeLoad, Timestamp: 6},
-			{Inst: 0x8bbca80b, Addr: 0x18a48520, Size: 4, Typ: primitive.TypeStore, Timestamp: 156}},
-		{{Inst: 0x8bbc9093, Addr: 0x18a48874, Size: 4, Typ: primitive.TypeLoad, Timestamp: 149},
-			{Inst: 0x8bbb75a0, Addr: 0x18a48874, Size: 4, Typ: primitive.TypeStore, Timestamp: 14}},
-	}
-
+func testCVE(t *testing.T, knots []Knot, required Knot) bool {
 	found := false
 	for i, knot := range knots {
 		t.Logf("Knot %d, type: %v", i, knot.Type())
@@ -91,25 +84,42 @@ func testCVE20168655(t *testing.T, knots []Knot) bool {
 	return found
 }
 
-func testExcavateKnots(t *testing.T, simple bool) []Knot {
-	filename := "data1"
-	if simple {
-		filename = "data1_simple"
+func testCVE20168655(t *testing.T, knots []Knot) bool {
+	required := Knot{
+		{{Inst: 0x8bbb79d6, Addr: 0x18a48520, Size: 4, Typ: primitive.TypeLoad, Timestamp: 6},
+			{Inst: 0x8bbca80b, Addr: 0x18a48520, Size: 4, Typ: primitive.TypeStore, Timestamp: 156}},
+		{{Inst: 0x8bbc9093, Addr: 0x18a48874, Size: 4, Typ: primitive.TypeLoad, Timestamp: 149},
+			{Inst: 0x8bbb75a0, Addr: 0x18a48874, Size: 4, Typ: primitive.TypeStore, Timestamp: 14}},
 	}
+	return testCVE(t, knots, required)
+}
+
+func testCVE20196974(t *testing.T, knots []Knot) bool {
+	required := Knot{
+		{{Inst: 0x81f2b4e1, Addr: 0x18a48520, Size: 4, Typ: primitive.TypeStore, Timestamp: 6}, // T0
+			{Inst: 0x81f2bbd3, Addr: 0x18a48520, Size: 4, Typ: primitive.TypeLoad, Timestamp: 156}}, // T1
+		{{Inst: 0x8d34b095, Addr: 0x18a48874, Size: 4, Typ: primitive.TypeStore, Timestamp: 149}, // T1
+			{Inst: 0x8d3662f0, Addr: 0x18a48874, Size: 4, Typ: primitive.TypeLoad, Timestamp: 14}}, // T0
+	}
+	return testCVE(t, knots, required)
+}
+
+func testExcavateKnots(t *testing.T, filename string, testFunc func(*testing.T, []Knot) bool) []Knot {
 	path := filepath.Join("testdata", filename)
 	knots := loadKnots(t, path)
-	if !testCVE20168655(t, knots) {
+	if !testFunc(t, knots) {
 		t.Errorf("can't find the required knot")
 	}
 	return knots
 }
 
 func TestExcavateKnots(t *testing.T) {
-	testExcavateKnots(t, false)
+	testExcavateKnots(t, "data1", testCVE20168655)
+	testExcavateKnots(t, "data2", testCVE20196974)
 }
 
 func TestExcavateKnotsSimple(t *testing.T) {
-	knots := testExcavateKnots(t, true)
+	knots := testExcavateKnots(t, "data1_simple", testCVE20168655)
 	totalKnots := 16
 	if len(knots) != totalKnots {
 		t.Errorf("wrong total number of knots, expected %v, got %v", totalKnots, len(knots))
@@ -179,21 +189,21 @@ func TestKnotType(t *testing.T) {
 	}
 }
 
-func testSelectHarmoniousKnotsIter(t *testing.T, simple bool) {
-	filename := "data1"
-	if simple {
-		filename = "data1_simple"
-	}
+func testSelectHarmoniousKnotsIter(t *testing.T, filename string, testFunc func(*testing.T, []Knot) bool) {
 	path := filepath.Join("testdata", filename)
 	knots := loadKnots(t, path)
 
 	orch := orchestrator{knots: knots}
-	count := 0
+	i, count := 0, 0
 	for len(orch.knots) != 0 {
 		selected := orch.selectHarmoniousKnots()
 		count += len(selected)
 		t.Logf("Selected:")
-		testCVE20168655(t, selected)
+		found := testFunc(t, selected)
+		if found {
+			t.Logf("Found: %d", i)
+		}
+		i++
 	}
 
 	if count != len(knots) {
@@ -202,9 +212,10 @@ func testSelectHarmoniousKnotsIter(t *testing.T, simple bool) {
 }
 
 func TestSelectHarmoniousKnotsIterSimple(t *testing.T) {
-	testSelectHarmoniousKnotsIter(t, true)
+	testSelectHarmoniousKnotsIter(t, "data1_simple", testCVE20168655)
 }
 
 func TestSelectHarmoniousKnotsIter(t *testing.T) {
-	testSelectHarmoniousKnotsIter(t, false)
+	testSelectHarmoniousKnotsIter(t, "data1", testCVE20168655)
+	testSelectHarmoniousKnotsIter(t, "data2", testCVE20196974)
 }
