@@ -81,3 +81,14 @@
     communications is not suitable to find a failure?
     - Same to the above such that we are not gonna consider this until
       we need it
+
+# Data race in reusable code
+
+## Both
+- CVE-2019-6974
+- CVE-2019-1999
+- CVE-2019-2025
+
+## Only one
+- e20a2e9c
+- 11eb85ec
