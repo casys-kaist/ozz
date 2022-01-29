@@ -186,12 +186,17 @@ type Scheduler struct {
 	schedPoints []SchedPoint
 }
 
-func (sched Scheduler) GenerateSchedPoints() []SchedPoint {
+func (sched Scheduler) GenerateSchedPoints() ([]SchedPoint, bool) {
 	dag := sched.buildDAG()
-	for _, node := range dag.topologicalSort() {
-		sched.schedPoints = append(sched.schedPoints, SchedPoint(node))
+	nodes, ok := dag.topologicalSort()
+	if !ok {
+		return nil, false
 	}
-	return sched.schedPoints
+	for _, node := range nodes {
+		acc := node.(primitive.Access)
+		sched.schedPoints = append(sched.schedPoints, SchedPoint(acc))
+	}
+	return sched.schedPoints, true
 }
 
 func (sched *Scheduler) SquizeSchedPoints() []SchedPoint {
@@ -207,10 +212,7 @@ func (sched *Scheduler) SquizeSchedPoints() []SchedPoint {
 }
 
 func (sched *Scheduler) buildDAG() dag {
-	d := dag{
-		nodes: make(map[node]struct{}),
-		edges: make(map[node]map[node]struct{}),
-	}
+	d := newDAG()
 	threads := make(map[uint64][]primitive.Access)
 	for i /*, knot */ := range sched.knots {
 		for j /*, comm */ := range sched.knots[i] {
@@ -233,64 +235,3 @@ func (sched *Scheduler) buildDAG() dag {
 	}
 	return d
 }
-
-type dag struct {
-	nodes map[node]struct{}
-	edges edge
-}
-
-func (d *dag) addEdge(src0, dst0 primitive.Access) {
-	src, dst := node(src0), node(dst0)
-	d.nodes[src] = struct{}{}
-	if _, ok := d.edges[src]; !ok {
-		d.edges[src] = make(map[node]struct{})
-	}
-	d.edges[src][dst] = struct{}{}
-}
-
-func (d dag) topologicalSort() []node {
-	res := make([]node, 0, len(d.nodes))
-	q, head := make([]node, 0, len(d.nodes)), 0
-	inbounds := make(map[node]int)
-	// Preprocessing: calculating in-bounds
-	for v := range d.nodes {
-		inbounds[v] = 0
-	}
-
-	for _, dsts := range d.edges {
-		for dst := range dsts {
-			inbounds[dst]++
-		}
-	}
-
-	// step 1: queue all nodes with 0 inbound
-	for n, inbound := range inbounds {
-		if inbound == 0 {
-			q = append(q, n)
-		}
-	}
-
-	// step 2: iteratively infd a vertex with 0 inbound
-	for head < len(q) {
-		v := q[head]
-		head++
-		res = append(res, v)
-		for dst := range d.edges[v] {
-			inbounds[dst]--
-			if inbounds[dst] == 0 {
-				q = append(q, dst)
-			}
-		}
-	}
-
-	return res
-}
-
-// TODO: primitive.Access does not contain many fields at this time,
-// so comparing two does not incur a high overhead. So we decide to
-// use primitive.Access as is as a node. But obviously this introduces
-// the unnecessary overhead, so if required, use a pointer of it as a
-// node.
-type node primitive.Access
-
-type edge map[node]map[node]struct{}

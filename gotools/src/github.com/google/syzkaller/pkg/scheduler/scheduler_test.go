@@ -240,12 +240,12 @@ func TestGenerateSchedPoint(t *testing.T) {
 			}
 		}
 		sched := Scheduler{knots: selected}
-		sps := sched.GenerateSchedPoints()
+		sps, ok := sched.GenerateSchedPoints()
 		t.Logf("total %d sched points\n", len(sps))
 		for _, sp := range sps {
 			t.Logf("%v", primitive.Access(sp))
 		}
-		if len(totalAcc) != len(sps) {
+		if !ok {
 			t.Errorf("missing schedpoint (before squeeze), expected %v, got %v", len(totalAcc), len(sps))
 		}
 		for _, knot := range selected {
