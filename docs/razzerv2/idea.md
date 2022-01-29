@@ -8,19 +8,19 @@
     - To let a program experience a given coverage (analogous to branch flipping)
   - Ultimately, we want to find more bugs in shorter time
 
-# Component of this project:
+# Problem statements and motivation
+  - A fuzzer requires a coverage capturing interesting interleavings
+    - Interesting interleavings must capture the combination of communication
+    - A single data race does not explain the context of the data race
+  - Based on the coverage, guide the fuzzer to quickly expand the coverage
+    - Previous works waste the computing power due to focusing on a single data race
+
+# Component of this project
   - Abstract the interleaving, which must be
     - Simple
     - Informative
   - Scheduling to expand the coverage, which must be
     - Effective
-
-# Problem statements
-  - A fuzzer requires a coverage capturing interesting interleavings
-    - Interesting interleavings must capture the combination of communication
-  - Based on the coverage, guide the fuzzer to quickly expand the coverage
-    - Q) Do we argue a contribution on this point? It seems Razzer, Snowboard,
-      and SKI share the exactly same mechanism (at least theoretically)?
 
 # Challenges
   - Numerous combination of all communications
