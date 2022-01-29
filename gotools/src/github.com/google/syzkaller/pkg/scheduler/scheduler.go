@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"sort"
+
 	"github.com/google/syzkaller/pkg/primitive"
 )
 
@@ -8,6 +10,14 @@ import (
 // NOTE: Assumption: Accesses's timestamps in SerialAccess have
 // the same order as the program order
 type Communication [2]primitive.Access
+
+func (comm *Communication) Former() primitive.Access {
+	return comm[0]
+}
+
+func (comm *Communication) Latter() primitive.Access {
+	return comm[1]
+}
 
 func (comm Communication) Same(comm0 Communication) bool {
 	return comm[0].Inst == comm0[0].Inst && comm[1].Inst == comm0[1].Inst
@@ -41,6 +51,15 @@ type Knot [2]Communication
 func (knot Knot) Same(knot0 Knot) bool {
 	return knot[0].Same(knot0[0]) && knot[1].Same(knot0[1])
 }
+
+type KnotType int
+
+const (
+	KnotInvalid KnotType = iota
+	KnotParallel
+	KnotOverlapped
+	KnotSeparated
+)
 
 type knotter struct {
 	accesses []primitive.SerialAccess
@@ -126,16 +145,6 @@ func (knot Knot) Type() KnotType {
 	}
 }
 
-type SchedPoint struct {
-}
-
-func GeneratingSchedule(knots []Knot) []SchedPoint {
-	orch := orchestrator{knots: knots}
-	target := orch.selectHarmoniousKnots()
-	_ = target
-	return nil
-}
-
 type orchestrator struct {
 	// Communications that are already selected
 	comms []Communication
@@ -168,11 +177,120 @@ func (orch orchestrator) harmoniousKnot(knot Knot) bool {
 	return true
 }
 
-type KnotType int
+type SchedPoint primitive.Access
 
-const (
-	KnotInvalid KnotType = iota
-	KnotParallel
-	KnotOverlapped
-	KnotSeparated
-)
+type Scheduler struct {
+	// input
+	knots []Knot
+	// output
+	schedPoints []SchedPoint
+}
+
+func (sched Scheduler) GenerateSchedPoints() []SchedPoint {
+	dag := sched.buildDAG()
+	for _, node := range dag.topologicalSort() {
+		sched.schedPoints = append(sched.schedPoints, SchedPoint(node))
+	}
+	return sched.schedPoints
+}
+
+func (sched *Scheduler) SquizeSchedPoints() []SchedPoint {
+	new := []SchedPoint{}
+	for i := range sched.schedPoints {
+		if i == len(sched.schedPoints)-1 || sched.schedPoints[i].Thread != sched.schedPoints[i+1].Thread {
+			new = append(new, sched.schedPoints[i])
+		}
+	}
+
+	sched.schedPoints = new
+	return sched.schedPoints
+}
+
+func (sched *Scheduler) buildDAG() dag {
+	d := dag{
+		nodes: make(map[node]struct{}),
+		edges: make(map[node]map[node]struct{}),
+	}
+	threads := make(map[uint64][]primitive.Access)
+	for i /*, knot */ := range sched.knots {
+		for j /*, comm */ := range sched.knots[i] {
+			former := sched.knots[i][j].Former()
+			latter := sched.knots[i][j].Latter()
+			d.addEdge(former, latter)
+			threads[former.Thread] = append(threads[former.Thread], former)
+			threads[latter.Thread] = append(threads[latter.Thread], latter)
+		}
+	}
+
+	for /* threadid*/ _, accs := range threads {
+		// NOTE: timestamp represents the program order
+		sort.Slice(accs, func(i, j int) bool { return accs[i].Timestamp < accs[j].Timestamp })
+		for i /*, acc*/ := range accs {
+			if i != len(accs)-1 && accs[i].Timestamp != accs[i+1].Timestamp {
+				d.addEdge(accs[i], accs[i+1])
+			}
+		}
+	}
+	return d
+}
+
+type dag struct {
+	nodes map[node]struct{}
+	edges edge
+}
+
+func (d *dag) addEdge(src0, dst0 primitive.Access) {
+	src, dst := node(src0), node(dst0)
+	d.nodes[src] = struct{}{}
+	if _, ok := d.edges[src]; !ok {
+		d.edges[src] = make(map[node]struct{})
+	}
+	d.edges[src][dst] = struct{}{}
+}
+
+func (d dag) topologicalSort() []node {
+	res := make([]node, 0, len(d.nodes))
+	q, head := make([]node, 0, len(d.nodes)), 0
+	inbounds := make(map[node]int)
+	// Preprocessing: calculating in-bounds
+	for v := range d.nodes {
+		inbounds[v] = 0
+	}
+
+	for _, dsts := range d.edges {
+		for dst := range dsts {
+			inbounds[dst]++
+		}
+	}
+
+	// step 1: queue all nodes with 0 inbound
+	for n, inbound := range inbounds {
+		if inbound == 0 {
+			q = append(q, n)
+		}
+	}
+
+	// step 2: iteratively infd a vertex with 0 inbound
+	for head < len(q) {
+		v := q[head]
+		head++
+		res = append(res, v)
+		for dst := range d.edges[v] {
+			inbounds[dst]--
+			if inbounds[dst] == 0 {
+				q = append(q, dst)
+			}
+		}
+	}
+
+	return res
+}
+
+// TODO: primitive.Access does not contain many fields at this time,
+// so comparing two does not incur a high overhead. So we decide to
+// use primitive.Access as is as a node. But obviously this introduces
+// the unnecessary overhead, so if required, use a pointer of it as a
+// node.
+type node primitive.Access
+
+type edge map[node]map[node]struct{}
