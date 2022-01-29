@@ -6,67 +6,12 @@ import (
 	"github.com/google/syzkaller/pkg/primitive"
 )
 
-// NOTE: Communicadtion[0] must/will happen before Communication[1]
-// NOTE: Assumption: Accesses's timestamps in SerialAccess have
-// the same order as the program order
-type Communication [2]primitive.Access
-
-func (comm *Communication) Former() primitive.Access {
-	return comm[0]
-}
-
-func (comm *Communication) Latter() primitive.Access {
-	return comm[1]
-}
-
-func (comm Communication) Same(comm0 Communication) bool {
-	return comm[0].Inst == comm0[0].Inst && comm[1].Inst == comm0[1].Inst
-}
-
-func (comm0 Communication) Conflict(comm1 Communication) bool {
-	if comm0.Parallel(comm1) {
-		// Parallell comms cannot be conflict
-		return false
-	}
-	return comm0[1].Timestamp <= comm1[0].Timestamp && comm1[1].Timestamp <= comm0[0].Timestamp ||
-		comm1[1].Timestamp <= comm0[0].Timestamp && comm0[1].Timestamp <= comm1[0].Timestamp
-}
-
-func (comm0 Communication) Parallel(comm1 Communication) bool {
-	for i := 0; i < 2; i++ {
-		if comm0[i].Thread != comm1[i].Thread {
-			return false
-		}
-	}
-	return true
-}
-
-func (comm0 Communication) HappenBefore(comm1 Communication) bool {
-	return comm0[1].Timestamp < comm1[0].Timestamp &&
-		comm0[0].Timestamp < comm1[1].Timestamp
-}
-
-type Knot [2]Communication
-
-func (knot Knot) Same(knot0 Knot) bool {
-	return knot[0].Same(knot0[0]) && knot[1].Same(knot0[1])
-}
-
-type KnotType int
-
-const (
-	KnotInvalid KnotType = iota
-	KnotParallel
-	KnotOverlapped
-	KnotSeparated
-)
-
 type knotter struct {
 	accesses []primitive.SerialAccess
-	knots    []Knot
+	knots    []primitive.Knot
 }
 
-func ExcavateKnots(accesses []primitive.SerialAccess) []Knot {
+func ExcavateKnots(accesses []primitive.SerialAccess) []primitive.Knot {
 	knotter := knotter{
 		accesses: accesses,
 	}
@@ -83,15 +28,15 @@ func (knotter *knotter) fastenKnots() {
 		}
 	}
 
-	comms := []Communication{}
+	comms := []primitive.Communication{}
 	for _, accs := range mp {
 		comms = append(comms, formCommunication(accs)...)
 	}
 	knotter.formKnots(comms)
 }
 
-func formCommunication(accesses []primitive.Access) []Communication {
-	comms := []Communication{}
+func formCommunication(accesses []primitive.Access) []primitive.Communication {
+	comms := []primitive.Communication{}
 	for i := 0; i < len(accesses); i++ {
 		for j := i + 1; j < len(accesses); j++ {
 			acc1, acc2 := accesses[i], accesses[j]
@@ -109,21 +54,21 @@ func formCommunication(accesses []primitive.Access) []Communication {
 
 			// We are generating all possible knots so append both
 			// Communications
-			comms = append(comms, Communication{acc1, acc2}, Communication{acc2, acc1})
+			comms = append(comms, primitive.Communication{acc1, acc2}, primitive.Communication{acc2, acc1})
 		}
 	}
 	return comms
 }
 
-func (knotter *knotter) formKnots(comms []Communication) {
+func (knotter *knotter) formKnots(comms []primitive.Communication) {
 	for i := 0; i < len(comms); i++ {
 		for j := i + 1; j < len(comms); j++ {
 			comm1, comm2 := comms[i], comms[j]
 			if comm1[0].Timestamp > comm2[0].Timestamp {
 				comm1, comm2 = comm2, comm1
 			}
-			knot := Knot{comm1, comm2}
-			if typ := knot.Type(); typ == KnotParallel || typ == KnotInvalid {
+			knot := primitive.Knot{comm1, comm2}
+			if typ := knot.Type(); typ == primitive.KnotParallel || typ == primitive.KnotInvalid {
 				continue
 			}
 			knotter.knots = append(knotter.knots, knot)
@@ -131,30 +76,16 @@ func (knotter *knotter) formKnots(comms []Communication) {
 	}
 }
 
-func (knot Knot) Type() KnotType {
-	comm0, comm1 := knot[0], knot[1]
-	if comm0.Parallel(comm1) {
-		return KnotParallel
-	} else if comm0.Conflict(comm1) || comm1.Conflict(comm0) {
-		// Invalid program orders
-		return KnotInvalid
-	} else if comm0.HappenBefore(comm1) || comm1.HappenBefore(comm0) {
-		return KnotSeparated
-	} else {
-		return KnotOverlapped
-	}
-}
-
 type orchestrator struct {
 	// Communications that are already selected
-	comms []Communication
+	comms []primitive.Communication
 	// Input knots
-	knots []Knot
+	knots []primitive.Knot
 }
 
-func (orch *orchestrator) selectHarmoniousKnots() []Knot {
-	res := []Knot{}
-	remaining := make([]Knot, 0, len(orch.knots))
+func (orch *orchestrator) selectHarmoniousKnots() []primitive.Knot {
+	res := []primitive.Knot{}
+	remaining := make([]primitive.Knot, 0, len(orch.knots))
 	for _, knot := range orch.knots {
 		if orch.harmoniousKnot(knot) {
 			res = append(res, knot)
@@ -168,7 +99,7 @@ func (orch *orchestrator) selectHarmoniousKnots() []Knot {
 	return res
 }
 
-func (orch orchestrator) harmoniousKnot(knot Knot) bool {
+func (orch orchestrator) harmoniousKnot(knot primitive.Knot) bool {
 	for _, comm := range orch.comms {
 		if knot[0].Conflict(comm) || knot[1].Conflict(comm) {
 			return false
@@ -181,7 +112,7 @@ type SchedPoint primitive.Access
 
 type Scheduler struct {
 	// input
-	knots []Knot
+	knots []primitive.Knot
 	// output
 	schedPoints []SchedPoint
 }

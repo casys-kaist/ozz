@@ -1,0 +1,83 @@
+package scheduler
+
+import (
+	"bytes"
+	"io/ioutil"
+	"strconv"
+	"testing"
+
+	"github.com/google/syzkaller/pkg/primitive"
+)
+
+func loadTestdata(t *testing.T, raw []byte) (threads [2]primitive.SerialAccess) {
+	timestamp, thread := uint32(0), -1
+	for {
+		idx := bytes.IndexByte(raw, byte('\n'))
+		if idx == -1 {
+			break
+		}
+		line := raw[:idx]
+		raw = raw[idx+1:]
+
+		toks := bytes.Fields(line)
+		if len(toks) != 3 {
+			if bytes.HasPrefix(line, []byte("Thread")) {
+				thread++
+			}
+			continue
+		}
+
+		var typ uint32
+		if bytes.Equal(toks[2], []byte("R")) {
+			typ = primitive.TypeLoad
+		} else {
+			typ = primitive.TypeStore
+		}
+
+		inst, err := strconv.ParseUint(string(toks[0]), 16, 64)
+		if err != nil {
+			t.Errorf("parsing error: %v", err)
+		}
+		addr, err := strconv.ParseUint(string(toks[1][2:]), 16, 64)
+		if err != nil {
+			t.Errorf("parsing error: %v", err)
+		}
+
+		acc := primitive.Access{
+			Inst:      uint32(inst),
+			Addr:      uint32(addr),
+			Typ:       typ,
+			Size:      4,
+			Timestamp: timestamp,
+			Thread:    uint64(thread),
+		}
+		threads[thread].Add(acc)
+		timestamp++
+	}
+	return
+}
+
+func loadKnots(t *testing.T, path string) []primitive.Knot {
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	thrs := loadTestdata(t, data)
+	knots := ExcavateKnots(thrs[:])
+	t.Logf("# of knots: %d", len(knots))
+	return knots
+}
+
+func checkAnswer(t *testing.T, knots []primitive.Knot, required primitive.Knot) bool {
+	found := false
+	for i, knot := range knots {
+		t.Logf("Knot %d, type: %v", i, knot.Type())
+		t.Logf("  %x (%v) --> %x (%v)", knot[0][0].Inst, knot[0][0].Timestamp, knot[0][1].Inst, knot[0][1].Timestamp)
+		t.Logf("  %x (%v) --> %x (%v)", knot[1][0].Inst, knot[1][0].Timestamp, knot[1][1].Inst, knot[1][1].Timestamp)
+		if knot.Same(required) {
+			t.Logf("found")
+			found = true
+		}
+	}
+	return found
+}
