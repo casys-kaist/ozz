@@ -7,32 +7,39 @@ import (
 )
 
 type knotter struct {
-	accesses []primitive.SerialAccess
-	knots    []primitive.Knot
+	accesses  []primitive.SerialAccess
+	knots     []primitive.Knot
+	accessMap map[uint32][]primitive.Access
+	comms     []primitive.Communication
 }
 
 func ExcavateKnots(accesses []primitive.SerialAccess) []primitive.Knot {
-	knotter := knotter{
-		accesses: accesses,
-	}
+	knotter := knotter{accesses: accesses}
 	knotter.fastenKnots()
 	return knotter.knots
 }
 
 func (knotter *knotter) fastenKnots() {
-	mp := make(map[uint32][]primitive.Access)
+	knotter.buildAccessMap()
+	knotter.formCommunications()
+	knotter.formKnots()
+}
+
+func (knotter *knotter) buildAccessMap() {
+	knotter.accessMap = make(map[uint32][]primitive.Access)
 	for _, accs := range knotter.accesses {
 		for _, acc := range accs {
 			addr := acc.Addr & ^uint32(7)
-			mp[addr] = append(mp[addr], acc)
+			knotter.accessMap[addr] = append(knotter.accessMap[addr], acc)
 		}
 	}
+}
 
-	comms := []primitive.Communication{}
-	for _, accs := range mp {
-		comms = append(comms, formCommunication(accs)...)
+func (knotter *knotter) formCommunications() {
+	knotter.comms = []primitive.Communication{}
+	for _, accs := range knotter.accessMap {
+		knotter.comms = append(knotter.comms, formCommunication(accs)...)
 	}
-	knotter.formKnots(comms)
 }
 
 func formCommunication(accesses []primitive.Access) []primitive.Communication {
@@ -60,10 +67,11 @@ func formCommunication(accesses []primitive.Access) []primitive.Communication {
 	return comms
 }
 
-func (knotter *knotter) formKnots(comms []primitive.Communication) {
-	for i := 0; i < len(comms); i++ {
-		for j := i + 1; j < len(comms); j++ {
-			comm1, comm2 := comms[i], comms[j]
+func (knotter *knotter) formKnots() {
+	knotter.knots = []primitive.Knot{}
+	for i := 0; i < len(knotter.comms); i++ {
+		for j := i + 1; j < len(knotter.comms); j++ {
+			comm1, comm2 := knotter.comms[i], knotter.comms[j]
 			if comm1[0].Timestamp > comm2[0].Timestamp {
 				comm1, comm2 = comm2, comm1
 			}

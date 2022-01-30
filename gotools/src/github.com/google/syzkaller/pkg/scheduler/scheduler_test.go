@@ -7,32 +7,32 @@ import (
 	"github.com/google/syzkaller/pkg/primitive"
 )
 
-// TODO: required depends on the data, so it should reside in the data
+// TODO: answers depend on the data, so it should reside in the data
 // file
-var CVE20168655Answer = primitive.Knot{
-	{{Inst: 0x8bbb79d6, Addr: 0x18a48520, Size: 4, Typ: primitive.TypeLoad, Timestamp: 6},
-		{Inst: 0x8bbca80b, Addr: 0x18a48520, Size: 4, Typ: primitive.TypeStore, Timestamp: 156}},
-	{{Inst: 0x8bbc9093, Addr: 0x18a48874, Size: 4, Typ: primitive.TypeLoad, Timestamp: 149},
-		{Inst: 0x8bbb75a0, Addr: 0x18a48874, Size: 4, Typ: primitive.TypeStore, Timestamp: 14}},
-}
+var CVE20168655 = primitive.Knot{
+	{{Inst: 0x8bbb79d6, Size: 4, Typ: primitive.TypeLoad}, {Inst: 0x8bbca80b, Size: 4, Typ: primitive.TypeStore}},
+	{{Inst: 0x8bbc9093, Size: 4, Typ: primitive.TypeLoad}, {Inst: 0x8bbb75a0, Size: 4, Typ: primitive.TypeStore}}}
 
-var CVE20196974Answer = primitive.Knot{
-	{{Inst: 0x81f2b4e1, Addr: 0x18a48520, Size: 4, Typ: primitive.TypeStore, Timestamp: 6},
-		{Inst: 0x81f2bbd3, Addr: 0x18a48520, Size: 4, Typ: primitive.TypeLoad, Timestamp: 156}},
-	{{Inst: 0x8d34b095, Addr: 0x18a48874, Size: 4, Typ: primitive.TypeStore, Timestamp: 149},
-		{Inst: 0x8d3662f0, Addr: 0x18a48874, Size: 4, Typ: primitive.TypeLoad, Timestamp: 14}},
+var CVE20196974 = primitive.Knot{
+	{{Inst: 0x81f2b4e1, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x81f2bbd3, Size: 4, Typ: primitive.TypeLoad}},
+	{{Inst: 0x8d34b095, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x8d3662f0, Size: 4, Typ: primitive.TypeLoad}}}
+
+var tests = []struct {
+	filename string
+	answer   primitive.Knot
+	total    int
+}{
+	{"data1", CVE20168655, -1},
+	{"data2", CVE20196974, -1},
+	{"data1_simple", CVE20168655, 16},
 }
 
 func TestExcavateKnots(t *testing.T) {
-	testExcavateKnots(t, "data1", CVE20168655Answer)
-	testExcavateKnots(t, "data2", CVE20196974Answer)
-}
-
-func TestExcavateKnotsSimple(t *testing.T) {
-	knots := testExcavateKnots(t, "data1_simple", CVE20168655Answer)
-	totalKnots := 16
-	if len(knots) != totalKnots {
-		t.Errorf("wrong total number of knots, expected %v, got %v", totalKnots, len(knots))
+	for _, test := range tests {
+		knots := testExcavateKnots(t, test.filename, test.answer)
+		if test.total != -1 && len(knots) != test.total {
+			t.Errorf("wrong total number of knots, expected %v, got %v", test.total, len(knots))
+		}
 	}
 }
 
@@ -46,12 +46,9 @@ func testExcavateKnots(t *testing.T, filename string, answer primitive.Knot) []p
 }
 
 func TestSelectHarmoniousKnotsIterSimple(t *testing.T) {
-	testSelectHarmoniousKnotsIter(t, "data1_simple", CVE20168655Answer)
-}
-
-func TestSelectHarmoniousKnotsIter(t *testing.T) {
-	testSelectHarmoniousKnotsIter(t, "data1", CVE20168655Answer)
-	testSelectHarmoniousKnotsIter(t, "data2", CVE20196974Answer)
+	for _, test := range tests {
+		testSelectHarmoniousKnotsIter(t, test.filename, test.answer)
+	}
 }
 
 func testSelectHarmoniousKnotsIter(t *testing.T, filename string, answer primitive.Knot) {
@@ -162,4 +159,8 @@ func TestSqueezeSchedPoints(t *testing.T) {
 		}
 		// TODO: check the squeezed sched points are correct.
 	}
+}
+
+func BenchmarkExcavateKnots(b *testing.B) {
+	benchmarkExcavateKnots(b)
 }

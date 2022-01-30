@@ -9,7 +9,7 @@ import (
 	"github.com/google/syzkaller/pkg/primitive"
 )
 
-func loadTestdata(t *testing.T, raw []byte) (threads [2]primitive.SerialAccess) {
+func loadTestdata(raw []byte) (threads [2]primitive.SerialAccess, e error) {
 	timestamp, thread := uint32(0), -1
 	for {
 		idx := bytes.IndexByte(raw, byte('\n'))
@@ -36,11 +36,13 @@ func loadTestdata(t *testing.T, raw []byte) (threads [2]primitive.SerialAccess) 
 
 		inst, err := strconv.ParseUint(string(toks[0]), 16, 64)
 		if err != nil {
-			t.Errorf("parsing error: %v", err)
+			e = err
+			return
 		}
 		addr, err := strconv.ParseUint(string(toks[1][2:]), 16, 64)
 		if err != nil {
-			t.Errorf("parsing error: %v", err)
+			e = err
+			return
 		}
 
 		acc := primitive.Access{
@@ -62,7 +64,10 @@ func loadKnots(t *testing.T, path string) []primitive.Knot {
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	thrs := loadTestdata(t, data)
+	thrs, err := loadTestdata(data)
+	if err != nil {
+		t.Errorf("%v", err)
+	}
 	knots := ExcavateKnots(thrs[:])
 	t.Logf("# of knots: %d", len(knots))
 	return knots
