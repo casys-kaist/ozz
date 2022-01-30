@@ -117,7 +117,7 @@ type Scheduler struct {
 	schedPoints []SchedPoint
 }
 
-func (sched Scheduler) GenerateSchedPoints() ([]SchedPoint, bool) {
+func (sched *Scheduler) GenerateSchedPoints() ([]SchedPoint, bool) {
 	dag := sched.buildDAG()
 	nodes, ok := dag.topologicalSort()
 	if !ok {
@@ -130,11 +130,18 @@ func (sched Scheduler) GenerateSchedPoints() ([]SchedPoint, bool) {
 	return sched.schedPoints, true
 }
 
-func (sched *Scheduler) SquizeSchedPoints() []SchedPoint {
+func (sched *Scheduler) SqueezeSchedPoints() []SchedPoint {
 	new := []SchedPoint{}
+	preempted := make(map[uint64]bool)
 	for i := range sched.schedPoints {
-		if i == len(sched.schedPoints)-1 || sched.schedPoints[i].Thread != sched.schedPoints[i+1].Thread {
+		if preempted[sched.schedPoints[i].Thread] {
+			// This is the first instruction after the thread is
+			// preempted. This should be a sched point
+			preempted[sched.schedPoints[i].Thread] = false
 			new = append(new, sched.schedPoints[i])
+		}
+		if i == len(sched.schedPoints)-1 || sched.schedPoints[i].Thread != sched.schedPoints[i+1].Thread {
+			preempted[sched.schedPoints[i].Thread] = true
 		}
 	}
 

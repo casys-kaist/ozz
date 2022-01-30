@@ -130,3 +130,36 @@ func TestGenerateSchedPoint(t *testing.T) {
 		}
 	}
 }
+
+func TestSqueezeSchedPoints(t *testing.T) {
+	path := filepath.Join("testdata", "data1_simple")
+	knots := loadKnots(t, path)
+	orch := orchestrator{knots: knots}
+	for len(orch.knots) != 0 {
+		selected := orch.selectHarmoniousKnots()
+		sched := Scheduler{knots: selected}
+		full, ok := sched.GenerateSchedPoints()
+		if !ok {
+			t.Errorf("failed to generate a full schedule")
+		}
+		t.Logf("total %d full sched points\n", len(full))
+		for _, sp := range full {
+			t.Logf("%v", primitive.Access(sp))
+		}
+		squeezed := sched.SqueezeSchedPoints()
+		t.Logf("total %d squeezed sched points\n", len(squeezed))
+		for _, sp := range squeezed {
+			t.Logf("%v", primitive.Access(sp))
+		}
+		j := 0
+		for i := 0; i < len(full); i++ {
+			if j < len(squeezed) && full[i] == squeezed[j] {
+				j++
+			}
+		}
+		if j != len(squeezed) {
+			t.Errorf("squeezed sched is not a subset of full sched")
+		}
+		// TODO: check the squeezed sched points are correct.
+	}
+}
