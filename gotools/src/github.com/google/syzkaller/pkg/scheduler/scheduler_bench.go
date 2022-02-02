@@ -22,7 +22,11 @@ func benchmarkExcavateKnots(b *testing.B) {
 			ExcavateKnots(thrs[:])
 		}
 	})
-	knotter := knotter{accesses: thrs[:]}
+	knotter := knotter{
+		accesses:    thrs[:],
+		loopAllowed: loopAllowed,
+		loopCnt:     make(map[StaticAccess]int),
+	}
 	b.Run("buildAccessMap", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {

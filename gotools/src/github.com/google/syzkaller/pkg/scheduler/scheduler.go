@@ -6,15 +6,36 @@ import (
 	"github.com/google/syzkaller/pkg/primitive"
 )
 
-type knotter struct {
-	accesses  []primitive.SerialAccess
-	knots     []primitive.Knot
-	accessMap map[uint32][]primitive.Access
-	comms     []primitive.Communication
+// TODO: move StaticAccess to the primitive package
+type StaticAccess struct {
+	Inst   uint32
+	Thread uint64
 }
 
+type knotter struct {
+	loopAllowed []int
+	loopCnt     map[StaticAccess]int
+	accessMap   map[uint32][]primitive.Access
+	comms       []primitive.Communication
+	// input
+	accesses []primitive.SerialAccess
+	// output
+	knots []primitive.Knot
+}
+
+// TODO: Currently QEMU cannot handle multiple dynamic instances, so
+// we do not handle them.
+// var loopAllowed = []int{1, 2, 4, 8, 16, 32}
+var loopAllowed = []int{1}
+
 func ExcavateKnots(accesses []primitive.SerialAccess) []primitive.Knot {
-	knotter := knotter{accesses: accesses}
+	// TODO: embedding accesses incurs a large memory allocation
+	// (e.g., about Mbyes) and slows down this function
+	knotter := knotter{
+		accesses:    accesses,
+		loopAllowed: loopAllowed,
+		loopCnt:     make(map[StaticAccess]int),
+	}
 	knotter.fastenKnots()
 	return knotter.knots
 }
@@ -26,11 +47,40 @@ func (knotter *knotter) fastenKnots() {
 }
 
 func (knotter *knotter) buildAccessMap() {
+	// 1) accessMap do not need to contain accesses for addresses on
+	// which only loads are taken. 2) record specific dynamic
+	// instances for the same instruction to handle loops
 	knotter.accessMap = make(map[uint32][]primitive.Access)
+
+	// step1: record all writes
+	knotter.pickAccessesCond(func(acc primitive.Access) bool {
+		return acc.Typ == primitive.TypeStore
+	})
+
+	// step 2: record loads that have corresponding writes
+	knotter.pickAccessesCond(func(acc primitive.Access) bool {
+		addr := acc.Addr & ^uint32(7)
+		_, ok := knotter.accessMap[addr]
+		return acc.Typ == primitive.TypeLoad && ok
+	})
+}
+
+func (knotter *knotter) pickAccessesCond(cond func(acc primitive.Access) bool) {
 	for _, accs := range knotter.accesses {
 		for _, acc := range accs {
-			addr := acc.Addr & ^uint32(7)
-			knotter.accessMap[addr] = append(knotter.accessMap[addr], acc)
+			if !cond(acc) {
+				continue
+			}
+			sa := StaticAccess{Inst: acc.Inst, Thread: acc.Thread}
+			knotter.loopCnt[sa]++
+			// TODO: this loop can be optimized
+			for _, allowed := range knotter.loopAllowed {
+				if allowed == knotter.loopCnt[sa] {
+					addr := acc.Addr & ^uint32(7)
+					knotter.accessMap[addr] = append(knotter.accessMap[addr], acc)
+					break
+				}
+			}
 		}
 	}
 }
