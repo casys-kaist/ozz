@@ -15,6 +15,30 @@
   - Based on the coverage, guide the fuzzer to quickly expand the coverage
     - Previous works waste the computing power due to focusing on a single data race
 
+# Existing approaches
+  - Single data race as a coverage without a context
+    - Razzer, Snowboard, KRace
+    - does not explain the context on which instructions take place
+	- Testing a single coverage at a time
+	  - Snowboard, Razzer
+	- Or without guiding
+	  - KRace
+
+# Our approach to abstract interleaving
+  - Focusing a specific subsystem at a time
+    - API calls to other subsystems, a caller of functions in the
+      subsystem, subsequent executions can be think as aggregated virtual instructions
+  - Decomposing a combination of communcations into two communications
+    - Analogous to the 2-gram of control flow
+
+# Our approach to guide the fuzzer
+  - Testing multiple combinations at a time
+    - Many of communications are independent with each other
+    - Coalesce independent races
+  - Cooperative way of composing possible commbinations
+    - Different interleavings can give a clue of concealed
+      interleaving
+
 # Component of this project
   - Abstract the interleaving, which must be
     - Simple
@@ -54,21 +78,6 @@
 
 # Misc
   - Equivalence relation with respect to a certain data race
-
-# Our approach to abstract interleaving
-  - Focusing a specific subsystem at a time
-    - API calls to other subsystems, a caller of functions in the
-      subsystem, subsequent executions can be think as aggregated virtual instructions
-  - Decomposing a combination of communcations into two communications
-    - Analogous to the 2-gram of control flow
-
-# Our approach to guide the fuzzer
-  - Testing multiple combinations at a time
-    - Many of communications are independent with each other
-    - Coalesce independent races
-  - Cooperative way of composing possible commbinations
-    - Different interleavings can give a clue of concealed
-      interleaving
 
 # Concerns
   - Are there cases that a specific interleaving in a subsystem causes a
