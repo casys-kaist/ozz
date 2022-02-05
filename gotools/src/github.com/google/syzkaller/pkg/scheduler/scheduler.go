@@ -29,12 +29,9 @@ type knotter struct {
 var loopAllowed = []int{1}
 
 func ExcavateKnots(accesses []primitive.SerialAccess) []primitive.Knot {
-	// TODO: embedding accesses incurs a large memory allocation
-	// (e.g., about Mbyes) and slows down this function
 	knotter := knotter{
 		accesses:    accesses,
 		loopAllowed: loopAllowed,
-		loopCnt:     make(map[StaticAccess]int),
 	}
 	knotter.fastenKnots()
 	return knotter.knots
@@ -47,10 +44,14 @@ func (knotter *knotter) fastenKnots() {
 }
 
 func (knotter *knotter) buildAccessMap() {
+	// XXX: using maps incurs lots of memory allocations which slows
+	// down ExcavatgeKnots().
+
 	// 1) accessMap do not need to contain accesses for addresses on
 	// which only loads are taken. 2) record specific dynamic
 	// instances for the same instruction to handle loops
 	knotter.accessMap = make(map[uint32][]primitive.Access)
+	knotter.loopCnt = make(map[StaticAccess]int)
 
 	// step1: record all writes
 	knotter.pickAccessesCond(func(acc primitive.Access) bool {
@@ -88,12 +89,11 @@ func (knotter *knotter) pickAccessesCond(cond func(acc primitive.Access) bool) {
 func (knotter *knotter) formCommunications() {
 	knotter.comms = []primitive.Communication{}
 	for _, accs := range knotter.accessMap {
-		knotter.comms = append(knotter.comms, formCommunication(accs)...)
+		knotter.formCommunicationAddr(accs)
 	}
 }
 
-func formCommunication(accesses []primitive.Access) []primitive.Communication {
-	comms := []primitive.Communication{}
+func (knotter *knotter) formCommunicationAddr(accesses []primitive.Access) {
 	for i := 0; i < len(accesses); i++ {
 		for j := i + 1; j < len(accesses); j++ {
 			acc1, acc2 := accesses[i], accesses[j]
@@ -111,10 +111,9 @@ func formCommunication(accesses []primitive.Access) []primitive.Communication {
 
 			// We are generating all possible knots so append both
 			// Communications
-			comms = append(comms, primitive.Communication{acc1, acc2}, primitive.Communication{acc2, acc1})
+			knotter.comms = append(knotter.comms, primitive.Communication{acc1, acc2}, primitive.Communication{acc2, acc1})
 		}
 	}
-	return comms
 }
 
 func (knotter *knotter) formKnots() {
