@@ -26,6 +26,7 @@ require (
 	github.com/stretchr/objx v0.3.0 // indirect
 	github.com/tdakkota/asciicheck v0.0.0-20200416200610-e657995f937b // indirect
 	github.com/timakin/bodyclose v0.0.0-20200424151742-cb6215831a94 // indirect
+	golang.org/x/arch v0.0.0-20210923205945-b76863e36670
 	golang.org/x/net v0.0.0-20201202161906-c7110b5ffcbb
 	golang.org/x/oauth2 v0.0.0-20200902213428-5d25da1a8d43
 	golang.org/x/sys v0.0.0-20210119212857-b64e53b001e4
