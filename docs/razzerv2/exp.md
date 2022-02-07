@@ -1,30 +1,44 @@
 # Evaluation plan
 
-## How to show two pair (or considering the context) is better than a single communication
+## Finding real bugs
 
-## Context-sensitive bugs
+## Effectiveness of the context-sensitive coverage (or two pair of comms) compared with a single data race
 
-### How many of know CVEs are context-sensitive?
+### How many of known CVEs are context-sensitive?
 
-### Both comms
+#### Both comms
 - CVE-2019-6974
 - CVE-2019-1999
 - CVE-2019-2025
 
-### Only one comm
+#### Only one comm
 - e20a2e9c
 - 11eb85ec
 
-## During fuzzing a specific subsystem (i.e., KVM)
+#### Our arguments
 
-### Given an offending comm (i.e., dedup effectiveness)
+- There are many such race conditions
+
+### During fuzzing a specific subsystem (i.e., KVM) to find above bugs
+
+#### Given an offending comm (i.e., dedup effectiveness)
 
 - # of the total detection of the comm
+- Among the total detected comms, # of comms that can trigger the bugs
 - # of unique comm with respect to the context
   - w/ or w/o the module proximity
+- Among the unique comms, # of unique comms that can trigger the bugs
 
-### The number of total runs until finding above bugs
+#### Our arguments
 
-- Random guiding
+- Dedup is very effective to reduce unnecessary executions
+
+### The number of total runs (or the spending time) until finding above bugs
+
+- Random selection amomg detected instances of comms
 - Snowboard
 - Razzer V2
+
+#### Our arguments
+
+- TBD

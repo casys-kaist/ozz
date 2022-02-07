@@ -25,19 +25,16 @@
 	  - KRace
 
 # Our approach to abstract interleaving
+  - Decomposing a combination of communcations into two communications
+    - Analogous to the 2-gram of control flow
   - Focusing a specific subsystem at a time
     - API calls to other subsystems, a caller of functions in the
       subsystem, subsequent executions can be think as aggregated virtual instructions
-  - Decomposing a combination of communcations into two communications
-    - Analogous to the 2-gram of control flow
 
 # Our approach to guide the fuzzer
-  - Testing multiple combinations at a time
-    - Many of communications are independent with each other
-    - Coalesce independent races
-  - Cooperative way of composing possible commbinations
-    - Different interleavings can give a clue of concealed
-      interleaving
+  - Testing a whole interleaving instead of flipping a single data race
+  - Cooperatively infer a possible interleaving
+    - Multiple runs can give a clue of concealed interleavings
 
 # Component of this project
   - Abstract the interleaving, which must be
@@ -45,13 +42,6 @@
     - Informative
   - Scheduling to expand the coverage, which must be
     - Effective
-
-# Challenges
-  - Numerous combination of all communications
-  - Interleaving patterns are not standardized
-  - Guiding a fuzzer with not-well-refined coverage would harm the
-    performance of the fuzzer
-  - Hidden data races and hidden interleaving
 
 # Terms
   - Communication: read-from + from-read

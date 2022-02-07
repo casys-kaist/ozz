@@ -101,6 +101,13 @@ func (knotter *knotter) formCommunicationAddr(accesses []primitive.Access) {
 				continue
 			}
 
+			// NOTE: We want to form a communication when one stores a
+			// value and the other loads the value. However, all
+			// RMW-atomics such that atomic_inc and atomic_dec have
+			// the store type, so there is no load even if one atomic
+			// in fact reads a value from another atomic. To handle
+			// the cases, we discasd cases only when both accesses
+			// have the load type.
 			if acc1.Typ == primitive.TypeLoad && acc2.Typ == primitive.TypeLoad {
 				continue
 			}
