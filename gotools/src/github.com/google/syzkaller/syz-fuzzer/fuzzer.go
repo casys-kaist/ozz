@@ -24,7 +24,6 @@ import (
 	"github.com/google/syzkaller/pkg/ipc/ipcconfig"
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/primitive"
 	"github.com/google/syzkaller/pkg/rpctype"
 	"github.com/google/syzkaller/pkg/signal"
 	"github.com/google/syzkaller/pkg/tool"
@@ -445,9 +444,9 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats map[string]uint64) bool {
 	for _, inp := range r.NewInputs {
 		fuzzer.addInputFromAnotherFuzzer(inp)
 	}
-	for _, inp := range r.NewThreadedInputs {
-		fuzzer.addThreadedInputFromAnotherFuzzer(inp)
-	}
+	// for _, inp := range r.NewThreadedInputs {
+	// 	fuzzer.addThreadedInputFromAnotherFuzzer(inp)
+	// }
 	for _, candidate := range r.Candidates {
 		fuzzer.addCandidateInput(candidate)
 	}
@@ -467,15 +466,15 @@ func (fuzzer *Fuzzer) sendInputToManager(inp rpctype.RPCInput) {
 	}
 }
 
-func (fuzzer *Fuzzer) sendThreadedInputToManager(inp rpctype.RPCThreadedInput) {
-	a := &rpctype.NewThreadedInputArgs{
-		Name:             fuzzer.name,
-		RPCThreadedInput: inp,
-	}
-	if err := fuzzer.manager.Call("Manager.NewThreadedInput", a, nil); err != nil {
-		log.Fatalf("Manager.NewThreadedInput call failed: %v", err)
-	}
-}
+// func (fuzzer *Fuzzer) sendThreadedInputToManager(inp rpctype.RPCThreadedInput) {
+// 	a := &rpctype.NewThreadedInputArgs{
+// 		Name:             fuzzer.name,
+// 		RPCThreadedInput: inp,
+// 	}
+// 	if err := fuzzer.manager.Call("Manager.NewThreadedInput", a, nil); err != nil {
+// 		log.Fatalf("Manager.NewThreadedInput call failed: %v", err)
+// 	}
+// }
 
 func (fuzzer *Fuzzer) addInputFromAnotherFuzzer(inp rpctype.RPCInput) {
 	p := fuzzer.deserializeInput(inp.Prog)
@@ -487,14 +486,14 @@ func (fuzzer *Fuzzer) addInputFromAnotherFuzzer(inp rpctype.RPCInput) {
 	fuzzer.addInputToCorpus(p, sign, sig)
 }
 
-func (fuzzer *Fuzzer) addThreadedInputFromAnotherFuzzer(inp rpctype.RPCThreadedInput) {
-	p := fuzzer.deserializeInput(inp.Prog)
-	if p == nil {
-		return
-	}
-	readfrom := inp.ReadFrom.Deserialize()
-	fuzzer.addInputToThreadedCorpus(p, readfrom, inp.Serial)
-}
+// func (fuzzer *Fuzzer) addThreadedInputFromAnotherFuzzer(inp rpctype.RPCThreadedInput) {
+// 	p := fuzzer.deserializeInput(inp.Prog)
+// 	if p == nil {
+// 		return
+// 	}
+// 	readfrom := inp.ReadFrom.Deserialize()
+// 	fuzzer.addInputToThreadedCorpus(p, readfrom, inp.Serial)
+// }
 
 func (fuzzer *Fuzzer) addCandidateInput(candidate rpctype.RPCCandidate) {
 	p := fuzzer.deserializeInput(candidate.Prog)
@@ -557,28 +556,28 @@ func (fuzzer *FuzzerSnapshot) chooseProgram(r *rand.Rand) *prog.Prog {
 	return fuzzer.corpus[idx]
 }
 
-func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.ThreadedProg {
-	if len(fuzzer.threadedCorpus) == 0 {
-		return nil
-	}
-	// NOTE: we want to select a threaded program with the long legnth
-	// of read-from (i.e., the scheduling space is large), and has not
-	// been selected too many times (i.e., and we don't expore the
-	// scheduling space yet).
-	// XXX: Although the idea is straight-forward, implementing it is
-	// costly (or not. whatever.). So instead, the below is a kind of
-	// heuristic (hopefully) mimicking the idea.
-	for try := 0; try < 10; try++ {
-		idx := r.Intn(len(fuzzer.threadedCorpus))
-		tp := fuzzer.threadedCorpus[idx]
-		if tp.Prio-tp.Scheduled >= r.Intn(tp.Prio) {
-			tp.Scheduled++
-			return tp
-		}
-	}
-	idx := r.Intn(len(fuzzer.threadedCorpus))
-	return fuzzer.threadedCorpus[idx]
-}
+// func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.ThreadedProg {
+// 	if len(fuzzer.threadedCorpus) == 0 {
+// 		return nil
+// 	}
+// 	// NOTE: we want to select a threaded program with the long legnth
+// 	// of read-from (i.e., the scheduling space is large), and has not
+// 	// been selected too many times (i.e., and we don't expore the
+// 	// scheduling space yet).
+// 	// XXX: Although the idea is straight-forward, implementing it is
+// 	// costly (or not. whatever.). So instead, the below is a kind of
+// 	// heuristic (hopefully) mimicking the idea.
+// 	for try := 0; try < 10; try++ {
+// 		idx := r.Intn(len(fuzzer.threadedCorpus))
+// 		tp := fuzzer.threadedCorpus[idx]
+// 		if tp.Prio-tp.Scheduled >= r.Intn(tp.Prio) {
+// 			tp.Scheduled++
+// 			return tp
+// 		}
+// 	}
+// 	idx := r.Intn(len(fuzzer.threadedCorpus))
+// 	return fuzzer.threadedCorpus[idx]
+// }
 
 func (fuzzer *Fuzzer) __addInputToCorpus(p *prog.Prog, sig hash.Sig, prio int64) {
 	fuzzer.corpusMu.Lock()
@@ -606,32 +605,32 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 	}
 }
 
-func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, readfrom signal.ReadFrom, serial primitive.SerialAccess) {
-	fuzzer.corpusMu.Lock()
-	defer fuzzer.corpusMu.Unlock()
-	fuzzer.threadedCorpus = append(fuzzer.threadedCorpus, &prog.ThreadedProg{
-		P:        p,
-		ReadFrom: readfrom,
-		Serial:   serial,
-		Prio:     readfrom.Len() * 2,
-	})
-}
+// func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, readfrom signal.ReadFrom, serial primitive.SerialAccess) {
+// 	fuzzer.corpusMu.Lock()
+// 	defer fuzzer.corpusMu.Unlock()
+// 	fuzzer.threadedCorpus = append(fuzzer.threadedCorpus, &prog.ThreadedProg{
+// 		P:        p,
+// 		ReadFrom: readfrom,
+// 		Serial:   serial,
+// 		Prio:     readfrom.Len() * 2,
+// 	})
+// }
 
-func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, info *ipc.ProgInfo, sig hash.Sig) {
-	// TODO: how to set the priority of threaded input?
-	rf := info.ContenderReadFrom(p.Contender)
-	serial := info.ContenderSerialAccess(p.Contender)
+// func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, info *ipc.ProgInfo, sig hash.Sig) {
+// 	// TODO: how to set the priority of threaded input?
+// 	rf := info.ContenderReadFrom(p.Contender)
+// 	serial := info.ContenderSerialAccess(p.Contender)
 
-	const threadedPrio = 1000
-	fuzzer.__addInputToCorpus(p, sig, threadedPrio)
-	fuzzer.addInputToThreadedCorpus(p, rf, serial)
+// 	const threadedPrio = 1000
+// 	fuzzer.__addInputToCorpus(p, sig, threadedPrio)
+// 	fuzzer.addInputToThreadedCorpus(p, rf, serial)
 
-	fuzzer.signalMu.Lock()
-	defer fuzzer.signalMu.Unlock()
+// 	fuzzer.signalMu.Lock()
+// 	defer fuzzer.signalMu.Unlock()
 
-	fuzzer.corpusReadFrom.Merge(rf)
-	fuzzer.maxReadFrom.Merge(rf)
-}
+// 	fuzzer.corpusReadFrom.Merge(rf)
+// 	fuzzer.maxReadFrom.Merge(rf)
+// }
 
 func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
 	fuzzer.corpusMu.RLock()

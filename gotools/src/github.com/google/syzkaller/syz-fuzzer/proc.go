@@ -140,23 +140,23 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot, force bool) {
 	// proc.scheduleInput() does not queue additional works, so
 	// executing proc.scheduleInput() does not cause the workqueues
 	// exploding.
-	for cnt := 0; cnt < 10 && (proc.needScheduling() || force); cnt++ {
-		force = false
-		// increase scheduled here so let needScheduling() know that
-		// we tried to mutate a schedule.
-		proc.scheduled++
-		tp := fuzzerSnapshot.chooseThreadedProgram(proc.rnd)
-		if tp == nil {
-			continue
-		}
-		p := tp.P.Clone()
-		ok := p.MutateSchedule(proc.rnd, proc.fuzzer.staleCount, prog.MaximalPoints, prog.MinimalPoints, tp.ReadFrom, tp.Serial)
-		if !ok {
-			continue
-		}
-		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
-		proc.execute(proc.execOpts, p, ProgNormal, StatSchedule)
-	}
+	// for cnt := 0; cnt < 10 && (proc.needScheduling() || force); cnt++ {
+	// 	force = false
+	// 	// increase scheduled here so let needScheduling() know that
+	// 	// we tried to mutate a schedule.
+	// 	proc.scheduled++
+	// 	tp := fuzzerSnapshot.chooseThreadedProgram(proc.rnd)
+	// 	if tp == nil {
+	// 		continue
+	// 	}
+	// 	p := tp.P.Clone()
+	// 	ok := p.MutateSchedule(proc.rnd, proc.fuzzer.staleCount, prog.MaximalPoints, prog.MinimalPoints, tp.ReadFrom, tp.Serial)
+	// 	if !ok {
+	// 		continue
+	// 	}
+	// 	log.Logf(1, "proc #%v: scheduling an input", proc.pid)
+	// 	proc.execute(proc.execOpts, p, ProgNormal, StatSchedule)
+	// }
 }
 
 func (proc *Proc) triageInput(item *WorkTriage) {
@@ -357,26 +357,26 @@ func (proc *Proc) postExecute(p *prog.Prog, flags ProgTypes, info *ipc.ProgInfo)
 }
 
 func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.ProgInfo {
-	// looking for read-from coverage
-	if proc.fuzzer.checkNewReadFrom(p, p.Contender, info) {
-		// TODO: Razzer's mechanism. we don't minimize p when
-		// threading, but we can.
-		data := p.Serialize()
-		sig := hash.Hash(data)
-		log.Logf(2, "added new threaded input for %v, %v to corpus:\n%s",
-			p.Contender.Calls[0], p.Contender.Calls[1], data)
-		proc.fuzzer.sendThreadedInputToManager(rpctype.RPCThreadedInput{
-			Prog:     data,
-			ReadFrom: info.ContenderReadFrom(p.Contender).Serialize(),
-			Serial:   info.ContenderSerialAccess(p.Contender),
-		})
-		proc.fuzzer.addThreadedInputToCorpus(p, info, sig)
-	}
+	// 	// looking for read-from coverage
+	// 	if proc.fuzzer.checkNewReadFrom(p, p.Contender, info) {
+	// 		// TODO: Razzer's mechanism. we don't minimize p when
+	// 		// threading, but we can.
+	// 		data := p.Serialize()
+	// 		sig := hash.Hash(data)
+	// 		log.Logf(2, "added new threaded input for %v, %v to corpus:\n%s",
+	// 			p.Contender.Calls[0], p.Contender.Calls[1], data)
+	// 		proc.fuzzer.sendThreadedInputToManager(rpctype.RPCThreadedInput{
+	// 			Prog:     data,
+	// 			ReadFrom: info.ContenderReadFrom(p.Contender).Serialize(),
+	// 			Serial:   info.ContenderSerialAccess(p.Contender),
+	// 		})
+	// 		proc.fuzzer.addThreadedInputToCorpus(p, info, sig)
+	// 	}
 
-	// TODO: Razzer mechanism. p is already threaded so we don't
-	// thread it more. So here we don't enqueue more threading works.
-	// This is possibly a limitation of Razzer. Improve this if
-	// possible.
+	// 	// TODO: Razzer mechanism. p is already threaded so we don't
+	// 	// thread it more. So here we don't enqueue more threading works.
+	// 	// This is possibly a limitation of Razzer. Improve this if
+	// 	// possible.
 	return info
 }
 
