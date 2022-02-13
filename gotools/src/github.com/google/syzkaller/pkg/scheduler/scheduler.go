@@ -6,94 +6,249 @@ import (
 	"github.com/google/syzkaller/pkg/primitive"
 )
 
-// TODO: move StaticAccess to the primitive package
-type StaticAccess struct {
-	Inst   uint32
-	Thread uint64
-}
-
-type knotter struct {
+// XXX: using mutiple maps incurs lots of memory allocations which
+// slows down ExcavateKnots().
+type Knotter struct {
 	loopAllowed []int
-	loopCnt     map[StaticAccess]int
+	commChan    map[uint32]struct{}
 	accessMap   map[uint32][]primitive.Access
 	comms       []primitive.Communication
+	numThr      int
 	// input
-	accesses []primitive.SerialAccess
+	seqs     [][]primitive.SerialAccess
+	seqCount int
 	// output
 	knots []primitive.Knot
 }
 
-// TODO: Currently QEMU cannot handle multiple dynamic instances, so
-// we do not handle them.
-// var loopAllowed = []int{1, 2, 4, 8, 16, 32}
-var loopAllowed = []int{1}
+type instPerThread struct {
+	inst   uint32
+	thread uint64
+}
 
-func ExcavateKnots(accesses []primitive.SerialAccess) []primitive.Knot {
-	knotter := knotter{
-		accesses:    accesses,
-		loopAllowed: loopAllowed,
+func (knotter *Knotter) AddSequentialTrace(seq []primitive.SerialAccess) bool {
+	if knotter.seqCount == 2 {
+		// NOTE: In this project, we build knots using at most two
+		// sequential executions. Adding more sequential execution is
+		// not allowed.
+		return false
 	}
+	if !knotter.sanitizeSequentialTrace(seq) {
+		return false
+	}
+	knotter.seqs = append(knotter.seqs, seq)
+	knotter.seqCount++
+	return true
+}
+
+func (knotter *Knotter) sanitizeSequentialTrace(seq []primitive.SerialAccess) bool {
+	if len(seq) <= 1 {
+		// 1) Reject a case that a thread does not touch memory at all. In
+		// theory, there can be a case that a thread or all threads do not
+		// touch any memory objects. We don't need to consider those cases
+		// since they do not race anyway. 2) or a single thread is given
+		return false
+	}
+	chk := make([]bool, len(seq))
+	for _, serial := range seq {
+		if len(serial) == 0 {
+			return false
+		}
+		if !serial.SingleThread() {
+			// All serial execution should be a single thread
+			return false
+		}
+		thr := int(serial[0].Thread)
+		if thr >= len(chk) {
+			// thread id should be consecutive starting from 0
+		}
+		if chk[thr] {
+			// All serial should have a different thread id
+			return false
+		}
+		chk[thr] = true
+	}
+	// At this point we take consider cases that all sequential
+	// executions have the same nubmer of threads
+	if knotter.numThr == 0 {
+		knotter.numThr = len(seq)
+	} else if knotter.numThr != len(seq) {
+		return false
+	}
+	return true
+}
+
+func (knotter *Knotter) ExcavateKnots() []primitive.Knot {
+	if knotter.seqCount < 1 {
+		return nil
+	}
+	knotter.loopAllowed = loopAllowed
 	knotter.fastenKnots()
 	return knotter.knots
 }
 
-func (knotter *knotter) fastenKnots() {
+func (knotter *Knotter) fastenKnots() {
+	knotter.collectCommChans()
+	knotter.inferProgramOrder()
 	knotter.buildAccessMap()
 	knotter.formCommunications()
 	knotter.formKnots()
 }
 
-func (knotter *knotter) buildAccessMap() {
-	// XXX: using maps incurs lots of memory allocations which slows
-	// down ExcavatgeKnots().
-
-	// 1) accessMap do not need to contain accesses for addresses on
-	// which only loads are taken. 2) record specific dynamic
-	// instances for the same instruction to handle loops
-	knotter.accessMap = make(map[uint32][]primitive.Access)
-	knotter.loopCnt = make(map[StaticAccess]int)
-
-	// step1: record all writes
-	knotter.pickAccessesCond(func(acc primitive.Access) bool {
-		return acc.Typ == primitive.TypeStore
-	})
-
-	// step 2: record loads that have corresponding writes
-	knotter.pickAccessesCond(func(acc primitive.Access) bool {
-		addr := acc.Addr & ^uint32(7)
-		_, ok := knotter.accessMap[addr]
-		return acc.Typ == primitive.TypeLoad && ok
-	})
+func (knotter *Knotter) collectCommChans() {
+	// Only memory objects on which store operations take place can be
+	// a communication channel
+	knotter.commChan = make(map[uint32]struct{})
+	forAllSerial := func(f func(*primitive.SerialAccess)) {
+		for i := 0; i < len(knotter.seqs); i++ {
+			for j := 0; j < len(knotter.seqs[i]); j++ {
+				serial := &knotter.seqs[i][j]
+				f(serial)
+			}
+		}
+	}
+	// Firstly, collect all possible communicatino channels
+	forAllSerial(knotter.collectCommChansSerial)
+	// Then, distill all serial accesses
+	forAllSerial(knotter.distillSerial)
 }
 
-func (knotter *knotter) pickAccessesCond(cond func(acc primitive.Access) bool) {
-	for _, accs := range knotter.accesses {
-		for _, acc := range accs {
-			if !cond(acc) {
-				continue
+func (knotter *Knotter) collectCommChansSerial(serial *primitive.SerialAccess) {
+	for _, acc := range *serial {
+		if acc.Typ == primitive.TypeStore {
+			addr := wordify(acc.Addr)
+			knotter.commChan[addr] = struct{}{}
+		}
+	}
+}
+
+func (knotter *Knotter) distillSerial(serial *primitive.SerialAccess) {
+	head := 0
+	for i := 0; i < len(*serial); i++ {
+		addr := wordify((*serial)[i].Addr)
+		if _, ok := knotter.commChan[addr]; ok {
+			(*serial)[head] = (*serial)[i]
+			head++
+		}
+	}
+	(*serial) = (*serial)[:head]
+}
+
+func (knotter *Knotter) inferProgramOrder() {
+	if knotter.seqCount == 1 {
+		// If we have only one sequential execution, ts timestamps
+		// represent the program order as is.
+		return
+	}
+
+	for i := 0; i < knotter.numThr; i++ {
+		// TODO: refactoring below functions
+		serials := knotter.pickThread(uint64(i))
+		commLen, bitmaps := knotter.inferCommonPathThread(serials)
+		knotter.inferProgramOrderThread(serials, commLen, bitmaps)
+	}
+}
+
+func (knotter *Knotter) pickThread(id uint64) []*primitive.SerialAccess {
+	thr := []*primitive.SerialAccess{}
+	for i := range knotter.seqs {
+		for j := range knotter.seqs[i] {
+			serial := &knotter.seqs[i][j]
+			if (*serial)[0].Thread == id {
+				thr = append(thr, serial)
+				break
 			}
-			sa := StaticAccess{Inst: acc.Inst, Thread: acc.Thread}
-			knotter.loopCnt[sa]++
-			// TODO: this loop can be optimized
-			for _, allowed := range knotter.loopAllowed {
-				if allowed == knotter.loopCnt[sa] {
-					addr := acc.Addr & ^uint32(7)
-					knotter.accessMap[addr] = append(knotter.accessMap[addr], acc)
-					break
+		}
+	}
+	return thr
+}
+
+func (knotter *Knotter) inferProgramOrderThread(thr []*primitive.SerialAccess, commLen int, bitmaps [][]bool) {
+	// TODO: refactoring
+	max := 0
+	for _, serial := range thr {
+		max += len(*serial)
+	}
+	max -= (commLen * (len(thr) - 1))
+	idx := make([]int, len(thr))
+
+	for po := uint32(0); po < uint32(max); {
+		for i := range thr {
+			for ; idx[i] < len(bitmaps[i]) && !bitmaps[i][idx[i]]; idx[i]++ {
+				// assign po to i
+				(*thr[i])[idx[i]].Timestamp = po
+				(*thr[i])[idx[i]].Thread |= uint64(i) << 16
+				// log.Logf(0, "Assign %d to %v", po, (*thr[i])[idx[i]].StringContext())
+				// log.Logf(0, "increase po")
+				po++
+			}
+		}
+
+	loop:
+		for {
+			for i := range idx {
+				if idx[i] >= len(bitmaps[i]) || !bitmaps[i][idx[i]] {
+					break loop
 				}
+			}
+			// comm
+			for i := range idx {
+				(*thr[i])[idx[i]].Timestamp = po
+				(*thr[i])[idx[i]].Thread |= commonPath << 16
+				// log.Logf(0, "Assign %d to %v (comm)", po, (*thr[i])[idx[i]].StringContext())
+				idx[i]++
+			}
+			// log.Logf(0, "increase po")
+			po++
+		}
+	}
+}
+
+func (knotter *Knotter) inferCommonPathThread(thr []*primitive.SerialAccess) (int, [][]bool) {
+	if len(thr) < 2 {
+		return 0, nil
+	}
+	return lcs(*thr[0], *thr[1])
+}
+
+func (knotter *Knotter) buildAccessMap() {
+	// Record specific dynamic instances for the same instruction to
+	// handle loops
+	knotter.accessMap = make(map[uint32][]primitive.Access)
+	for _, seq := range knotter.seqs {
+		for _, serial := range seq {
+			knotter.buildAccessMapSerial(serial)
+		}
+	}
+}
+
+func (knotter *Knotter) buildAccessMapSerial(serial primitive.SerialAccess) {
+	loopCnt := make(map[uint32]int)
+	for _, acc := range serial {
+		addr := wordify(acc.Addr)
+		if _, ok := knotter.commChan[addr]; !ok {
+			continue
+		}
+		loopCnt[acc.Inst]++
+		// TODO: this loop can be optimized
+		for _, allowed := range knotter.loopAllowed {
+			if allowed == loopCnt[acc.Inst] {
+				addr := wordify(acc.Addr)
+				knotter.accessMap[addr] = append(knotter.accessMap[addr], acc)
+				break
 			}
 		}
 	}
 }
 
-func (knotter *knotter) formCommunications() {
+func (knotter *Knotter) formCommunications() {
 	knotter.comms = []primitive.Communication{}
 	for _, accs := range knotter.accessMap {
 		knotter.formCommunicationAddr(accs)
 	}
 }
 
-func (knotter *knotter) formCommunicationAddr(accesses []primitive.Access) {
+func (knotter *Knotter) formCommunicationAddr(accesses []primitive.Access) {
 	for i := 0; i < len(accesses); i++ {
 		for j := i + 1; j < len(accesses); j++ {
 			acc1, acc2 := accesses[i], accesses[j]
@@ -123,7 +278,7 @@ func (knotter *knotter) formCommunicationAddr(accesses []primitive.Access) {
 	}
 }
 
-func (knotter *knotter) formKnots() {
+func (knotter *Knotter) formKnots() {
 	knotter.knots = []primitive.Knot{}
 	for i := 0; i < len(knotter.comms); i++ {
 		for j := i + 1; j < len(knotter.comms); j++ {
@@ -237,3 +392,14 @@ func (sched *Scheduler) buildDAG() dag {
 	}
 	return d
 }
+
+func wordify(addr uint32) uint32 {
+	return addr & ^uint32(7)
+}
+
+// TODO: Currently QEMU cannot handle multiple dynamic instances, so
+// we do not handle them.
+// var loopAllowed = []int{1, 2, 4, 8, 16, 32}
+var loopAllowed = []int{1}
+
+const commonPath = 0xff

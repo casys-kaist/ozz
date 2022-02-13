@@ -20,7 +20,7 @@ func loadTestdata(raw []byte) (threads [2]primitive.SerialAccess, e error) {
 		raw = raw[idx+1:]
 
 		toks := bytes.Fields(line)
-		if len(toks) != 3 {
+		if len(toks) < 3 {
 			if bytes.HasPrefix(line, []byte("Thread")) {
 				thread++
 			}
@@ -68,7 +68,9 @@ func loadKnots(t *testing.T, path string) []primitive.Knot {
 	if err != nil {
 		t.Errorf("%v", err)
 	}
-	knots := ExcavateKnots(thrs[:])
+	knotter := Knotter{}
+	knotter.AddSequentialTrace(thrs[:])
+	knots := knotter.ExcavateKnots()
 	t.Logf("# of knots: %d", len(knots))
 	return knots
 }
