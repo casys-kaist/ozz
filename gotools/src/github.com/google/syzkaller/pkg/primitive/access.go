@@ -17,7 +17,12 @@ type Access struct {
 
 func (acc Access) String() string {
 	return fmt.Sprintf("thread #%d: %x accesses %x (size: %d, type: %d, timestamp: %d)",
-		acc.Thread, acc.Inst, acc.Addr, acc.Size, acc.Typ, acc.Timestamp)
+		acc.Thread&0xffff, acc.Inst, acc.Addr, acc.Size, acc.Typ, acc.Timestamp)
+}
+
+func (acc Access) StringContext() string {
+	return fmt.Sprintf("thread #%d (ctx %x): %x accesses %x (size: %d, type: %d, timestamp: %d)",
+		acc.Thread&0xffff, (acc.Thread>>16)&0xff, acc.Inst, acc.Addr, acc.Size, acc.Typ, acc.Timestamp)
 }
 
 func (acc Access) Overlapped(acc2 Access) bool {
