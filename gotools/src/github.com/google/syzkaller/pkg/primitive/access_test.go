@@ -49,6 +49,32 @@ func TestSerializeAccess(t *testing.T) {
 	}
 }
 
+func TestSingleThread(t *testing.T) {
+	tests := []struct {
+		serial primitive.SerialAccess
+		st     bool
+	}{
+		{[]primitive.Access{
+			{Thread: 0},
+			{Thread: 0},
+			{Thread: 0},
+		}, true},
+		{[]primitive.Access{
+			{Thread: 0},
+			{Thread: 1},
+			{Thread: 0},
+		}, false},
+		{[]primitive.Access{
+			{Thread: 0},
+		}, true},
+	}
+	for _, test := range tests {
+		if got := test.serial.SingleThread(); got != test.st {
+			t.Errorf("wrong, expected=%v, got=%v", test.st, got)
+		}
+	}
+}
+
 func TestFindIndex(t *testing.T) {
 	serial := primitive.SerialAccess{}
 	for _, acc := range testAcc {

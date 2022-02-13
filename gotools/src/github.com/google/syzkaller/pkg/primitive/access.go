@@ -41,6 +41,15 @@ func SerializeAccess(acc []Access) SerialAccess {
 	return serial
 }
 
+func (serial SerialAccess) SingleThread() bool {
+	for i := 1; i < len(serial); i++ {
+		if serial[i].Thread != serial[i-1].Thread {
+			return false
+		}
+	}
+	return true
+}
+
 func (serial *SerialAccess) Add(acc Access) {
 	n := len(*serial)
 	idx := sort.Search(n, func(i int) bool {
