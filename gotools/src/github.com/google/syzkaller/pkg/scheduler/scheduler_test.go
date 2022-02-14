@@ -1,32 +1,11 @@
 package scheduler
 
 import (
-	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/google/syzkaller/pkg/primitive"
 )
-
-// TODO: answers depend on the data, so it should reside in the data
-// file
-var CVE20168655 = primitive.Knot{
-	{{Inst: 0x8bbb79d6, Size: 4, Typ: primitive.TypeLoad}, {Inst: 0x8bbca80b, Size: 4, Typ: primitive.TypeStore}},
-	{{Inst: 0x8bbc9093, Size: 4, Typ: primitive.TypeLoad}, {Inst: 0x8bbb75a0, Size: 4, Typ: primitive.TypeStore}}}
-
-var CVE20196974 = primitive.Knot{
-	{{Inst: 0x81f2b4e1, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x81f2bbd3, Size: 4, Typ: primitive.TypeLoad}},
-	{{Inst: 0x8d34b095, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x8d3662f0, Size: 4, Typ: primitive.TypeLoad}}}
-
-var tests = []struct {
-	filename string
-	answer   primitive.Knot
-	total    int
-}{
-	{"data1", CVE20168655, -1},
-	{"data2", CVE20196974, -1},
-	{"data1_simple", CVE20168655, 16},
-}
 
 func TestSanitizeSequentialTrace(t *testing.T) {
 	tests := []struct {
@@ -145,8 +124,28 @@ func TestInferProgramOrderThread(t *testing.T) {
 	}
 }
 
+// TODO: answers depend on the data, so it should reside in the data
+// file
+var CVE20168655 = primitive.Knot{
+	{{Inst: 0x8bbb79d6, Size: 4, Typ: primitive.TypeLoad}, {Inst: 0x8bbca80b, Size: 4, Typ: primitive.TypeStore}},
+	{{Inst: 0x8bbc9093, Size: 4, Typ: primitive.TypeLoad}, {Inst: 0x8bbb75a0, Size: 4, Typ: primitive.TypeStore}}}
+
+var CVE20196974 = primitive.Knot{
+	{{Inst: 0x81f2b4e1, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x81f2bbd3, Size: 4, Typ: primitive.TypeLoad}},
+	{{Inst: 0x8d34b095, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x8d3662f0, Size: 4, Typ: primitive.TypeLoad}}}
+
+var testsSingleSeq = []struct {
+	filename string
+	answer   primitive.Knot
+	total    int
+}{
+	{"data1", CVE20168655, -1},
+	{"data2", CVE20196974, -1},
+	{"data1_simple", CVE20168655, 16},
+}
+
 func TestExcavateKnots(t *testing.T) {
-	for _, test := range tests {
+	for _, test := range testsSingleSeq {
 		knots := testExcavateKnots(t, test.filename, test.answer)
 		if test.total != -1 && len(knots) != test.total {
 			t.Errorf("wrong total number of knots, expected %v, got %v", test.total, len(knots))
@@ -155,8 +154,7 @@ func TestExcavateKnots(t *testing.T) {
 }
 
 func testExcavateKnots(t *testing.T, filename string, answer primitive.Knot) []primitive.Knot {
-	path := filepath.Join("testdata", filename)
-	knots := loadKnots(t, path)
+	knots := loadKnots(t, []string{filename})
 	if !checkAnswer(t, knots, answer) {
 		t.Errorf("can't find the required knot")
 	}
@@ -164,14 +162,13 @@ func testExcavateKnots(t *testing.T, filename string, answer primitive.Knot) []p
 }
 
 func TestSelectHarmoniousKnotsIterSimple(t *testing.T) {
-	for _, test := range tests {
+	for _, test := range testsSingleSeq {
 		testSelectHarmoniousKnotsIter(t, test.filename, test.answer)
 	}
 }
 
-func testSelectHarmoniousKnotsIter(t *testing.T, filename string, answer primitive.Knot) {
-	path := filepath.Join("testdata", filename)
-	knots := loadKnots(t, path)
+func testSelectHarmoniousKnotsIter(t *testing.T, path string, answer primitive.Knot) {
+	knots := loadKnots(t, []string{path})
 
 	orch := orchestrator{knots: knots}
 	i, count := 0, 0
@@ -192,8 +189,7 @@ func testSelectHarmoniousKnotsIter(t *testing.T, filename string, answer primiti
 }
 
 func TestGenerateSchedPoint(t *testing.T) {
-	path := filepath.Join("testdata", "data1_simple")
-	knots := loadKnots(t, path)
+	knots := loadKnots(t, []string{"data1_simple"})
 
 	orch := orchestrator{knots: knots}
 	for len(orch.knots) != 0 {
@@ -247,8 +243,7 @@ func TestGenerateSchedPoint(t *testing.T) {
 }
 
 func TestSqueezeSchedPoints(t *testing.T) {
-	path := filepath.Join("testdata", "data1_simple")
-	knots := loadKnots(t, path)
+	knots := loadKnots(t, []string{"data1_simple"})
 	orch := orchestrator{knots: knots}
 	for len(orch.knots) != 0 {
 		selected := orch.selectHarmoniousKnots()
@@ -276,6 +271,20 @@ func TestSqueezeSchedPoints(t *testing.T) {
 			t.Errorf("squeezed sched is not a subset of full sched")
 		}
 		// TODO: check the squeezed sched points are correct.
+	}
+}
+
+func TestExcavateKnotsTwoSeqs(t *testing.T) {
+	test := struct {
+		filenames []string
+		answer    primitive.Knot
+	}{
+		[]string{"data1_seq1", "data1_seq2"},
+		CVE20168655,
+	}
+	knots := loadKnots(t, test.filenames)
+	if !checkAnswer(t, knots, test.answer) {
+		t.Errorf("can't find the required knot")
 	}
 }
 

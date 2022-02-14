@@ -3,6 +3,7 @@ package scheduler
 import (
 	"bytes"
 	"io/ioutil"
+	"path/filepath"
 	"strconv"
 	"testing"
 
@@ -59,17 +60,20 @@ func loadTestdata(raw []byte) (threads [2]primitive.SerialAccess, e error) {
 	return
 }
 
-func loadKnots(t *testing.T, path string) []primitive.Knot {
-	data, err := ioutil.ReadFile(path)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	thrs, err := loadTestdata(data)
-	if err != nil {
-		t.Errorf("%v", err)
-	}
+func loadKnots(t *testing.T, paths []string) []primitive.Knot {
 	knotter := Knotter{}
-	knotter.AddSequentialTrace(thrs[:])
+	for _, _path := range paths {
+		path := filepath.Join("testdata", _path)
+		data, err := ioutil.ReadFile(path)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		thrs, err := loadTestdata(data)
+		if err != nil {
+			t.Errorf("%v", err)
+		}
+		knotter.AddSequentialTrace(thrs[:])
+	}
 	knots := knotter.ExcavateKnots()
 	t.Logf("# of knots: %d", len(knots))
 	return knots
