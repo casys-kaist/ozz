@@ -23,9 +23,31 @@ func (knot Knot) Type() KnotType {
 	} else if comm0.Conflict(comm1) || comm1.Conflict(comm0) {
 		// Invalid program orders
 		return KnotInvalid
+	} else if knot.invalidContext() {
+		return KnotInvalid
 	} else if comm0.HappenBefore(comm1) || comm1.HappenBefore(comm0) {
 		return KnotSeparated
 	} else {
 		return KnotOverlapped
 	}
 }
+
+func (knot Knot) invalidContext() bool {
+	for i := 0; i < 2; i++ {
+		for j := 0; j < 2; j++ {
+			acc0 := knot[0][i]
+			acc1 := knot[1][j]
+			if acc0.Thread != acc1.Thread {
+				continue
+			}
+			if ctx0, ctx1 := acc0.Context, acc1.Context; !(ctx0 == ctx1 && ctx0 == CommonPath && ctx1 == CommonPath) {
+				return false
+			} else {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+const CommonPath = 0xff

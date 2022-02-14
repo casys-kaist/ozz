@@ -103,8 +103,8 @@ func TestInferProgramOrderThread(t *testing.T) {
 			{true, false, true},
 		},
 		[]primitive.SerialAccess{
-			{{Timestamp: 0, Thread: commonPath << 16}, {Inst: 1, Timestamp: 1}, {Inst: 2, Timestamp: 2}, {Timestamp: 3, Thread: commonPath << 16}},
-			{{Timestamp: 0, Thread: commonPath << 16}, {Inst: 3, Timestamp: 1, Thread: 1 << 16}, {Timestamp: 3, Thread: commonPath << 16}},
+			{{Timestamp: 0, Context: primitive.CommonPath}, {Inst: 1, Timestamp: 1}, {Inst: 2, Timestamp: 2}, {Timestamp: 3, Context: primitive.CommonPath}},
+			{{Timestamp: 0, Context: primitive.CommonPath}, {Inst: 3, Timestamp: 1, Thread: 1 << 16}, {Timestamp: 3, Context: primitive.CommonPath}},
 		},
 	}
 
@@ -117,7 +117,7 @@ func TestInferProgramOrderThread(t *testing.T) {
 			if (*serial)[j].Timestamp <= (*serial)[j-1].Timestamp {
 				t.Errorf("PO violation")
 			}
-			if ctx := ((*serial)[j].Thread >> 16) & 0xff; ctx == commonPath && (test.ans[i][j].Thread>>16)&0xff != ctx {
+			if ctx := (*serial)[j].Context; ctx == primitive.CommonPath && test.ans[i][j].Context != ctx {
 				t.Errorf("Common path wrong at %d %d, expected=%v, got=%v", i, j, test.ans[i][j].Thread, ctx)
 			}
 		}

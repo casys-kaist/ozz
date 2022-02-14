@@ -177,7 +177,7 @@ func (knotter *Knotter) inferProgramOrderThread(thr []*primitive.SerialAccess, c
 			for ; idx[i] < len(bitmaps[i]) && !bitmaps[i][idx[i]]; idx[i]++ {
 				// assign po to i
 				(*thr[i])[idx[i]].Timestamp = po
-				(*thr[i])[idx[i]].Thread |= uint64(i) << 16
+				(*thr[i])[idx[i]].Context = uint32(i)
 				// log.Logf(0, "Assign %d to %v", po, (*thr[i])[idx[i]].StringContext())
 				// log.Logf(0, "increase po")
 				po++
@@ -194,7 +194,7 @@ func (knotter *Knotter) inferProgramOrderThread(thr []*primitive.SerialAccess, c
 			// comm
 			for i := range idx {
 				(*thr[i])[idx[i]].Timestamp = po
-				(*thr[i])[idx[i]].Thread |= commonPath << 16
+				(*thr[i])[idx[i]].Context = primitive.CommonPath
 				// log.Logf(0, "Assign %d to %v (comm)", po, (*thr[i])[idx[i]].StringContext())
 				idx[i]++
 			}
@@ -401,5 +401,3 @@ func wordify(addr uint32) uint32 {
 // we do not handle them.
 // var loopAllowed = []int{1, 2, 4, 8, 16, 32}
 var loopAllowed = []int{1}
-
-const commonPath = 0xff
