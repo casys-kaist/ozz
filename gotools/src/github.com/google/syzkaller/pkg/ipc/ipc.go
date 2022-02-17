@@ -93,7 +93,7 @@ type CallInfo struct {
 	Cover  []uint32 // per-call coverage, filled if FlagSignal is set and cover == true,
 	// if dedup == false, then cov effectively contains a trace, otherwise duplicates are removed
 	Comps  prog.CompMap // per-call comparison operands
-	Access []primitive.Access
+	Access primitive.SerialAccess
 	Errno  int // call errno (0 if the call was successful)
 	ConcurrencyInfo
 }
@@ -106,6 +106,7 @@ type ConcurrencyInfo struct {
 type ProgInfo struct {
 	Calls []CallInfo
 	Extra CallInfo // stores Signal and Cover collected from background threads
+	// TODO: Belows will be removed
 	// RFInfo describe read-from coverage between instructions from
 	// two calls. For example, RFInfo[i1][i2] represents read-from
 	// coverage for instructions from calls, Calls[i1] and
@@ -401,7 +402,6 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 		}
 		inf.Comps = comps
 	}
-	info.RFInfo, info.Serial = analyzeReadFromInfo(p, info.Calls)
 	if len(extraParts) == 0 {
 		return info, nil
 	}
@@ -425,33 +425,6 @@ func convertExtra(extraParts []CallInfo) CallInfo {
 		i++
 	}
 	return extra
-}
-
-func analyzeReadFromInfo(p *prog.Prog, calls []CallInfo) (rfinfo [][]signal.ReadFrom, serial [][]primitive.SerialAccess) {
-	initReadFromInfo(p, &rfinfo, &serial)
-	for i1, c1 := range calls {
-		for i2, c2 := range calls {
-			if i1 == i2 {
-				continue
-			}
-			rfinfo[i1][i2], serial[i1][i2] = signal.FromAccesses(
-				c1.Access,
-				c2.Access,
-				signal.FromEpoch(c1.Epoch, c2.Epoch),
-			)
-		}
-	}
-	return
-}
-
-func initReadFromInfo(p *prog.Prog, rfinfo *[][]signal.ReadFrom, serial *[][]primitive.SerialAccess) {
-	n := len(p.Calls)
-	*rfinfo = make([][]signal.ReadFrom, n)
-	*serial = make([][]primitive.SerialAccess, n)
-	for i := 0; i < n; i++ {
-		(*rfinfo)[i] = make([]signal.ReadFrom, n)
-		(*serial)[i] = make([]primitive.SerialAccess, n)
-	}
 }
 
 func readComps(outp *[]byte, compsSize uint32) (prog.CompMap, error) {
@@ -534,7 +507,7 @@ func readUint32Array(outp *[]byte, size uint32) ([]uint32, bool) {
 	return res, true
 }
 
-func readReadFromCoverages(outp *[]byte, size uint32, inf *CallInfo) ([]primitive.Access, bool) {
+func readReadFromCoverages(outp *[]byte, size uint32, inf *CallInfo) (primitive.SerialAccess, bool) {
 	array, ok := readUint32Array(outp, size*5)
 	if !ok {
 		return nil, false
@@ -542,7 +515,7 @@ func readReadFromCoverages(outp *[]byte, size uint32, inf *CallInfo) ([]primitiv
 	if len(array)%5 != 0 {
 		return nil, false
 	}
-	var res []primitive.Access
+	var res primitive.SerialAccess
 	for i := 0; i < len(array); i += 5 {
 		res = append(res, primitive.Access{
 			Inst:      array[i],
