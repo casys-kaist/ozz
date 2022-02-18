@@ -63,9 +63,9 @@ type Fuzzer struct {
 	corpusSignal   signal.Signal // signal of inputs in corpus
 	maxSignal      signal.Signal // max signal ever observed including flakes
 	newSignal      signal.Signal // diff of maxSignal since last sync with master
-	corpusReadFrom signal.ReadFrom
-	maxReadFrom    signal.ReadFrom
-	newReadFrom    signal.ReadFrom
+	// corpusReadFrom signal.ReadFrom
+	// maxReadFrom    signal.ReadFrom
+	// newReadFrom    signal.ReadFrom
 
 	// Mostly for debugging scheduling mutation. If generate is true,
 	// procs do not generate/mutate inputs but schedule
@@ -277,12 +277,12 @@ func main() {
 		faultInjectionEnabled:    false,
 		comparisonTracingEnabled: false,
 		corpusHashes:             make(map[hash.Sig]struct{}),
-		corpusReadFrom:           signal.NewReadFrom(),
-		maxReadFrom:              signal.NewReadFrom(),
-		newReadFrom:              signal.NewReadFrom(),
-		staleCount:               make(map[uint32]int),
 		checkResult:              r.CheckResult,
 		generate:                 *flagGen,
+		// corpusReadFrom:           signal.NewReadFrom(),
+		// maxReadFrom:              signal.NewReadFrom(),
+		// newReadFrom:              signal.NewReadFrom(),
+		staleCount:  make(map[uint32]int),
 	}
 	gateCallback := fuzzer.useBugFrames(r, *flagProcs)
 	fuzzer.gate = ipc.NewGate(2**flagProcs, gateCallback)
@@ -428,8 +428,8 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats map[string]uint64) bool {
 		Name:           fuzzer.name,
 		NeedCandidates: needCandidates,
 		MaxSignal:      fuzzer.grabNewSignal().Serialize(),
-		MaxReadFrom:    fuzzer.grabNewReadFrom().Serialize(),
-		Stats:          stats,
+		// MaxReadFrom:    fuzzer.grabNewReadFrom().Serialize(),
+		Stats: stats,
 	}
 	r := &rpctype.PollRes{}
 	if err := fuzzer.manager.Call("Manager.Poll", a, r); err != nil {
@@ -440,7 +440,7 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats map[string]uint64) bool {
 	log.Logf(1, "poll: candidates=%v inputs=%v signal=%v readfrom=%v",
 		len(r.Candidates), len(r.NewInputs), maxSignal.Len(), maxReadFrom.Len())
 	fuzzer.addMaxSignal(maxSignal)
-	fuzzer.addMaxReadFrom(maxReadFrom)
+	// fuzzer.addMaxReadFrom(maxReadFrom)
 	for _, inp := range r.NewInputs {
 		fuzzer.addInputFromAnotherFuzzer(inp)
 	}
@@ -658,16 +658,16 @@ func (fuzzer *Fuzzer) grabNewSignal() signal.Signal {
 	return sign
 }
 
-func (fuzzer *Fuzzer) grabNewReadFrom() signal.ReadFrom {
-	fuzzer.signalMu.Lock()
-	defer fuzzer.signalMu.Unlock()
-	rf := fuzzer.newReadFrom
-	if rf.Empty() {
-		return nil
-	}
-	fuzzer.newReadFrom = signal.NewReadFrom()
-	return rf
-}
+// func (fuzzer *Fuzzer) grabNewReadFrom() signal.ReadFrom {
+// 	fuzzer.signalMu.Lock()
+// 	defer fuzzer.signalMu.Unlock()
+// 	rf := fuzzer.newReadFrom
+// 	if rf.Empty() {
+// 		return nil
+// 	}
+// 	fuzzer.newReadFrom = signal.NewReadFrom()
+// 	return rf
+// }
 
 func (fuzzer *Fuzzer) corpusSignalDiff(sign signal.Signal) signal.Signal {
 	fuzzer.signalMu.RLock()
@@ -701,19 +701,19 @@ func (fuzzer *Fuzzer) checkNewCallSignal(p *prog.Prog, info *ipc.CallInfo, call 
 	return true
 }
 
-func (fuzzer *Fuzzer) mergeMaxReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo) {
-	fuzzer.signalMu.Lock()
-	defer fuzzer.signalMu.Unlock()
-	rf := info.ContenderReadFrom(contender)
-	fuzzer.maxReadFrom.Merge(rf)
-	fuzzer.newReadFrom.Merge(rf)
-}
+// func (fuzzer *Fuzzer) mergeMaxReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo) {
+// 	fuzzer.signalMu.Lock()
+// 	defer fuzzer.signalMu.Unlock()
+// 	rf := info.ContenderReadFrom(contender)
+// 	fuzzer.maxReadFrom.Merge(rf)
+// 	fuzzer.newReadFrom.Merge(rf)
+// }
 
-func (fuzzer *Fuzzer) addMaxReadFrom(rf signal.ReadFrom) {
-	fuzzer.signalMu.Lock()
-	defer fuzzer.signalMu.Unlock()
-	fuzzer.maxReadFrom.Merge(rf)
-}
+// func (fuzzer *Fuzzer) addMaxReadFrom(rf signal.ReadFrom) {
+// 	fuzzer.signalMu.Lock()
+// 	defer fuzzer.signalMu.Unlock()
+// 	fuzzer.maxReadFrom.Merge(rf)
+// }
 
 func (fuzzer *Fuzzer) __checkNewReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo, readfrom signal.ReadFrom) bool {
 	rf := info.ContenderReadFrom(contender)
@@ -723,33 +723,31 @@ func (fuzzer *Fuzzer) __checkNewReadFrom(p *prog.Prog, contender prog.Contender,
 	return !diff.Empty()
 }
 
-func (fuzzer *Fuzzer) checkNewReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo) bool {
-	return fuzzer.__checkNewReadFrom(p, contender, info, fuzzer.corpusReadFrom)
-}
+// func (fuzzer *Fuzzer) checkNewReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo) bool {
+// 	return fuzzer.__checkNewReadFrom(p, contender, info, fuzzer.corpusReadFrom)
+// }
 
-func (fuzzer *Fuzzer) checkMaxReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo) bool {
-	// if diff.Empty(), obtained read-from (i.e., depends
-	// relationship) does not give a clue for interesting read-from
-	// (i.e., conflicts). It might provide interesting results if we
-	// execute the threaded p, but it is somewhat unlikely. Give this
-	// case very low chance (i.e., 1%) to go into the threading
-	// workqueue.
-	return fuzzer.__checkNewReadFrom(p, contender, info, fuzzer.maxReadFrom) || rand.Intn(100) == 0
-}
+// func (fuzzer *Fuzzer) checkMaxReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo) bool {
+// 	// if diff.Empty(), obtained read-from (i.e., depends
+// 	// relationship) does not give a clue for interesting read-from
+// 	// (i.e., conflicts). It might provide interesting results if we
+// 	// execute the threaded p, but it is somewhat unlikely. Give this
+// 	// case very low chance (i.e., 1%) to go into the threading
+// 	// workqueue.
+// 	return fuzzer.__checkNewReadFrom(p, contender, info, fuzzer.maxReadFrom) || rand.Intn(100) == 0
+// }
 
 func (fuzzer *Fuzzer) identifyContenders(p *prog.Prog, info *ipc.ProgInfo) (res []prog.Contender) {
 	// identify calls that are likely to be of interest when run
 	// in parallel.
-	// TODO: Razzer's mechanism: it considers only two calls.
 	for c1 := 0; c1 < len(p.Calls); c1++ {
 		for c2 := c1 + 1; c2 < len(p.Calls); c2++ {
 			cont := prog.Contender{
 				Calls: []int{c1, c2},
 			}
-			if fuzzer.checkMaxReadFrom(p, cont, info) {
+			if newComm, newKnot := fuzzer.newCommunication(p, info, cont), fuzzer.newKnot(p, info, cont); newComm != nil || newKnot != nil {
 				res = append(res, cont)
 			}
-			fuzzer.mergeMaxReadFrom(p, cont, info)
 		}
 	}
 	return

@@ -398,7 +398,7 @@ func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, info *ipc
 	if proc.fuzzer.shutOffThreading(p, calls, info) {
 		return
 	}
-	proc.fuzzer.mergeMaxReadFrom(p, calls, info)
+	// proc.fuzzer.mergeMaxReadFrom(p, calls, info)
 	proc.fuzzer.workQueue.enqueue(&WorkThreading{
 		p:     p.Clone(),
 		calls: calls,
