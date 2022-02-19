@@ -74,7 +74,12 @@ func loadKnots(t *testing.T, paths []string) []primitive.Knot {
 		}
 		knotter.AddSequentialTrace(thrs[:])
 	}
-	knots := knotter.ExcavateKnots()
+	knotter.ExcavateKnots()
+	knots0 := knotter.GetKnots()
+	knots := []primitive.Knot{}
+	for _, knot0 := range knots0 {
+		knots = append(knots, knot0.(primitive.Knot))
+	}
 	t.Logf("# of knots: %d", len(knots))
 	return knots
 }

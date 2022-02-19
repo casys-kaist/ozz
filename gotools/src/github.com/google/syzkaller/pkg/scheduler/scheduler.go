@@ -12,13 +12,13 @@ type Knotter struct {
 	loopAllowed []int
 	commChan    map[uint32]struct{}
 	accessMap   map[uint32][]primitive.Access
-	comms       []primitive.Communication
 	numThr      int
 	// input
 	seqs     [][]primitive.SerialAccess
 	seqCount int
 	// output
-	knots []primitive.Knot
+	knots []primitive.Segment
+	comms []primitive.Segment
 }
 
 type instPerThread struct {
@@ -78,12 +78,19 @@ func (knotter *Knotter) sanitizeSequentialTrace(seq []primitive.SerialAccess) bo
 	return true
 }
 
-func (knotter *Knotter) ExcavateKnots() []primitive.Knot {
+func (knotter *Knotter) ExcavateKnots() {
 	if knotter.seqCount < 1 {
-		return nil
+		return
 	}
 	knotter.loopAllowed = loopAllowed
 	knotter.fastenKnots()
+}
+
+func (knotter *Knotter) GetCommunications() []primitive.Segment {
+	return knotter.comms
+}
+
+func (knotter *Knotter) GetKnots() []primitive.Segment {
 	return knotter.knots
 }
 
@@ -233,7 +240,6 @@ func (knotter *Knotter) buildAccessMapSerial(serial primitive.SerialAccess) {
 		// TODO: this loop can be optimized
 		for _, allowed := range knotter.loopAllowed {
 			if allowed == loopCnt[acc.Inst] {
-				addr := wordify(acc.Addr)
 				knotter.accessMap[addr] = append(knotter.accessMap[addr], acc)
 				break
 			}
@@ -242,7 +248,7 @@ func (knotter *Knotter) buildAccessMapSerial(serial primitive.SerialAccess) {
 }
 
 func (knotter *Knotter) formCommunications() {
-	knotter.comms = []primitive.Communication{}
+	knotter.comms = []primitive.Segment{}
 	for _, accs := range knotter.accessMap {
 		knotter.formCommunicationAddr(accs)
 	}
@@ -279,10 +285,10 @@ func (knotter *Knotter) formCommunicationAddr(accesses []primitive.Access) {
 }
 
 func (knotter *Knotter) formKnots() {
-	knotter.knots = []primitive.Knot{}
+	knotter.knots = []primitive.Segment{}
 	for i := 0; i < len(knotter.comms); i++ {
 		for j := i + 1; j < len(knotter.comms); j++ {
-			comm1, comm2 := knotter.comms[i], knotter.comms[j]
+			comm1, comm2 := knotter.comms[i].(primitive.Communication), knotter.comms[j].(primitive.Communication)
 			if comm1[0].Timestamp > comm2[0].Timestamp {
 				comm1, comm2 = comm2, comm1
 			}
