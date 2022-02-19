@@ -24,7 +24,9 @@ import (
 	"github.com/google/syzkaller/pkg/ipc/ipcconfig"
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/pkg/osutil"
+	"github.com/google/syzkaller/pkg/primitive"
 	"github.com/google/syzkaller/pkg/rpctype"
+	"github.com/google/syzkaller/pkg/scheduler"
 	"github.com/google/syzkaller/pkg/signal"
 	"github.com/google/syzkaller/pkg/tool"
 	"github.com/google/syzkaller/prog"
@@ -59,10 +61,20 @@ type Fuzzer struct {
 	threadedCorpus []*prog.ThreadedProg
 	staleCount     map[uint32]int
 
-	signalMu       sync.RWMutex
-	corpusSignal   signal.Signal // signal of inputs in corpus
-	maxSignal      signal.Signal // max signal ever observed including flakes
-	newSignal      signal.Signal // diff of maxSignal since last sync with master
+	signalMu     sync.RWMutex
+	corpusSignal signal.Signal // signal of inputs in corpus
+	maxSignal    signal.Signal // max signal ever observed including flakes
+	newSignal    signal.Signal // diff of maxSignal since last sync with master
+
+	// We maintain two information: communications and knots.
+	maxComms signal.Interleaving
+	// corpusComms signal.Interleaving
+	// newComms    signal.Interleaving
+
+	maxKnots signal.Interleaving
+	// corpusKnots signal.Interleaving
+	// newKnots    signal.Interleaving
+
 	// corpusReadFrom signal.ReadFrom
 	// maxReadFrom    signal.ReadFrom
 	// newReadFrom    signal.ReadFrom
@@ -277,12 +289,20 @@ func main() {
 		faultInjectionEnabled:    false,
 		comparisonTracingEnabled: false,
 		corpusHashes:             make(map[hash.Sig]struct{}),
-		checkResult:              r.CheckResult,
-		generate:                 *flagGen,
 		// corpusReadFrom:           signal.NewReadFrom(),
 		// maxReadFrom:              signal.NewReadFrom(),
 		// newReadFrom:              signal.NewReadFrom(),
+
+		// corpusComms: make(signal.Interleaving),
+		maxComms: make(signal.Interleaving),
+		// newComms:    make(signal.Interleaving),
+		// corpusKnots: make(signal.Interleaving),
+		maxKnots: make(signal.Interleaving),
+		// newKnots:    make(signal.Interleaving),
+
 		staleCount:  make(map[uint32]int),
+		checkResult: r.CheckResult,
+		generate:    *flagGen,
 	}
 	gateCallback := fuzzer.useBugFrames(r, *flagProcs)
 	fuzzer.gate = ipc.NewGate(2**flagProcs, gateCallback)
@@ -737,15 +757,40 @@ func (fuzzer *Fuzzer) __checkNewReadFrom(p *prog.Prog, contender prog.Contender,
 // 	return fuzzer.__checkNewReadFrom(p, contender, info, fuzzer.maxReadFrom) || rand.Intn(100) == 0
 // }
 
+func (fuzzer *Fuzzer) newSegment(interleaving *signal.Interleaving, segs []primitive.Segment) bool {
+	new := signal.FromPrimitive(segs)
+	diff := interleaving.Diff(new)
+	if diff.Len() == 0 {
+		return false
+	}
+	(*interleaving).Merge(diff)
+	return true
+}
+
+func (fuzzer *Fuzzer) newCommunication(comms []primitive.Segment) bool {
+	return fuzzer.newSegment(&fuzzer.maxComms, comms)
+}
+
+func (fuzzer *Fuzzer) newKnot(knots []primitive.Segment) bool {
+	return fuzzer.newSegment(&fuzzer.maxKnots, knots)
+}
+
 func (fuzzer *Fuzzer) identifyContenders(p *prog.Prog, info *ipc.ProgInfo) (res []prog.Contender) {
 	// identify calls that are likely to be of interest when run
 	// in parallel.
+
+	maxIntermediateCalls := 3
 	for c1 := 0; c1 < len(p.Calls); c1++ {
-		for c2 := c1 + 1; c2 < len(p.Calls); c2++ {
-			cont := prog.Contender{
-				Calls: []int{c1, c2},
-			}
-			if newComm, newKnot := fuzzer.newCommunication(p, info, cont), fuzzer.newKnot(p, info, cont); newComm != nil || newKnot != nil {
+		for c2 := c1 + 1; c2 < len(p.Calls) && c2-c1-1 < maxIntermediateCalls; c2++ {
+			cont := prog.Contender{Calls: []int{c1, c2}}
+
+			knotter := scheduler.Knotter{}
+			knotter.AddSequentialTrace([]primitive.SerialAccess{info.Calls[c1].Access, info.Calls[c2].Access})
+			knotter.ExcavateKnots()
+			comms := knotter.GetCommunications()
+			knots := knotter.GetKnots()
+
+			if newComm, newKnot := fuzzer.newCommunication(comms), fuzzer.newKnot(knots); newComm || newKnot {
 				res = append(res, cont)
 			}
 		}
