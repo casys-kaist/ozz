@@ -246,6 +246,11 @@ github.com/mgechev/revive/lint
 github.com/mgechev/revive/rule
 # github.com/mitchellh/go-homedir v1.1.0
 github.com/mitchellh/go-homedir
+# github.com/mitchellh/hashstructure v1.1.0
+## explicit
+github.com/mitchellh/hashstructure
+# github.com/mitchellh/hashstructure/v2 v2.0.2
+## explicit
 # github.com/mitchellh/mapstructure v1.3.3
 ## explicit
 github.com/mitchellh/mapstructure
@@ -391,7 +396,6 @@ go.opencensus.io/trace/propagation
 go.opencensus.io/trace/tracestate
 # golang.org/x/arch v0.0.0-20210923205945-b76863e36670
 ## explicit
-golang.org/x/arch/x86/x86asm
 # golang.org/x/lint v0.0.0-20200302205851-738671d3881b
 golang.org/x/lint
 golang.org/x/lint/golint
