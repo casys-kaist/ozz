@@ -64,6 +64,9 @@ func (p *Prog) removeDummyPoints() {
 	if !p.Threaded {
 		return
 	}
+	if len(p.Schedule.points) == 0 {
+		return
+	}
 	i := len(p.Schedule.points) - 1
 	for ; i >= 0; i-- {
 		pnt := p.Schedule.points[i]
