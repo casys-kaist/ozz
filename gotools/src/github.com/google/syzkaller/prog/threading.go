@@ -76,6 +76,22 @@ func (p *Prog) Threading(calls Contender) {
 	p.appendDummyPoints()
 }
 
+func (p *Prog) Reverse() {
+	if !p.Threaded {
+		return
+	}
+	// TODO: This is a weird function. This is used only for a
+	// threading work, to reverse the execution order of two serial
+	// calls. Maybe need rework
+	if len(p.Schedule.points) != 2 {
+		return
+	}
+	if p.Schedule.points[0].addr != ^uint64(0) {
+		return
+	}
+	p.Schedule.points[0], p.Schedule.points[1] = p.Schedule.points[1], p.Schedule.points[0]
+}
+
 func (p *Prog) Contenders() []*Call {
 	res := []*Call{}
 	for _, ci := range p.Contender.Calls {
