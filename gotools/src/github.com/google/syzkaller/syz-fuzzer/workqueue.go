@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/syzkaller/pkg/ipc"
 	"github.com/google/syzkaller/pkg/log"
+	"github.com/google/syzkaller/pkg/primitive"
 	"github.com/google/syzkaller/prog"
 )
 
@@ -69,7 +70,7 @@ type WorkSmash struct {
 type WorkThreading struct {
 	p     *prog.Prog
 	calls prog.Contender
-	info  *ipc.ProgInfo
+	knots []primitive.Segment
 }
 
 const maxWorkThreading = 10000

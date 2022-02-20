@@ -26,7 +26,6 @@ import (
 	"github.com/google/syzkaller/pkg/osutil"
 	"github.com/google/syzkaller/pkg/primitive"
 	"github.com/google/syzkaller/pkg/rpctype"
-	"github.com/google/syzkaller/pkg/scheduler"
 	"github.com/google/syzkaller/pkg/signal"
 	"github.com/google/syzkaller/pkg/tool"
 	"github.com/google/syzkaller/prog"
@@ -78,6 +77,8 @@ type Fuzzer struct {
 	// corpusReadFrom signal.ReadFrom
 	// maxReadFrom    signal.ReadFrom
 	// newReadFrom    signal.ReadFrom
+
+	schedulingHints map[string][]primitive.Segment
 
 	// Mostly for debugging scheduling mutation. If generate is true,
 	// procs do not generate/mutate inputs but schedule
@@ -299,6 +300,8 @@ func main() {
 		// corpusKnots: make(signal.Interleaving),
 		maxKnots: make(signal.Interleaving),
 		// newKnots:    make(signal.Interleaving),
+
+		schedulingHints: make(map[string][]primitive.Segment),
 
 		staleCount:  make(map[uint32]int),
 		checkResult: r.CheckResult,
@@ -757,48 +760,23 @@ func (fuzzer *Fuzzer) __checkNewReadFrom(p *prog.Prog, contender prog.Contender,
 // 	return fuzzer.__checkNewReadFrom(p, contender, info, fuzzer.maxReadFrom) || rand.Intn(100) == 0
 // }
 
-func (fuzzer *Fuzzer) newSegment(interleaving *signal.Interleaving, segs []primitive.Segment) bool {
-	new := signal.FromPrimitive(segs)
-	diff := interleaving.Diff(new)
-	if diff.Len() == 0 {
-		return false
+func (fuzzer *Fuzzer) newSegment(base *signal.Interleaving, segs []primitive.Segment) []primitive.Segment {
+	diff := base.DiffMergePrimitive(segs)
+	if len(diff) == 0 {
+		return nil
 	}
-	(*interleaving).Merge(diff)
-	return true
+	return diff
 }
 
-func (fuzzer *Fuzzer) newCommunication(comms []primitive.Segment) bool {
+func (fuzzer *Fuzzer) newCommunication(comms []primitive.Segment) []primitive.Segment {
 	return fuzzer.newSegment(&fuzzer.maxComms, comms)
 }
 
-func (fuzzer *Fuzzer) newKnot(knots []primitive.Segment) bool {
+func (fuzzer *Fuzzer) newKnot(knots []primitive.Segment) []primitive.Segment {
 	return fuzzer.newSegment(&fuzzer.maxKnots, knots)
 }
 
-func (fuzzer *Fuzzer) identifyContenders(p *prog.Prog, info *ipc.ProgInfo) (res []prog.Contender) {
-	// identify calls that are likely to be of interest when run
-	// in parallel.
-
-	maxIntermediateCalls := 3
-	for c1 := 0; c1 < len(p.Calls); c1++ {
-		for c2 := c1 + 1; c2 < len(p.Calls) && c2-c1-1 < maxIntermediateCalls; c2++ {
-			cont := prog.Contender{Calls: []int{c1, c2}}
-
-			knotter := scheduler.Knotter{}
-			knotter.AddSequentialTrace([]primitive.SerialAccess{info.Calls[c1].Access, info.Calls[c2].Access})
-			knotter.ExcavateKnots()
-			comms := knotter.GetCommunications()
-			knots := knotter.GetKnots()
-
-			if newComm, newKnot := fuzzer.newCommunication(comms), fuzzer.newKnot(knots); newComm || newKnot {
-				res = append(res, cont)
-			}
-		}
-	}
-	return
-}
-
-func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog, calls prog.Contender, info *ipc.ProgInfo) bool {
+func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog, calls prog.Contender) bool {
 	// Threading a given input requires at most O(n*n) re-execution to
 	// collect read-from inside an epoch (i.e., conflicts), so the
 	// threading queue may explode very quickly. To avoid that
@@ -813,6 +791,11 @@ func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog, calls prog.Contender, info 
 		return true
 	}
 	return false
+}
+
+func (fuzzer *Fuzzer) handSchedulingHints(p *prog.Prog, hints []primitive.Segment) {
+	k := hash.String(p.Serialize())
+	fuzzer.schedulingHints[k] = append(fuzzer.schedulingHints[k], hints...)
 }
 
 func signalPrio(p *prog.Prog, info *ipc.CallInfo, call int) (prio uint8) {

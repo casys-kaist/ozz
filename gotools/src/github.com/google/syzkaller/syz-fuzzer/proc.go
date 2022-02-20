@@ -20,7 +20,9 @@ import (
 	"github.com/google/syzkaller/pkg/hash"
 	"github.com/google/syzkaller/pkg/ipc"
 	"github.com/google/syzkaller/pkg/log"
+	"github.com/google/syzkaller/pkg/primitive"
 	"github.com/google/syzkaller/pkg/rpctype"
+	"github.com/google/syzkaller/pkg/scheduler"
 	"github.com/google/syzkaller/pkg/signal"
 	"github.com/google/syzkaller/prog"
 )
@@ -285,7 +287,20 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 	log.Logf(1, "proc #%v: threading an input", proc.pid)
 	p := item.p.Clone()
 	p.Threading(item.calls)
-	proc.execute(proc.execOpts, p, ProgNormal, StatThreading)
+	knotter := scheduler.Knotter{}
+	for i := 0; i < 2; i++ {
+		inf := proc.executeRaw(proc.execOpts, p, StatThreading)
+		knotter.AddSequentialTrace(inf.SequentialTrace())
+		p.Reverse()
+	}
+	knotter.ExcavateKnots()
+	knots := knotter.GetKnots()
+
+	new := proc.fuzzer.newKnot(knots)
+	new = append(new, primitive.Intersect(knots, item.knots)...)
+
+	// Now we know newly found knots
+	proc.fuzzer.handSchedulingHints(p, new)
 }
 
 func (proc *Proc) failCall(p *prog.Prog, call int) {
@@ -348,12 +363,27 @@ func (proc *Proc) postExecute(p *prog.Prog, flags ProgTypes, info *ipc.ProgInfo)
 	if extra {
 		proc.enqueueCallTriage(p, flags, -1, info.Extra)
 	}
-
-	contenders := proc.fuzzer.identifyContenders(p, info)
-	for _, contender := range contenders {
-		proc.enqueueThreading(p, contender, info)
-	}
+	proc.pickupThreadingWorks(p, info)
 	return info
+}
+
+func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
+	maxIntermediateCalls := 3
+	for c1 := 0; c1 < len(p.Calls); c1++ {
+		for c2 := c1 + 1; c2 < len(p.Calls) && c2-c1-1 < maxIntermediateCalls; c2++ {
+			cont := prog.Contender{Calls: []int{c1, c2}}
+
+			knotter := scheduler.Knotter{}
+			knotter.AddSequentialTrace([]primitive.SerialAccess{info.Calls[c1].Access, info.Calls[c2].Access})
+			knotter.ExcavateKnots()
+			comms := knotter.GetCommunications()
+			knots := knotter.GetKnots()
+
+			if newComms, newKnots := proc.fuzzer.newCommunication(comms), proc.fuzzer.newKnot(knots); len(newComms) != 0 || len(newKnots) != 0 {
+				proc.enqueueThreading(p, cont, newKnots)
+			}
+		}
+	}
 }
 
 func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.ProgInfo {
@@ -394,15 +424,15 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 	})
 }
 
-func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, info *ipc.ProgInfo) {
-	if proc.fuzzer.shutOffThreading(p, calls, info) {
+func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, knots []primitive.Segment) {
+	if proc.fuzzer.shutOffThreading(p, calls) {
 		return
 	}
 	// proc.fuzzer.mergeMaxReadFrom(p, calls, info)
 	proc.fuzzer.workQueue.enqueue(&WorkThreading{
 		p:     p.Clone(),
 		calls: calls,
-		info:  info,
+		knots: knots,
 	})
 }
 
