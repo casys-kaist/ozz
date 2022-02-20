@@ -115,7 +115,8 @@ type ProgInfo struct {
 	RFInfo [][]signal.ReadFrom
 	// Serial are accesses that are used to build ReadFrom and sorted
 	// according to Accesses' timestamps
-	Serial [][]primitive.SerialAccess
+	Serial   [][]primitive.SerialAccess
+	threaded bool
 }
 
 type Env struct {
@@ -349,7 +350,7 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 	if !ok {
 		return nil, fmt.Errorf("failed to read number of calls")
 	}
-	info := &ProgInfo{Calls: make([]CallInfo, len(p.Calls))}
+	info := &ProgInfo{Calls: make([]CallInfo, len(p.Calls)), threaded: p.Threaded}
 	extraParts := make([]CallInfo, 0)
 	for i := uint32(0); i < ncmd; i++ {
 		if len(out) < int(unsafe.Sizeof(callReply{})) {
@@ -893,4 +894,17 @@ func (info *ProgInfo) ContenderReadFrom(contender prog.Contender) signal.ReadFro
 func (info *ProgInfo) ContenderSerialAccess(contender prog.Contender) primitive.SerialAccess {
 	c := contender.Calls
 	return info.Serial[c[0]][c[1]]
+}
+
+func (info *ProgInfo) SequentialTrace() []primitive.SerialAccess {
+	if !info.threaded {
+		return nil
+	}
+	res := []primitive.SerialAccess{}
+	for _, c := range info.Calls {
+		if len(c.Access) != 0 {
+			res = append(res, c.Access)
+		}
+	}
+	return res
 }
