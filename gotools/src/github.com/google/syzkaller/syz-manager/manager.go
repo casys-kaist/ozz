@@ -472,9 +472,9 @@ func (mgr *Manager) vmLoop() {
 	}
 }
 
-func (mgr *Manager) seedDir() (dir string) {
+func (mgr *Manager) seedDir(typ string) (dir string) {
 	dir = filepath.Join(mgr.cfg.Syzkaller, "sys", mgr.cfg.TargetOS, "test")
-	if mgr.seedType == "normal" {
+	if typ == "normal" {
 		// We don't want to dump seeds for testing
 		return
 	}
@@ -486,7 +486,7 @@ func (mgr *Manager) seedDir() (dir string) {
 		{"threaded-cve", "threaded-cve", "loading threaded seeds for CVEs..."},
 	}
 	for _, o := range options {
-		if o.typ == mgr.seedType {
+		if o.typ == typ {
 			log.Logf(0, "%s", o.misc)
 			dir = filepath.Join(dir, o.path)
 			break
@@ -526,7 +526,12 @@ func (mgr *Manager) preloadCorpus() {
 
 	mgr.checkKernelVersion()
 
-	seedDir := mgr.seedDir()
+	seedType, wanted := mgr.seedType, ""
+	if strings.IndexByte(seedType, '/') != -1 {
+		toks := strings.SplitN(seedType, "/", 2)
+		seedType, wanted = toks[0], toks[1]
+	}
+	seedDir := mgr.seedDir(seedType)
 
 	if osutil.IsExist(seedDir) {
 		seeds, err := ioutil.ReadDir(seedDir)
@@ -539,6 +544,9 @@ func (mgr *Manager) preloadCorpus() {
 				// syscall, which is not interesting to test race
 				// condition. Let's ignore them for now, and once we
 				// have done enough testing, include them again.
+				continue
+			}
+			if wanted != "" && seed.Name() != wanted {
 				continue
 			}
 			if seed.IsDir() {
