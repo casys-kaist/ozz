@@ -288,6 +288,30 @@ func TestExcavateKnotsTwoSeqs(t *testing.T) {
 	}
 }
 
+func TestExcavateKnotsSingleThread(t *testing.T) {
+	for _, test := range testsSingleSeq {
+		thrs0 := loadTestdata(t, []string{test.filename}, nil)
+		thrs := thrs0[0]
+		for i := range thrs {
+			for j := range thrs[i] {
+				thrs[i][j].Thread = 0
+			}
+		}
+		knotter := Knotter{}
+		knotter.ReassignThreadID()
+		knotter.AddSequentialTrace(thrs[:])
+		knotter.ExcavateKnots()
+		knots0 := knotter.GetKnots()
+		knots := []primitive.Knot{}
+		for _, knot0 := range knots0 {
+			knots = append(knots, knot0.(primitive.Knot))
+		}
+		if !checkAnswer(t, knots, test.answer) {
+			t.Errorf("can't find the required knot")
+		}
+	}
+}
+
 func BenchmarkExcavateKnots(b *testing.B) {
 	benchmarkExcavateKnots(b)
 }

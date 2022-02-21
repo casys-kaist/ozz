@@ -10,7 +10,7 @@ import (
 	"github.com/google/syzkaller/pkg/primitive"
 )
 
-func loadTestdata(raw []byte) (threads [2]primitive.SerialAccess, e error) {
+func _loadTestdata(raw []byte) (threads [2]primitive.SerialAccess, e error) {
 	timestamp, thread := uint32(0), -1
 	for {
 		idx := bytes.IndexByte(raw, byte('\n'))
@@ -60,20 +60,29 @@ func loadTestdata(raw []byte) (threads [2]primitive.SerialAccess, e error) {
 	return
 }
 
-func loadKnots(t *testing.T, paths []string) []primitive.Knot {
-	knotter := Knotter{}
+func loadTestdata(t *testing.T, paths []string, knotter *Knotter) [][2]primitive.SerialAccess {
+	res := [][2]primitive.SerialAccess{}
 	for _, _path := range paths {
 		path := filepath.Join("testdata", _path)
 		data, err := ioutil.ReadFile(path)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
-		thrs, err := loadTestdata(data)
+		thrs, err := _loadTestdata(data)
 		if err != nil {
 			t.Errorf("%v", err)
 		}
-		knotter.AddSequentialTrace(thrs[:])
+		res = append(res, thrs)
+		if knotter != nil {
+			knotter.AddSequentialTrace(thrs[:])
+		}
 	}
+	return res
+}
+
+func loadKnots(t *testing.T, paths []string) []primitive.Knot {
+	knotter := Knotter{}
+	loadTestdata(t, paths, &knotter)
 	knotter.ExcavateKnots()
 	knots0 := knotter.GetKnots()
 	knots := []primitive.Knot{}

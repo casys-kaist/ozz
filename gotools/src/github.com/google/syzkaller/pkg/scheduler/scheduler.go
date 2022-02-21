@@ -13,6 +13,14 @@ type Knotter struct {
 	commChan    map[uint32]struct{}
 	accessMap   map[uint32][]primitive.Access
 	numThr      int
+
+	// Mostly used for thread works. Our implmenetation requires to
+	// distinguish two accesses will be executed in different threads,
+	// while all Access have same Thread when sequentially executing
+	// all calls. When reassignThreadID is true, Knotter will reassign
+	// Thread to each Access when fastening Knots
+	reassignThreadID bool
+
 	// input
 	seqs     [][]primitive.SerialAccess
 	seqCount int
@@ -21,9 +29,13 @@ type Knotter struct {
 	comms []primitive.Segment
 }
 
-type instPerThread struct {
-	inst   uint32
-	thread uint64
+type serial struct {
+	id     int
+	serial primitive.SerialAccess
+}
+
+func (knotter *Knotter) ReassignThreadID() {
+	knotter.reassignThreadID = true
 }
 
 func (knotter *Knotter) AddSequentialTrace(seq []primitive.SerialAccess) bool {
@@ -49,7 +61,10 @@ func (knotter *Knotter) sanitizeSequentialTrace(seq []primitive.SerialAccess) bo
 		// since they do not race anyway. 2) or a single thread is given
 		return false
 	}
-	chk := make([]bool, len(seq))
+	var chk []bool
+	if !knotter.reassignThreadID {
+		chk = make([]bool, len(seq))
+	}
 	for _, serial := range seq {
 		if len(serial) == 0 {
 			return false
@@ -57,6 +72,9 @@ func (knotter *Knotter) sanitizeSequentialTrace(seq []primitive.SerialAccess) bo
 		if !serial.SingleThread() {
 			// All serial execution should be a single thread
 			return false
+		}
+		if knotter.reassignThreadID {
+			continue
 		}
 		thr := int(serial[0].Thread)
 		if thr >= len(chk) {
@@ -68,7 +86,7 @@ func (knotter *Knotter) sanitizeSequentialTrace(seq []primitive.SerialAccess) bo
 		}
 		chk[thr] = true
 	}
-	// At this point we take consider cases that all sequential
+	// NOTE: At this point we take consider cases that all sequential
 	// executions have the same nubmer of threads
 	if knotter.numThr == 0 {
 		knotter.numThr = len(seq)
@@ -148,6 +166,10 @@ func (knotter *Knotter) inferProgramOrder() {
 		return
 	}
 
+	if knotter.reassignThreadID {
+		panic("not yet handled") // And probably will not be handled
+	}
+
 	for i := 0; i < knotter.numThr; i++ {
 		// TODO: refactoring below functions
 		serials := knotter.pickThread(uint64(i))
@@ -223,13 +245,17 @@ func (knotter *Knotter) buildAccessMap() {
 	// handle loops
 	knotter.accessMap = make(map[uint32][]primitive.Access)
 	for _, seq := range knotter.seqs {
-		for _, serial := range seq {
-			knotter.buildAccessMapSerial(serial)
+		for _id, serial := range seq {
+			id := serial[0].Thread
+			if knotter.reassignThreadID {
+				id = uint64(_id)
+			}
+			knotter.buildAccessMapSerial(serial, id)
 		}
 	}
 }
 
-func (knotter *Knotter) buildAccessMapSerial(serial primitive.SerialAccess) {
+func (knotter *Knotter) buildAccessMapSerial(serial primitive.SerialAccess, id uint64) {
 	loopCnt := make(map[uint32]int)
 	for _, acc := range serial {
 		addr := wordify(acc.Addr)
@@ -237,9 +263,11 @@ func (knotter *Knotter) buildAccessMapSerial(serial primitive.SerialAccess) {
 			continue
 		}
 		loopCnt[acc.Inst]++
+
 		// TODO: this loop can be optimized
 		for _, allowed := range knotter.loopAllowed {
 			if allowed == loopCnt[acc.Inst] {
+				acc.Thread = id
 				knotter.accessMap[addr] = append(knotter.accessMap[addr], acc)
 				break
 			}
