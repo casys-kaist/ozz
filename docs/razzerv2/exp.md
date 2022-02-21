@@ -2,43 +2,52 @@
 
 ## Finding real bugs
 
-## Effectiveness of the context-sensitive coverage (or two pair of comms) compared with a single data race
+## How much RazzerV2 is faster than previous scheduling guided fuzzer (i.e., Snowboard, Razzer) when finding known bugs
 
-### How many of known CVEs are context-sensitive?
+- We want to compare the execution number until finding those bugs
+- And then analyze why the number is derived (i.e., how much new approaches affect the number)
 
-#### Both comms
-- CVE-2019-6974
-- CVE-2019-1999
-- CVE-2019-2025
+### Target bugs
 
-#### Only one comm
-- e20a2e9c
-- 11eb85ec
+#### Involving context-sensitive comms
 
-#### Our arguments
+- Both comms
+  - CVE-2019-6974
+  - CVE-2019-1999
+  - CVE-2019-2025
+- Only one comm
+  - e20a2e9c
+  - 11eb85ec
 
-- There are many such race conditions
+#### Involving context-oblivious comms only
 
-### During fuzzing a specific subsystem (i.e., KVM) to find above bugs
+- CVE-2017-2636
 
-#### Given an offending comm (i.e., dedup effectiveness)
+### The total execution number until finding known bugs
 
-- # of the total detection of the comm
-- Among the total detected comms, # of comms that can trigger the bugs
-- # of unique comm with respect to the context
-  - w/ or w/o the module proximity
-- Among the unique comms, # of unique comms that can trigger the bugs
+- During fuzzing a specific subsystem (i.e., KVM) to find above bugs
+- We measure the number of tested interleavings
+  - But we measure the number of all executions
 
-#### Our arguments
+### Analysis
 
-- Dedup is very effective to reduce unnecessary executions
+#### Effectiveness of the context-sensitive coverage compared with a single data race (i.e., dedup effectiveness)
 
-### The number of total runs (or the spending time) until finding above bugs
+- We want to argue that the context-sensitive coverage is effective to
+  select syscall pairs to test
+- We measure the number of syscall pairs tested by RazzerV2 compaired
+  with Razzer and Snowboard
 
-- Random selection amomg detected instances of comms
-- Snowboard
-- Razzer V2
+##### Details 
 
-#### Our arguments
+- TBD
+
+#### Effectiveness of the scheduling mechanism in completely testing interleavings between two calls
+
+- We want to argue that our scheduling mechanism (i.e., testing
+  interleaving) is effective to cover all coverage comparied to Razzer
+  and Snowboard (i.e., testing a single)
+
+##### Details
 
 - TBD
