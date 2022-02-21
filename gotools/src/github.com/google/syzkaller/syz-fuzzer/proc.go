@@ -550,7 +550,7 @@ func (proc *Proc) logResult(p *prog.Prog, info *ipc.ProgInfo, hanged bool) {
 	for i := uint64(0); i < epochs; i++ {
 		logger.logEpochLocked(i)
 	}
-	logger.logReadFrom()
+	logger.logNewCoverage()
 }
 
 func (logger *ResultLogger) initialize() {
@@ -605,34 +605,6 @@ func (logger ResultLogger) logRowLocked(row []string) {
 	}
 }
 
-func (logger ResultLogger) logReadFrom() {
-	conflicts := []string{}
-	depends := []string{}
-	for i1, c1 := range logger.p.Calls {
-		for i2, c2 := range logger.p.Calls {
-			if i1 == i2 {
-				continue
-			}
-			rf := logger.info.RFInfo[i1][i2]
-			if rf.Len() == 0 {
-				continue
-			}
-			str := fmt.Sprintf("%v(%d@%d) -> %v(%d@%d) (read-from=%d)",
-				c1.Meta.Name, c1.Thread, c1.Epoch,
-				c2.Meta.Name, c2.Thread, c2.Epoch, rf.Len())
-			if c1.Epoch == c2.Epoch {
-				conflicts = append(conflicts, str)
-			} else {
-				depends = append(depends, str)
-			}
-		}
-	}
-	log.Logf(2, "conflicts")
-	for _, str := range conflicts {
-		log.Logf(2, str)
-	}
-	log.Logf(2, "depends")
-	for _, str := range depends {
-		log.Logf(2, str)
-	}
+func (logger ResultLogger) logNewCoverage() {
+	// TODO
 }
