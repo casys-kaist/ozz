@@ -290,7 +290,10 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 	knotter := scheduler.Knotter{}
 	for i := 0; i < 2; i++ {
 		inf := proc.executeRaw(proc.execOpts, p, StatThreading)
-		knotter.AddSequentialTrace(inf.SequentialTrace())
+		if !knotter.AddSequentialTrace(inf.SequentialTrace()) {
+			log.Logf(0, "[WARN] failed to add the sequence trace")
+			return
+		}
 		p.Reverse()
 	}
 	knotter.ExcavateKnots()
@@ -374,7 +377,11 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 			cont := prog.Contender{Calls: []int{c1, c2}}
 
 			knotter := scheduler.Knotter{}
-			knotter.AddSequentialTrace([]primitive.SerialAccess{info.Calls[c1].Access, info.Calls[c2].Access})
+			knotter.ReassignThreadID()
+			if !knotter.AddSequentialTrace([]primitive.SerialAccess{info.Calls[c1].Access, info.Calls[c2].Access}) {
+				log.Logf(0, "[WARN] failed to add the sequence trace")
+				continue
+			}
 			knotter.ExcavateKnots()
 			comms := knotter.GetCommunications()
 			knots := knotter.GetKnots()
