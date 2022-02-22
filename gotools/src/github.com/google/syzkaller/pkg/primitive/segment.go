@@ -1,7 +1,8 @@
 package primitive
 
 import (
-	"github.com/mitchellh/hashstructure"
+	"encoding/binary"
+	"hash/fnv"
 )
 
 type Segment interface {
@@ -9,19 +10,41 @@ type Segment interface {
 }
 
 func (comm Communication) Hash() uint64 {
-	return hash(comm)
+	b := make([]byte, 24)
+	w := writer{b: b}
+	for i := 0; i < 2; i++ {
+		w.write(comm[i].Inst)
+		w.write(uint32(comm[i].Thread))
+		w.write(0)
+	}
+	return hash(b)
 }
 
 func (knot Knot) Hash() uint64 {
-	return hash(knot)
+	// NOTE: Assumption: the knot type is not Invalid or Parallel, and
+	// there are only two threads. TODO: extend the implmentation if
+	// needed.
+	b := make([]byte, 48)
+	w := writer{b: b}
+	for i := 0; i < 2; i++ {
+		for j := 0; j < 2; j++ {
+			w.write(knot[i][j].Inst)
+			w.write(uint32(knot[i][j].Thread))
+			var normalized uint32
+			if knot[i][j].Timestamp > knot[1-i][1-j].Timestamp {
+				normalized = 1
+			}
+			w.write(normalized)
+		}
+	}
+
+	return hash(b)
 }
 
-func hash(v interface{}) uint64 {
-	hash, err := hashstructure.Hash(v, nil)
-	if err != nil {
-		panic(err)
-	}
-	return hash
+func hash(b []byte) uint64 {
+	hash := fnv.New64a()
+	hash.Write(b)
+	return hash.Sum64()
 }
 
 func Intersect(s1, s2 []Segment) []Segment {
@@ -36,4 +59,13 @@ func Intersect(s1, s2 []Segment) []Segment {
 		}
 	}
 	return i
+}
+
+type writer struct {
+	b []byte
+}
+
+func (w *writer) write(v uint32) {
+	binary.LittleEndian.PutUint32(w.b, v)
+	w.b = w.b[4:]
 }
