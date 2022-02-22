@@ -76,6 +76,7 @@ func (proc *Proc) loop() {
 	}
 	for i := 0; ; i++ {
 		log.Logf(2, "executed=%v scheduled=%v", proc.executed, proc.scheduled)
+		MonitorMemUsage()
 		if proc.needScheduling() {
 			fuzzerSnapshot := proc.fuzzer.snapshot()
 			proc.scheduleInput(fuzzerSnapshot, false)

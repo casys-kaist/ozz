@@ -461,10 +461,12 @@ func FuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox string, procs,
 	if pinning {
 		taskset = "taskset 0x1"
 	}
+	// Monitor memory usage if debug mode
+	monitor := debug
 	return fmt.Sprintf("%v %v -executor=%v -name=%v -arch=%v%v -manager=%v -sandbox=%v"+
-		" -procs=%v -cover=%v -debug=%v -test=%v%v%v%v -gen=%v",
+		" -procs=%v -cover=%v -debug=%v -test=%v%v%v%v -gen=%v -monitor-memory-usage=%v",
 		taskset, fuzzer, executor, name, arch, osArg, fwdAddr, sandbox,
-		procs, cover, debug, test, runtestArg, verbosityArg, optionalArg, generate)
+		procs, cover, debug, test, runtestArg, verbosityArg, optionalArg, generate, monitor)
 }
 
 func OldFuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox string, procs int,
