@@ -246,6 +246,9 @@ func (knotter *Knotter) buildAccessMap() {
 	knotter.accessMap = make(map[uint32][]primitive.Access)
 	for _, seq := range knotter.seqs {
 		for _id, serial := range seq {
+			if len(serial) == 0 {
+				continue
+			}
 			id := serial[0].Thread
 			if knotter.reassignThreadID {
 				id = uint64(_id)
