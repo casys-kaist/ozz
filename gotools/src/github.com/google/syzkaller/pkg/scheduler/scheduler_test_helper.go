@@ -60,17 +60,17 @@ func _loadTestdata(raw []byte) (threads [2]primitive.SerialAccess, e error) {
 	return
 }
 
-func loadTestdata(t *testing.T, paths []string, knotter *Knotter) [][2]primitive.SerialAccess {
+func loadTestdata(tb testing.TB, paths []string, knotter *Knotter) [][2]primitive.SerialAccess {
 	res := [][2]primitive.SerialAccess{}
 	for _, _path := range paths {
 		path := filepath.Join("testdata", _path)
 		data, err := ioutil.ReadFile(path)
 		if err != nil {
-			t.Errorf("unexpected error: %v", err)
+			tb.Errorf("unexpected error: %v", err)
 		}
 		thrs, err := _loadTestdata(data)
 		if err != nil {
-			t.Errorf("%v", err)
+			tb.Errorf("%v", err)
 		}
 		res = append(res, thrs)
 		if knotter != nil {
