@@ -14,7 +14,7 @@ type Knotter struct {
 	accessMap   map[uint32][]primitive.Access
 	numThr      int
 
-	// Mostly used for thread works. Our implmenetation requires to
+	// Used only for thread works. Our implmenetation requires to
 	// distinguish two accesses will be executed in different threads,
 	// while all Access have same Thread when sequentially executing
 	// all calls. When reassignThreadID is true, Knotter will reassign
@@ -22,16 +22,12 @@ type Knotter struct {
 	reassignThreadID bool
 
 	// input
-	seqs     [][]primitive.SerialAccess
 	seqCount int
+	seqs0    [][]primitive.SerialAccess // Unmodified input
+	seqs     [][]primitive.SerialAccess // Used internally
 	// output
 	knots []primitive.Segment
 	comms []primitive.Segment
-}
-
-type serial struct {
-	id     int
-	serial primitive.SerialAccess
 }
 
 func (knotter *Knotter) ReassignThreadID() {
@@ -48,7 +44,7 @@ func (knotter *Knotter) AddSequentialTrace(seq []primitive.SerialAccess) bool {
 	if !knotter.sanitizeSequentialTrace(seq) {
 		return false
 	}
-	knotter.seqs = append(knotter.seqs, seq)
+	knotter.seqs0 = append(knotter.seqs0, seq)
 	knotter.seqCount++
 	return true
 }
@@ -104,14 +100,6 @@ func (knotter *Knotter) ExcavateKnots() {
 	knotter.fastenKnots()
 }
 
-func (knotter *Knotter) GetCommunications() []primitive.Segment {
-	return knotter.comms
-}
-
-func (knotter *Knotter) GetKnots() []primitive.Segment {
-	return knotter.knots
-}
-
 func (knotter *Knotter) fastenKnots() {
 	knotter.collectCommChans()
 	knotter.inferProgramOrder()
@@ -121,24 +109,30 @@ func (knotter *Knotter) fastenKnots() {
 }
 
 func (knotter *Knotter) collectCommChans() {
+	knotter.seqs = make([][]primitive.SerialAccess, len(knotter.seqs0))
+	for i, seq := range knotter.seqs0 {
+		knotter.seqs[i] = make([]primitive.SerialAccess, len(seq))
+	}
+
 	// Only memory objects on which store operations take place can be
 	// a communication channel
 	knotter.commChan = make(map[uint32]struct{})
-	forAllSerial := func(f func(*primitive.SerialAccess)) {
-		for i := 0; i < len(knotter.seqs); i++ {
-			for j := 0; j < len(knotter.seqs[i]); j++ {
-				serial := &knotter.seqs[i][j]
-				f(serial)
+	doSerial := func(f func(*primitive.SerialAccess, *primitive.SerialAccess)) {
+		for i := 0; i < len(knotter.seqs0); i++ {
+			for j := 0; j < len(knotter.seqs0[i]); j++ {
+				src := &knotter.seqs0[i][j]
+				dst := &knotter.seqs[i][j]
+				f(src, dst)
 			}
 		}
 	}
 	// Firstly, collect all possible communicatino channels
-	forAllSerial(knotter.collectCommChansSerial)
+	doSerial(knotter.collectCommChansSerial)
 	// Then, distill all serial accesses
-	forAllSerial(knotter.distillSerial)
+	doSerial(knotter.distillSerial)
 }
 
-func (knotter *Knotter) collectCommChansSerial(serial *primitive.SerialAccess) {
+func (knotter *Knotter) collectCommChansSerial(serial, unused *primitive.SerialAccess) {
 	for _, acc := range *serial {
 		if acc.Typ == primitive.TypeStore {
 			addr := wordify(acc.Addr)
@@ -147,16 +141,14 @@ func (knotter *Knotter) collectCommChansSerial(serial *primitive.SerialAccess) {
 	}
 }
 
-func (knotter *Knotter) distillSerial(serial *primitive.SerialAccess) {
-	head := 0
-	for i := 0; i < len(*serial); i++ {
-		addr := wordify((*serial)[i].Addr)
-		if _, ok := knotter.commChan[addr]; ok {
-			(*serial)[head] = (*serial)[i]
-			head++
+func (knotter *Knotter) distillSerial(serial *primitive.SerialAccess, distiled *primitive.SerialAccess) {
+	for _, acc := range *serial {
+		addr := wordify(acc.Addr)
+		if _, ok := knotter.commChan[addr]; !ok {
+			continue
 		}
+		(*distiled) = append((*distiled), acc)
 	}
-	(*serial) = (*serial)[:head]
 }
 
 func (knotter *Knotter) inferProgramOrder() {
@@ -330,6 +322,14 @@ func (knotter *Knotter) formKnots() {
 			knotter.knots = append(knotter.knots, knot)
 		}
 	}
+}
+
+func (knotter *Knotter) GetCommunications() []primitive.Segment {
+	return knotter.comms
+}
+
+func (knotter *Knotter) GetKnots() []primitive.Segment {
+	return knotter.knots
 }
 
 type orchestrator struct {
