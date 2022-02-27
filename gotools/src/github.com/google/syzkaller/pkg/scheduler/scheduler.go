@@ -163,19 +163,17 @@ func (knotter *Knotter) inferProgramOrder() {
 	}
 
 	for i := 0; i < knotter.numThr; i++ {
-		// TODO: refactoring below functions
 		serials := knotter.pickThread(uint64(i))
-		commLen, bitmaps := knotter.inferCommonPathThread(serials)
-		knotter.inferProgramOrderThread(serials, commLen, bitmaps)
+		knotter.alignThread(serials)
 	}
 }
 
-func (knotter *Knotter) pickThread(id uint64) []*primitive.SerialAccess {
-	thr := []*primitive.SerialAccess{}
+func (knotter *Knotter) pickThread(id uint64) []primitive.SerialAccess {
+	thr := []primitive.SerialAccess{}
 	for i := range knotter.seqs {
 		for j := range knotter.seqs[i] {
-			serial := &knotter.seqs[i][j]
-			if (*serial)[0].Thread == id {
+			serial := knotter.seqs[i][j]
+			if serial[0].Thread == id {
 				thr = append(thr, serial)
 				break
 			}
@@ -184,52 +182,11 @@ func (knotter *Knotter) pickThread(id uint64) []*primitive.SerialAccess {
 	return thr
 }
 
-func (knotter *Knotter) inferProgramOrderThread(thr []*primitive.SerialAccess, commLen int, bitmaps [][]bool) {
-	// TODO: refactoring
-	max := 0
-	for _, serial := range thr {
-		max += len(*serial)
-	}
-	max -= (commLen * (len(thr) - 1))
-	idx := make([]int, len(thr))
-
-	for po := uint32(0); po < uint32(max); {
-		for i := range thr {
-			for ; idx[i] < len(bitmaps[i]) && !bitmaps[i][idx[i]]; idx[i]++ {
-				// assign po to i
-				(*thr[i])[idx[i]].Timestamp = po
-				(*thr[i])[idx[i]].Context = uint32(i)
-				// log.Logf(0, "Assign %d to %v", po, (*thr[i])[idx[i]].StringContext())
-				// log.Logf(0, "increase po")
-				po++
-			}
-		}
-
-	loop:
-		for {
-			for i := range idx {
-				if idx[i] >= len(bitmaps[i]) || !bitmaps[i][idx[i]] {
-					break loop
-				}
-			}
-			// comm
-			for i := range idx {
-				(*thr[i])[idx[i]].Timestamp = po
-				(*thr[i])[idx[i]].Context = primitive.CommonPath
-				// log.Logf(0, "Assign %d to %v (comm)", po, (*thr[i])[idx[i]].StringContext())
-				idx[i]++
-			}
-			// log.Logf(0, "increase po")
-			po++
-		}
-	}
-}
-
-func (knotter *Knotter) inferCommonPathThread(thr []*primitive.SerialAccess) (int, [][]bool) {
+func (knotter *Knotter) alignThread(thr []primitive.SerialAccess) {
 	if len(thr) < 2 {
-		return 0, nil
+		return
 	}
-	return lcs(*thr[0], *thr[1])
+	pairwiseSequenceAlign(&thr[0], &thr[1])
 }
 
 func (knotter *Knotter) buildAccessMap() {

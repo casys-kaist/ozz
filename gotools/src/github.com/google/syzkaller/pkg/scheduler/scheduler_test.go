@@ -13,24 +13,24 @@ func TestSanitizeSequentialTrace(t *testing.T) {
 		ok   bool
 	}{
 		{[][]primitive.SerialAccess{
-			[]primitive.SerialAccess{{{Thread: 0}, {Thread: 0}}, {{Thread: 1}, {Thread: 1}}},
+			{{{Thread: 0}, {Thread: 0}}, {{Thread: 1}, {Thread: 1}}},
 		}, true}, // one sequential execution, two threads
 		{[][]primitive.SerialAccess{
-			[]primitive.SerialAccess{{{Thread: 0}, {Thread: 0}}, {{Thread: 1}, {Thread: 1}}},
-			[]primitive.SerialAccess{{{Thread: 0}, {Thread: 0}, {Thread: 0}}, {{Thread: 1}}},
+			{{{Thread: 0}, {Thread: 0}}, {{Thread: 1}, {Thread: 1}}},
+			{{{Thread: 0}, {Thread: 0}, {Thread: 0}}, {{Thread: 1}}},
 		}, true}, // two sequential execution, two threads
 		{[][]primitive.SerialAccess{
-			[]primitive.SerialAccess{{{Thread: 0}, {Thread: 0}}, {{Thread: 1}, {Thread: 1}}},
-			[]primitive.SerialAccess{{{Thread: 0}, {Thread: 0}, {Thread: 0}}, {{Thread: 1}}, {{Thread: 2}}},
+			{{{Thread: 0}, {Thread: 0}}, {{Thread: 1}, {Thread: 1}}},
+			{{{Thread: 0}, {Thread: 0}, {Thread: 0}}, {{Thread: 1}}, {{Thread: 2}}},
 		}, false}, // two sequential execution, one has two threads, the other has three threads
 		{[][]primitive.SerialAccess{
-			[]primitive.SerialAccess{{{Thread: 0}, {Thread: 1}, {Thread: 0}}, {{Thread: 1}, {Thread: 1}}},
+			{{{Thread: 0}, {Thread: 1}, {Thread: 0}}, {{Thread: 1}, {Thread: 1}}},
 		}, false}, // one serial is not a single thread
 		{[][]primitive.SerialAccess{
-			[]primitive.SerialAccess{{{Thread: 0}}, {}},
+			{{{Thread: 0}}, {}},
 		}, false}, // one serial is empty
 		{[][]primitive.SerialAccess{
-			[]primitive.SerialAccess{},
+			{},
 		}, false}, // empty seq
 	}
 	for i, test := range tests {
@@ -83,44 +83,6 @@ func TestCollectCommChans(t *testing.T) {
 	knotter.collectCommChans()
 	if !reflect.DeepEqual(test.after, knotter.seqs) {
 		t.Errorf("wrong\nexptected=%v\ngot=%v", test.after, knotter.seqs)
-	}
-}
-
-func TestInferProgramOrderThread(t *testing.T) {
-	test := struct {
-		serials []*primitive.SerialAccess
-		commLen int
-		bitmap  [][]bool
-		ans     []primitive.SerialAccess
-	}{
-		[]*primitive.SerialAccess{
-			&primitive.SerialAccess{{Timestamp: 100}, {Inst: 1, Timestamp: 101}, {Inst: 2, Timestamp: 102}, {Inst: 4, Timestamp: 103}},
-			&primitive.SerialAccess{{Timestamp: 0}, {Inst: 3, Timestamp: 1}, {Inst: 4, Timestamp: 3}},
-		},
-		2,
-		[][]bool{
-			{true, false, false, true},
-			{true, false, true},
-		},
-		[]primitive.SerialAccess{
-			{{Timestamp: 0, Context: primitive.CommonPath}, {Inst: 1, Timestamp: 1}, {Inst: 2, Timestamp: 2}, {Timestamp: 3, Context: primitive.CommonPath}},
-			{{Timestamp: 0, Context: primitive.CommonPath}, {Inst: 3, Timestamp: 1, Thread: 1 << 16}, {Timestamp: 3, Context: primitive.CommonPath}},
-		},
-	}
-
-	knotter := Knotter{}
-	knotter.inferProgramOrderThread(test.serials, test.commLen, test.bitmap)
-
-	for i := range test.serials {
-		serial := test.serials[i]
-		for j := 1; j < len(*serial); j++ {
-			if (*serial)[j].Timestamp <= (*serial)[j-1].Timestamp {
-				t.Errorf("PO violation")
-			}
-			if ctx := (*serial)[j].Context; ctx == primitive.CommonPath && test.ans[i][j].Context != ctx {
-				t.Errorf("Common path wrong at %d %d, expected=%v, got=%v", i, j, test.ans[i][j].Thread, ctx)
-			}
-		}
 	}
 }
 
