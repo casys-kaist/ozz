@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"fmt"
+
 	"github.com/google/syzkaller/pkg/primitive"
 )
 
@@ -41,7 +43,7 @@ func (a aligner) pairwiseSequenceAlign() {
 			diverged1, diverged2 := a.countDivergedAccessess()
 			// Forward progress should be guaranteed
 			if diverged1 == 0 && diverged2 == 0 || diverged1 < 0 || diverged2 < 0 {
-				panic("wrong")
+				panic(fmt.Sprintf("wrong %d %d", diverged1, diverged2))
 			}
 			// (*s1)[i1:next_i1] and (*s2)[i2:next_i2] are diverged sequences.
 			a.adjustAccessesPO(diverged1, diverged2, false)
@@ -105,7 +107,7 @@ func countDivergedAccessesPivot(pivot, counterpart *primitive.SerialAccess, foot
 	}()
 	for idx1 := from1; idx1 < len(*pivot); idx1++ {
 		hsh := hashWindow(pivot, idx1, windowSize)
-		if idx2, ok := footprint[hsh]; ok {
+		if idx2, ok := footprint[hsh]; ok && idx2 > from2 {
 			diverged1 = idx1 - from1
 			diverged2 = idx2 - from2
 			return

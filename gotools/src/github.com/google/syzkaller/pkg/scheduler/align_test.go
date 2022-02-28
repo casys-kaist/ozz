@@ -58,6 +58,41 @@ func TestPairwiseSequenceAlign(t *testing.T) {
 	}
 }
 
+func TestAlignFromRealdata(t *testing.T) {
+	// data from a faild execution
+	seq := loadTestdata(t, []string{"align_data"}, nil)[0]
+	pairwiseSequenceAlign(&seq[0], &seq[1])
+
+	s0, s1 := seq[0], seq[1]
+	for i0, i1 := 0, 0; i0 < len(s0) || i1 < len(s1); {
+		if s0[i0].Context != primitive.CommonPath || s1[i1].Context != primitive.CommonPath {
+			if s0[i0].Context != primitive.CommonPath {
+				i0++
+			}
+			if s1[i1].Context != primitive.CommonPath {
+				i1++
+			}
+			continue
+		}
+		if s0[i0].Inst != s1[i1].Inst {
+			t.Errorf("Two accesses' instruction addresses are different\n%v\n%v", s0[i0], s1[i1])
+		}
+		i0, i1 = i0+1, i1+1
+	}
+	check := func(s primitive.SerialAccess, id int) {
+		for i, acc := range s {
+			if i > 0 && acc.Timestamp <= s[i-1].Timestamp {
+				t.Errorf("%d: PO is not monotonically increasing\n%v\n%v", id, acc, s[i-1])
+			}
+			if acc.Context != uint32(id) && acc.Context != primitive.CommonPath {
+				t.Errorf("%d: wrong context\n%v", id, acc)
+			}
+		}
+	}
+	check(s0, 0)
+	check(s1, 1)
+}
+
 func _toString(serials []primitive.SerialAccess) (str string) {
 	for i, serial := range serials {
 		str += fmt.Sprintf("Serial #%d\n", i)
