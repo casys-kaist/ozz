@@ -1,5 +1,4 @@
 Thread: ioctl
-1226
 ffffffff81a8cc6d	0xffffffff9133fca8	R
 ffffffff81866830	0xffffffff9133fca8	R
 ffffffff81ee5764	0xffffc90000ca7fc8	R
@@ -837,7 +836,6 @@ ffffffff818160bd	0xffff888021ff65f0	R
 ffffffff81816118	0xffff888021ff65f8	R
 ffffffff81816175	0xffff888021ff6608	R
 Thread: close
-430
 ffffffff81a8cc6d	0xffffffff9133fca8	R
 ffffffff81866830	0xffffffff9133fca8	R
 ffffffff81e649bb	0xffffc90000ca7fc8	R

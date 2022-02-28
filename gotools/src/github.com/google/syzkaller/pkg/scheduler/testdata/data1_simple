@@ -1,5 +1,4 @@
 Thread: packet_version
-48
 ffffffff81a8cc6d	0xffffffff9133fca8	R
 ffffffff81866830	0xffffffff9133fca8	R
 ffffffff8a659e08	0xffffc90000c77fc8	R
@@ -20,7 +19,6 @@ ffffffff81d7c440	0xffffffff9133fca8	R
 ffffffff81d7c4c9	0xffffffff91211210	R
 ffffffff812c46d6	0xffff88801821ba80	R
 Thread: packet_set_ring
-8130
 ffffffff81a8cc6d	0xffffffff9133fca8	R
 ffffffff81866830	0xffffffff9133fca8	R
 ffffffff8a659e08	0xffffc90000c77fc8	R

@@ -11,7 +11,7 @@ import (
 )
 
 func _loadTestdata(raw []byte) (threads [2]primitive.SerialAccess, e error) {
-	timestamp, thread := uint32(0), -1
+	timestamp, thread, serialID := uint32(0), -1, -1
 	for {
 		idx := bytes.IndexByte(raw, byte('\n'))
 		if idx == -1 {
@@ -22,6 +22,7 @@ func _loadTestdata(raw []byte) (threads [2]primitive.SerialAccess, e error) {
 
 		toks := bytes.Fields(line)
 		if len(toks) < 3 {
+			serialID++
 			if bytes.HasPrefix(line, []byte("Thread")) {
 				thread++
 			}
@@ -46,15 +47,25 @@ func _loadTestdata(raw []byte) (threads [2]primitive.SerialAccess, e error) {
 			return
 		}
 
+		size := uint64(4)
+		if len(toks) > 3 {
+			size0, err := strconv.ParseUint(string(toks[3]), 10, 64)
+			if err != nil {
+				e = err
+				return
+			}
+			size = size0
+		}
+
 		acc := primitive.Access{
 			Inst:      uint32(inst),
 			Addr:      uint32(addr),
 			Typ:       typ,
-			Size:      4,
+			Size:      uint32(size),
 			Timestamp: timestamp,
 			Thread:    uint64(thread),
 		}
-		threads[thread].Add(acc)
+		threads[serialID].Add(acc)
 		timestamp++
 	}
 	return

@@ -1,5 +1,4 @@
 Thread: packet_version
-48
 ffffffff81a8cc6d	0xffffffff9133fca8	R
 ffffffff81866830	0xffffffff9133fca8	R
 ffffffff8a659e08	0xffffc90000c77fc8	R
@@ -33,7 +32,7 @@ ffffffff8a65995a	0xffffffff8ed25770	R
 ffffffff8a65996a	0xffffc90000c77e30	R
 ffffffff8a659979	0xffffc90000c77e40	R
 ffffffff8bbb5a29	0xffff888049c3e018	R
-ffffffff8bbb79d6	0xffff888018a48520	R *
+ffffffff8bbb79d6	0xffff888018a48520	R
 ffffffff8bbb83c7	0xffff888018a48648	R
 ffffffff81c0ef6c	0xffff88801821d188	R
 ffffffff81c0ef7b	0xffff88801821bf90	R
@@ -48,7 +47,6 @@ ffffffff812c46d6	0xffff88801821ba80	R
 ffffffff81866340	0xffffffff9133fca8	R
 ffffffff81a8c83d	0xffffffff9133fca8	R
 Thread: packet_set_ring
-8130
 ffffffff81a8cc6d	0xffffffff9133fca8	R
 ffffffff81866830	0xffffffff9133fca8	R
 ffffffff8a659e08	0xffffc90000c77fc8	R
@@ -1029,7 +1027,7 @@ ffffffff81ca1da5	0xffffea00007c0bc8	W
 ffffffff81ca5188	0xffffffff9133fca8	R
 ffffffff81ca524f	0xffffffff91211330	R
 ffffffff8bbc8a42	0xffff88801b77e780	W
-ffffffff8bbc9093	0xffff888018a48874	R *
+ffffffff8bbc9093	0xffff888018a48874	R
 ffffffff8bbc9407	0xffffc90000c77c4c	R
 ffffffff81b9fa28	0xffffffff8f8a3f38	R
 ffffffff81d7ad79	0xffffffff91340608	R
@@ -8113,7 +8111,7 @@ ffffffff84f01161	0xffffffff92e910b0	R
 ffffffff8162cd25	0xffff888018a481c0	W
 ffffffff8162cd3f	0xffffc90000c778c0	W
 ffffffff8bbca7f9	0xffff888018a48520	R
-ffffffff8bbca80b	0xffff888018a48520	W *
+ffffffff8bbca80b	0xffff888018a48520	W
 ffffffff8bbca818	0xffff888018a48874	R
 ffffffff8bbca9e3	0xffff888018a48550	R
 ffffffff8bbca9f5	0xffff888018a48550	W
