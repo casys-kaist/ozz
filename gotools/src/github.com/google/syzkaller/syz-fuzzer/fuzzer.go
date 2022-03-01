@@ -107,21 +107,23 @@ const (
 	StatHint
 	StatSeed
 	StatThreading
+	StatScheduleHint
 	StatSchedule
 	StatCount
 )
 
 var statNames = [StatCount]string{
-	StatGenerate:  "exec gen",
-	StatFuzz:      "exec fuzz",
-	StatCandidate: "exec candidate",
-	StatTriage:    "exec triage",
-	StatMinimize:  "exec minimize",
-	StatSmash:     "exec smash",
-	StatHint:      "exec hints",
-	StatSeed:      "exec seeds",
-	StatThreading: "exec threadings",
-	StatSchedule:  "exec schedulings",
+	StatGenerate:     "exec gen",
+	StatFuzz:         "exec fuzz",
+	StatCandidate:    "exec candidate",
+	StatTriage:       "exec triage",
+	StatMinimize:     "exec minimize",
+	StatSmash:        "exec smash",
+	StatHint:         "exec hints",
+	StatSeed:         "exec seeds",
+	StatThreading:    "exec threadings",
+	StatScheduleHint: "total scheduling hints",
+	StatSchedule:     "exec schedulings",
 }
 
 type OutputType int
@@ -795,6 +797,7 @@ func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog, calls prog.Contender) bool 
 
 func (fuzzer *Fuzzer) handSchedulingHints(p *prog.Prog, hints []primitive.Segment) {
 	k := hash.String(p.Serialize())
+	atomic.AddUint64(&fuzzer.stats[StatScheduleHint], uint64(len(hints)))
 	fuzzer.schedulingHints[k] = append(fuzzer.schedulingHints[k], hints...)
 }
 
