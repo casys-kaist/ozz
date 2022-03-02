@@ -86,16 +86,6 @@ func TestCollectCommChans(t *testing.T) {
 	}
 }
 
-// TODO: answers depend on the data, so it should reside in the data
-// file
-var CVE20168655 = primitive.Knot{
-	{{Inst: 0x8bbb79d6, Size: 4, Typ: primitive.TypeLoad}, {Inst: 0x8bbca80b, Size: 4, Typ: primitive.TypeStore}},
-	{{Inst: 0x8bbc9093, Size: 4, Typ: primitive.TypeLoad}, {Inst: 0x8bbb75a0, Size: 4, Typ: primitive.TypeStore}}}
-
-var CVE20196974 = primitive.Knot{
-	{{Inst: 0x81f2b4e1, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x81f2bbd3, Size: 4, Typ: primitive.TypeLoad}},
-	{{Inst: 0x8d34b095, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x8d3662f0, Size: 4, Typ: primitive.TypeLoad}}}
-
 var testsSingleSeq = []struct {
 	filename string
 	answer   primitive.Knot
@@ -237,16 +227,24 @@ func TestSqueezeSchedPoints(t *testing.T) {
 }
 
 func TestExcavateKnotsTwoSeqs(t *testing.T) {
-	test := struct {
+	tests := []struct {
 		filenames []string
 		answer    primitive.Knot
 	}{
-		[]string{"data1_seq1", "data1_seq2"},
-		CVE20168655,
+		{
+			[]string{"data1_seq1", "data1_seq2"},
+			CVE20168655,
+		},
+		{
+			[]string{"cve-2019-6974-seq1", "cve-2019-6974-seq2"},
+			CVE20196974_2,
+		},
 	}
-	knots := loadKnots(t, test.filenames)
-	if !checkAnswer(t, knots, test.answer) {
-		t.Errorf("can't find the required knot")
+	for _, test := range tests {
+		knots := loadKnots(t, test.filenames)
+		if !checkAnswer(t, knots, test.answer) {
+			t.Errorf("can't find the required knot")
+		}
 	}
 }
 
@@ -273,6 +271,23 @@ func TestExcavateKnotsSingleThread(t *testing.T) {
 		}
 	}
 }
+
+// TODO: answers depend on the data (i.e., two test data from the same
+// CVE may differ depending on the binary they ran on such as
+// CVE20196974 and CVE20196974_2), so it should reside in the data
+// file.
+
+var CVE20168655 = primitive.Knot{
+	{{Inst: 0x8bbb79d6, Size: 4, Typ: primitive.TypeLoad}, {Inst: 0x8bbca80b, Size: 4, Typ: primitive.TypeStore}},
+	{{Inst: 0x8bbc9093, Size: 4, Typ: primitive.TypeLoad}, {Inst: 0x8bbb75a0, Size: 4, Typ: primitive.TypeStore}}}
+
+var CVE20196974 = primitive.Knot{
+	{{Inst: 0x81f2b4e1, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x81f2bbd3, Size: 4, Typ: primitive.TypeLoad}},
+	{{Inst: 0x8d34b095, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x8d3662f0, Size: 4, Typ: primitive.TypeLoad}}}
+
+var CVE20196974_2 = primitive.Knot{
+	{{Inst: 0x8d57633a, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x8d592198, Size: 4, Typ: primitive.TypeLoad}},
+	{{Inst: 0x81f9e606, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x81f9ecf8, Size: 4, Typ: primitive.TypeLoad}}}
 
 func BenchmarkExcavateKnots(b *testing.B) {
 	benchmarkExcavateKnots(b)

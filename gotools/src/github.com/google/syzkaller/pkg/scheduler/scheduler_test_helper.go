@@ -113,6 +113,7 @@ func checkAnswer(t *testing.T, knots []primitive.Knot, required primitive.Knot) 
 		if knot.Same(required) {
 			t.Logf("found")
 			found = true
+			break
 		}
 	}
 	return found
