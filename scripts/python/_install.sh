@@ -16,7 +16,7 @@ _build() {
 	tar xf "$_DST" -C "$TOOLCHAINS_DIR/python"
 	mv "$TOOLCHAINS_DIR/python/Python-$PYTHON_VERSION" "$PYTHON_PATH"
 	__make_dir_and_exec_cmd "$PYTHON_BUILD" \
-							"../configure --enable-optimizations --prefix=$PYTHON_INSTALL" \
+							"../configure --enable-optimizations --prefix=$PYTHON_INSTALL --enable-loadable-sqlite-extensions" \
 							"make -j`nproc`"
 }
 
