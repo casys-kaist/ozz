@@ -40,7 +40,10 @@ func (knot Knot) invalidContext() bool {
 			if acc0.Thread != acc1.Thread {
 				continue
 			}
-			if ctx0, ctx1 := acc0.Context, acc1.Context; !(ctx0 == ctx1 && ctx0 == CommonPath && ctx1 == CommonPath) {
+			if ctx0, ctx1 := acc0.Context, acc1.Context; ctx0 == ctx1 || ctx0 == CommonPath || ctx1 == CommonPath {
+				// Two accesses in a same thread can exist if 1) they
+				// are in the same context, or 2) one resides on the
+				// common path.
 				return false
 			} else {
 				return true
