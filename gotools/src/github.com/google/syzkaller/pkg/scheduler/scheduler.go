@@ -213,6 +213,9 @@ func (knotter *Knotter) buildAccessMap() {
 			knotter.buildAccessMapSerial(serial, id)
 		}
 	}
+	// Communication channels will not be used after this point. Let's
+	// nil it for the garbage collector to know it.
+	knotter.commChan = nil
 }
 
 func (knotter *Knotter) buildAccessMapSerial(serial primitive.SerialAccess, id uint64) {
@@ -231,6 +234,8 @@ func (knotter *Knotter) formCommunications() {
 	for _, accs := range knotter.accessMap {
 		knotter.formCommunicationAddr(accs)
 	}
+	// As same to knotter.commChan, let's nil it for GC.
+	knotter.accessMap = nil
 }
 
 func (knotter *Knotter) formCommunicationAddr(accesses []primitive.Access) {
