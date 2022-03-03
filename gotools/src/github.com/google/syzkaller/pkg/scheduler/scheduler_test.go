@@ -55,26 +55,26 @@ func TestCollectCommChans(t *testing.T) {
 	}{
 		[][]primitive.SerialAccess{
 			{ // seq 0
-				{{Addr: 1, Timestamp: 1, Typ: primitive.TypeStore}, {Addr: 13, Timestamp: 2, Typ: primitive.TypeLoad}},
-				{{Addr: 1, Timestamp: 3, Typ: primitive.TypeLoad, Thread: 1}, {Addr: 102, Timestamp: 4, Typ: primitive.TypeStore, Thread: 1}},
+				{{Addr: 1, Timestamp: 1, Typ: primitive.TypeStore}, {Inst: 1, Addr: 13, Timestamp: 2, Typ: primitive.TypeLoad}},
+				{{Inst: 3, Addr: 1, Timestamp: 3, Typ: primitive.TypeLoad, Thread: 1}, {Inst: 4, Addr: 102, Timestamp: 4, Typ: primitive.TypeStore, Thread: 1}},
 			},
 			{ // seq 1
-				{{Addr: 204, Timestamp: 101, Typ: primitive.TypeLoad, Thread: 1}, {Addr: 305, Timestamp: 102, Typ: primitive.TypeLoad, Thread: 1}},
-				{{Addr: 102, Timestamp: 103, Typ: primitive.TypeLoad}, {Addr: 305, Timestamp: 104, Typ: primitive.TypeStore}},
+				{{Addr: 204, Timestamp: 101, Typ: primitive.TypeLoad, Thread: 1}, {Inst: 1, Addr: 305, Timestamp: 102, Typ: primitive.TypeLoad, Thread: 1}},
+				{{Inst: 3, Addr: 102, Timestamp: 103, Typ: primitive.TypeLoad}, {Inst: 4, Addr: 305, Timestamp: 104, Typ: primitive.TypeStore}},
 			},
 		},
 		[][]primitive.SerialAccess{
 			{ // seq 0
 				{{Addr: 1, Timestamp: 1, Typ: primitive.TypeStore}},
-				{{Addr: 1, Timestamp: 3, Typ: primitive.TypeLoad, Thread: 1}, {Addr: 102, Timestamp: 4, Typ: primitive.TypeStore, Thread: 1}},
+				{{Inst: 3, Addr: 1, Timestamp: 3, Typ: primitive.TypeLoad, Thread: 1}, {Inst: 4, Addr: 102, Timestamp: 4, Typ: primitive.TypeStore, Thread: 1}},
 			},
 			{ // seq 1
-				{{Addr: 305, Timestamp: 102, Typ: primitive.TypeLoad, Thread: 1}},
-				{{Addr: 102, Timestamp: 103, Typ: primitive.TypeLoad}, {Addr: 305, Timestamp: 104, Typ: primitive.TypeStore}},
+				{{Inst: 1, Addr: 305, Timestamp: 102, Typ: primitive.TypeLoad, Thread: 1}},
+				{{Inst: 3, Addr: 102, Timestamp: 103, Typ: primitive.TypeLoad}, {Inst: 4, Addr: 305, Timestamp: 104, Typ: primitive.TypeStore}},
 			},
 		},
 	}
-	knotter := Knotter{}
+	knotter := Knotter{loopAllowed: loopAllowed}
 	for _, seq := range test.seqs {
 		if !knotter.AddSequentialTrace(seq) {
 			t.Fatalf("test case is wrong")

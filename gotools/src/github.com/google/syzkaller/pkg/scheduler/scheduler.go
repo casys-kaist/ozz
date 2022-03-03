@@ -142,12 +142,20 @@ func (knotter *Knotter) collectCommChansSerial(serial, unused *primitive.SerialA
 }
 
 func (knotter *Knotter) distillSerial(serial *primitive.SerialAccess, distiled *primitive.SerialAccess) {
+	loopCnt := make(map[uint32]int)
 	for _, acc := range *serial {
 		addr := wordify(acc.Addr)
 		if _, ok := knotter.commChan[addr]; !ok {
 			continue
 		}
-		(*distiled) = append((*distiled), acc)
+		loopCnt[acc.Inst]++
+		// TODO: this loop can be optimized
+		for _, allowed := range knotter.loopAllowed {
+			if allowed == loopCnt[acc.Inst] {
+				(*distiled) = append((*distiled), acc)
+				break
+			}
+		}
 	}
 }
 
@@ -208,22 +216,13 @@ func (knotter *Knotter) buildAccessMap() {
 }
 
 func (knotter *Knotter) buildAccessMapSerial(serial primitive.SerialAccess, id uint64) {
-	loopCnt := make(map[uint32]int)
 	for _, acc := range serial {
 		addr := wordify(acc.Addr)
 		if _, ok := knotter.commChan[addr]; !ok {
 			continue
 		}
-		loopCnt[acc.Inst]++
-
-		// TODO: this loop can be optimized
-		for _, allowed := range knotter.loopAllowed {
-			if allowed == loopCnt[acc.Inst] {
-				acc.Thread = id
-				knotter.accessMap[addr] = append(knotter.accessMap[addr], acc)
-				break
-			}
-		}
+		acc.Thread = id
+		knotter.accessMap[addr] = append(knotter.accessMap[addr], acc)
 	}
 }
 
