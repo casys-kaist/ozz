@@ -15,7 +15,7 @@ func (comm Communication) Hash() uint64 {
 	for i := 0; i < 2; i++ {
 		w.write(comm[i].Inst)
 		w.write(uint32(comm[i].Thread))
-		w.write(0)
+		w.write(uint32(comm[i].Timestamp))
 	}
 	return hash(b)
 }
@@ -30,11 +30,7 @@ func (knot Knot) Hash() uint64 {
 		for j := 0; j < 2; j++ {
 			w.write(knot[i][j].Inst)
 			w.write(uint32(knot[i][j].Thread))
-			var normalized uint32
-			if knot[i][j].Timestamp > knot[1-i][1-j].Timestamp {
-				normalized = 1
-			}
-			w.write(normalized)
+			w.write(knot[i][j].Timestamp)
 		}
 	}
 
