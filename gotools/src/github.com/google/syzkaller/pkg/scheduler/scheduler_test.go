@@ -257,8 +257,7 @@ func TestExcavateKnotsSingleThread(t *testing.T) {
 				thrs[i][j].Thread = 0
 			}
 		}
-		knotter := Knotter{}
-		knotter.ReassignThreadID()
+		knotter := Knotter{ReassignThreadID: true}
 		knotter.AddSequentialTrace(thrs[:])
 		knotter.ExcavateKnots()
 		knots0 := knotter.GetKnots()
@@ -270,6 +269,38 @@ func TestExcavateKnotsSingleThread(t *testing.T) {
 			t.Errorf("can't find the required knot")
 		}
 	}
+}
+
+func TestDupCheck(t *testing.T) {
+	knotter := &Knotter{}
+	loadTestdata(t, []string{"cve-2019-6974-seq1", "cve-2019-6974-seq2"}, knotter)
+	knotter.ExcavateKnots()
+
+	comms := knotter.GetCommunications()
+	t.Logf("Total communications: %d", len(comms))
+	dupCommCnt := 0
+	for i := range comms {
+		for j := i + 1; j < len(comms); j++ {
+			if comms[i].Hash() == comms[j].Hash() {
+				t.Errorf("duplicated communication:\n%v\n%v", comms[i], comms[j])
+				dupCommCnt++
+			}
+		}
+	}
+	t.Logf("Duplicated communications pairs: %d", dupCommCnt)
+	knots := knotter.GetKnots()
+	t.Logf("Total knots: %d", len(knots))
+	dupKnotCnt := 0
+	mp := make(map[uint64]int)
+	// Although this does not detect all pairs of duplicated knots, it
+	// there is no detected dups, there is no dups in knots.
+	for i, knot := range knots {
+		if prev, ok := mp[knot.Hash()]; ok {
+			t.Errorf("duplicated knots:\n%v\n%v", knots[prev], knots[i])
+		}
+		mp[knot.Hash()] = i
+	}
+	t.Logf("Duplicated knots: %d", dupKnotCnt)
 }
 
 // TODO: answers depend on the data (i.e., two test data from the same

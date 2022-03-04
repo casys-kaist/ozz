@@ -377,8 +377,7 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 		for c2 := c1 + 1; c2 < len(p.Calls) && c2-c1-1 < maxIntermediateCalls; c2++ {
 			cont := prog.Contender{Calls: []int{c1, c2}}
 
-			knotter := scheduler.Knotter{}
-			knotter.ReassignThreadID()
+			knotter := scheduler.Knotter{ReassignThreadID: true}
 			if !knotter.AddSequentialTrace([]primitive.SerialAccess{info.Calls[c1].Access, info.Calls[c2].Access}) {
 				log.Logf(0, "[WARN] failed to add the sequence trace")
 				continue

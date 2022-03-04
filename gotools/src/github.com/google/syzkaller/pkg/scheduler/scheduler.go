@@ -6,8 +6,10 @@ import (
 	"github.com/google/syzkaller/pkg/primitive"
 )
 
-// XXX: using mutiple maps incurs lots of memory allocations which
-// slows down ExcavateKnots().
+// TODO: Assumptions and models that this implementation relies on
+// (e.g., timestamps represents PO) are so fragile so it is hard to
+// extend, for example, to three threads.
+
 type Knotter struct {
 	loopAllowed []int
 	commChan    map[uint32]struct{}
@@ -19,7 +21,9 @@ type Knotter struct {
 	// while all Access have same Thread when sequentially executing
 	// all calls. When reassignThreadID is true, Knotter will reassign
 	// Thread to each Access when fastening Knots
-	reassignThreadID bool
+	ReassignThreadID bool
+
+	commHsh map[uint64]struct{}
 
 	// input
 	seqCount int
@@ -28,10 +32,6 @@ type Knotter struct {
 	// output
 	knots []primitive.Segment
 	comms []primitive.Segment
-}
-
-func (knotter *Knotter) ReassignThreadID() {
-	knotter.reassignThreadID = true
 }
 
 func (knotter *Knotter) AddSequentialTrace(seq []primitive.SerialAccess) bool {
@@ -58,7 +58,7 @@ func (knotter *Knotter) sanitizeSequentialTrace(seq []primitive.SerialAccess) bo
 		return false
 	}
 	var chk []bool
-	if !knotter.reassignThreadID {
+	if !knotter.ReassignThreadID {
 		chk = make([]bool, len(seq))
 	}
 	for _, serial := range seq {
@@ -69,7 +69,7 @@ func (knotter *Knotter) sanitizeSequentialTrace(seq []primitive.SerialAccess) bo
 			// All serial execution should be a single thread
 			return false
 		}
-		if knotter.reassignThreadID {
+		if knotter.ReassignThreadID {
 			continue
 		}
 		thr := int(serial[0].Thread)
@@ -103,6 +103,8 @@ func (knotter *Knotter) ExcavateKnots() {
 func (knotter *Knotter) fastenKnots() {
 	knotter.collectCommChans()
 	knotter.inferProgramOrder()
+	// At this point, two accesses conducted by a single thread are
+	// same if they have the same timestamp
 	knotter.buildAccessMap()
 	knotter.formCommunications()
 	knotter.formKnots()
@@ -148,6 +150,8 @@ func (knotter *Knotter) distillSerial(serial *primitive.SerialAccess, distiled *
 		if _, ok := knotter.commChan[addr]; !ok {
 			continue
 		}
+		// Deal with specific dynamic instances for the same instruction
+		// to handle loops
 		loopCnt[acc.Inst]++
 		// TODO: this loop can be optimized
 		for _, allowed := range knotter.loopAllowed {
@@ -166,7 +170,7 @@ func (knotter *Knotter) inferProgramOrder() {
 		return
 	}
 
-	if knotter.reassignThreadID {
+	if knotter.ReassignThreadID {
 		panic("not yet handled") // And probably will not be handled
 	}
 
@@ -181,6 +185,9 @@ func (knotter *Knotter) pickThread(id uint64) []primitive.SerialAccess {
 	for i := range knotter.seqs {
 		for j := range knotter.seqs[i] {
 			serial := knotter.seqs[i][j]
+			if len(serial) == 0 {
+				continue
+			}
 			if serial[0].Thread == id {
 				thr = append(thr, serial)
 				break
@@ -198,16 +205,15 @@ func (knotter *Knotter) alignThread(thr []primitive.SerialAccess) {
 }
 
 func (knotter *Knotter) buildAccessMap() {
-	// Record specific dynamic instances for the same instruction to
-	// handle loops
 	knotter.accessMap = make(map[uint32][]primitive.Access)
+
 	for _, seq := range knotter.seqs {
 		for _id, serial := range seq {
 			if len(serial) == 0 {
 				continue
 			}
 			id := serial[0].Thread
-			if knotter.reassignThreadID {
+			if knotter.ReassignThreadID {
 				id = uint64(_id)
 			}
 			knotter.buildAccessMapSerial(serial, id)
@@ -221,9 +227,6 @@ func (knotter *Knotter) buildAccessMap() {
 func (knotter *Knotter) buildAccessMapSerial(serial primitive.SerialAccess, id uint64) {
 	for _, acc := range serial {
 		addr := wordify(acc.Addr)
-		if _, ok := knotter.commChan[addr]; !ok {
-			continue
-		}
 		acc.Thread = id
 		knotter.accessMap[addr] = append(knotter.accessMap[addr], acc)
 	}
@@ -231,11 +234,13 @@ func (knotter *Knotter) buildAccessMapSerial(serial primitive.SerialAccess, id u
 
 func (knotter *Knotter) formCommunications() {
 	knotter.comms = []primitive.Segment{}
+	knotter.commHsh = make(map[uint64]struct{})
 	for _, accs := range knotter.accessMap {
 		knotter.formCommunicationAddr(accs)
 	}
 	// As same to knotter.commChan, let's nil it for GC.
 	knotter.accessMap = nil
+	knotter.commHsh = nil
 }
 
 func (knotter *Knotter) formCommunicationAddr(accesses []primitive.Access) {
@@ -263,9 +268,24 @@ func (knotter *Knotter) formCommunicationAddr(accesses []primitive.Access) {
 
 			// We are generating all possible knots so append both
 			// Communications
-			knotter.comms = append(knotter.comms, primitive.Communication{acc1, acc2}, primitive.Communication{acc2, acc1})
+			candidates := []primitive.Communication{{acc1, acc2}, {acc2, acc1}}
+			for _, cand := range candidates {
+				if knotter.dupedComm(cand) {
+					continue
+				}
+				knotter.comms = append(knotter.comms, cand)
+			}
 		}
 	}
+}
+
+func (knotter *Knotter) dupedComm(comm primitive.Communication) bool {
+	// A communication is redundant if there is another that accesses
+	// have the same timestamp with corresponding accesses.
+	hsh := comm.Hash()
+	_, ok := knotter.commHsh[hsh]
+	knotter.commHsh[hsh] = struct{}{}
+	return ok
 }
 
 func (knotter *Knotter) formKnots() {
