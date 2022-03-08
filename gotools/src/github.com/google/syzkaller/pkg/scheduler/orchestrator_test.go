@@ -15,10 +15,15 @@ func TestSelectHarmoniousKnotsIterSimple(t *testing.T) {
 func testSelectHarmoniousKnotsIter(t *testing.T, path string, answer primitive.Knot) {
 	knots := loadKnots(t, []string{path})
 
-	orch := orchestrator{knots: knots}
+	segs := []primitive.Segment{}
+	for _, knot := range knots {
+		segs = append(segs, knot)
+	}
+
+	orch := Orchestrator{Segs: segs}
 	i, count := 0, 0
-	for len(orch.knots) != 0 {
-		selected := orch.selectHarmoniousKnots()
+	for len(orch.Segs) != 0 {
+		selected := orch.SelectHarmoniousKnots()
 		count += len(selected)
 		t.Logf("Selected:")
 		found := checkAnswer(t, selected, answer)

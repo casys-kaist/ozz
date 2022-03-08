@@ -92,6 +92,7 @@ type FuzzerSnapshot struct {
 type Stat int
 
 const (
+	// Stats of fuzzing strategies
 	StatGenerate Stat = iota
 	StatFuzz
 	StatCandidate
@@ -101,8 +102,9 @@ const (
 	StatHint
 	StatSeed
 	StatThreading
-	StatScheduleHint
 	StatSchedule
+	// Stats of collected data
+	StatScheduleHint
 	StatCount
 )
 
@@ -482,15 +484,15 @@ func (fuzzer *Fuzzer) sendInputToManager(inp rpctype.RPCInput) {
 	}
 }
 
-// func (fuzzer *Fuzzer) sendThreadedInputToManager(inp rpctype.RPCThreadedInput) {
-// 	a := &rpctype.NewThreadedInputArgs{
-// 		Name:             fuzzer.name,
-// 		RPCThreadedInput: inp,
-// 	}
-// 	if err := fuzzer.manager.Call("Manager.NewThreadedInput", a, nil); err != nil {
-// 		log.Fatalf("Manager.NewThreadedInput call failed: %v", err)
-// 	}
-// }
+func (fuzzer *Fuzzer) sendThreadedInputToManager(inp rpctype.RPCThreadedInput) {
+	a := &rpctype.NewThreadedInputArgs{
+		Name:             fuzzer.name,
+		RPCThreadedInput: inp,
+	}
+	if err := fuzzer.manager.Call("Manager.NewThreadedInput", a, nil); err != nil {
+		log.Fatalf("Manager.NewThreadedInput call failed: %v", err)
+	}
+}
 
 func (fuzzer *Fuzzer) addInputFromAnotherFuzzer(inp rpctype.RPCInput) {
 	p := fuzzer.deserializeInput(inp.Prog)
@@ -572,28 +574,15 @@ func (fuzzer *FuzzerSnapshot) chooseProgram(r *rand.Rand) *prog.Prog {
 	return fuzzer.corpus[idx]
 }
 
-// func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.ThreadedProg {
-// 	if len(fuzzer.threadedCorpus) == 0 {
-// 		return nil
-// 	}
-// 	// NOTE: we want to select a threaded program with the long legnth
-// 	// of read-from (i.e., the scheduling space is large), and has not
-// 	// been selected too many times (i.e., and we don't expore the
-// 	// scheduling space yet).
-// 	// XXX: Although the idea is straight-forward, implementing it is
-// 	// costly (or not. whatever.). So instead, the below is a kind of
-// 	// heuristic (hopefully) mimicking the idea.
-// 	for try := 0; try < 10; try++ {
-// 		idx := r.Intn(len(fuzzer.threadedCorpus))
-// 		tp := fuzzer.threadedCorpus[idx]
-// 		if tp.Prio-tp.Scheduled >= r.Intn(tp.Prio) {
-// 			tp.Scheduled++
-// 			return tp
-// 		}
-// 	}
-// 	idx := r.Intn(len(fuzzer.threadedCorpus))
-// 	return fuzzer.threadedCorpus[idx]
-// }
+func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.ThreadedProg {
+	if len(fuzzer.threadedCorpus) == 0 {
+		return nil
+	}
+	// TODO: Prioritize inputs according to the number of
+	// hints.
+	idx := r.Intn(len(fuzzer.threadedCorpus))
+	return fuzzer.threadedCorpus[idx]
+}
 
 func (fuzzer *Fuzzer) __addInputToCorpus(p *prog.Prog, sig hash.Sig, prio int64) {
 	fuzzer.corpusMu.Lock()

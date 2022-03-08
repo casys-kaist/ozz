@@ -78,32 +78,29 @@ func (p *Prog) removeDummyPoints() {
 	p.Schedule.points = p.Schedule.points[:i+1]
 }
 
-func (p *Prog) MutateSchedule(rs rand.Source, staleCount map[uint32]int, maxPoints, minPoints int, hint []primitive.Segment) bool {
+func (p *Prog) MutateScheduleFromHint(rs rand.Source, staleCount map[uint32]int, maxPoints, minPoints int, hint []primitive.Segment) (bool, []primitive.Segment) {
 	if len(p.Contenders()) != 2 {
-		return false
+		return false, hint
 	}
 
 	if len(hint) == 0 {
-		return false
+		// TODO: We may want to generate random scheduling points
+		return false, nil
 	}
 
-	// TODO: Fix this unnecessary type conversion
-	hint0 := make([]primitive.Knot, len(hint))
-	for _, seg := range hint {
-		knot := seg.(primitive.Knot)
-		hint0 = append(hint0, knot)
-	}
+	orch := scheduler.Orchestrator{Segs: hint}
+	selected := orch.SelectHarmoniousKnots()
 
-	scheduler := scheduler.Scheduler{Knots: hint0}
+	scheduler := scheduler.Scheduler{Knots: selected}
 	_, ok := scheduler.GenerateSchedPoints()
 	if !ok {
-		return false
+		return false, hint
 	}
 	schedule := scheduler.SqueezeSchedPoints()
 
 	p.applySchedule(schedule)
 
-	return ok
+	return ok, orch.Segs
 
 	// TODO: Below code can be used to generate a scheduler if we
 	// don't have more hints. I don't delete the code (even though it

@@ -2,30 +2,35 @@ package scheduler
 
 import "github.com/google/syzkaller/pkg/primitive"
 
-type orchestrator struct {
+type Orchestrator struct {
 	// Communications that are already selected
 	comms []primitive.Communication
 	// Input knots
-	knots []primitive.Knot
+	Segs []primitive.Segment
 }
 
-func (orch *orchestrator) selectHarmoniousKnots() []primitive.Knot {
+// TODO: The time complexity of orchestrator.SelectHarmoniousKnots()
+// is O(n*n). Reduce it to O(n).
+
+func (orch *Orchestrator) SelectHarmoniousKnots() []primitive.Knot {
 	res := []primitive.Knot{}
-	remaining := make([]primitive.Knot, 0, len(orch.knots))
-	for _, knot := range orch.knots {
-		if orch.harmoniousKnot(knot) {
+	remaining := make([]primitive.Segment, 0, len(orch.Segs))
+	cnt := 0
+	for _, seg := range orch.Segs {
+		if knot, ok := seg.(primitive.Knot); ok && orch.harmoniousKnot(knot) {
 			res = append(res, knot)
 			orch.comms = append(orch.comms, knot[0], knot[1])
 		} else {
-			remaining = append(remaining, knot)
+			cnt++
+			remaining = append(remaining, seg)
 		}
 	}
-	orch.knots = remaining
+	orch.Segs = remaining[:cnt]
 	orch.comms = nil
 	return res
 }
 
-func (orch orchestrator) harmoniousKnot(knot primitive.Knot) bool {
+func (orch Orchestrator) harmoniousKnot(knot primitive.Knot) bool {
 	for _, comm := range orch.comms {
 		if knot[0].Conflict(comm) || knot[1].Conflict(comm) {
 			return false

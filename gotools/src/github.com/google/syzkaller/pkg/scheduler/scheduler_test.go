@@ -115,10 +115,13 @@ func testExcavateKnots(t *testing.T, filename string, answer primitive.Knot) []p
 
 func TestGenerateSchedPoint(t *testing.T) {
 	knots := loadKnots(t, []string{"data1_simple"})
-
-	orch := orchestrator{knots: knots}
-	for len(orch.knots) != 0 {
-		selected := orch.selectHarmoniousKnots()
+	segs := []primitive.Segment{}
+	for _, knot := range knots {
+		segs = append(segs, knot)
+	}
+	orch := Orchestrator{Segs: segs}
+	for len(orch.Segs) != 0 {
+		selected := orch.SelectHarmoniousKnots()
 		for i, knot := range selected {
 			t.Logf("Knot %d, type: %v", i, knot.Type())
 			t.Logf("  %x (%v) --> %x (%v)", knot[0][0].Inst, knot[0][0].Timestamp, knot[0][1].Inst, knot[0][1].Timestamp)
@@ -169,9 +172,13 @@ func TestGenerateSchedPoint(t *testing.T) {
 
 func TestSqueezeSchedPoints(t *testing.T) {
 	knots := loadKnots(t, []string{"data1_simple"})
-	orch := orchestrator{knots: knots}
-	for len(orch.knots) != 0 {
-		selected := orch.selectHarmoniousKnots()
+	segs := []primitive.Segment{}
+	for _, knot := range knots {
+		segs = append(segs, knot)
+	}
+	orch := Orchestrator{Segs: segs}
+	for len(orch.Segs) != 0 {
+		selected := orch.SelectHarmoniousKnots()
 		sched := Scheduler{Knots: selected}
 		full, ok := sched.GenerateSchedPoints()
 		if !ok {
