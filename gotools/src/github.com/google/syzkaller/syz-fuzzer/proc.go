@@ -300,11 +300,11 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 	knotter.ExcavateKnots()
 	knots := knotter.GetKnots()
 
-	new := proc.fuzzer.newKnot(knots)
-	new = append(new, primitive.Intersect(knots, item.knots)...)
+	newKnots := proc.fuzzer.newKnot(knots)
+	newKnots = append(newKnots, primitive.Intersect(knots, item.knots)...)
 
 	// Now we know newly found knots
-	proc.fuzzer.handSchedulingHints(p, new)
+	proc.fuzzer.addThreadedInputToCorpus(p, newKnots)
 }
 
 func (proc *Proc) failCall(p *prog.Prog, call int) {

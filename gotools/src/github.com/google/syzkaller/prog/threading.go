@@ -5,7 +5,6 @@ import (
 
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/pkg/primitive"
-	"github.com/google/syzkaller/pkg/signal"
 )
 
 type Contender struct {
@@ -110,8 +109,7 @@ func (p *Prog) unthreading() {
 
 type ThreadedProg struct {
 	P         *Prog
-	ReadFrom  signal.ReadFrom
-	Serial    primitive.SerialAccess
+	Hint      []primitive.Segment
 	Scheduled int
 	Prio      int
 }

@@ -68,17 +68,11 @@ type Fuzzer struct {
 	// We maintain two information: communications and knots.
 	maxComms signal.Interleaving
 	// corpusComms signal.Interleaving
-	// newComms    signal.Interleaving
+	newComms signal.Interleaving
 
 	maxKnots signal.Interleaving
 	// corpusKnots signal.Interleaving
-	// newKnots    signal.Interleaving
-
-	// corpusReadFrom signal.ReadFrom
-	// maxReadFrom    signal.ReadFrom
-	// newReadFrom    signal.ReadFrom
-
-	schedulingHints map[string][]primitive.Segment
+	newKnots signal.Interleaving
 
 	// Mostly for debugging scheduling mutation. If generate is true,
 	// procs do not generate/mutate inputs but schedule
@@ -292,18 +286,15 @@ func main() {
 		faultInjectionEnabled:    false,
 		comparisonTracingEnabled: false,
 		corpusHashes:             make(map[hash.Sig]struct{}),
-		// corpusReadFrom:           signal.NewReadFrom(),
-		// maxReadFrom:              signal.NewReadFrom(),
-		// newReadFrom:              signal.NewReadFrom(),
 
+		// XXX
+		// I'm not sure we want to keep these two interleaving signals
 		// corpusComms: make(signal.Interleaving),
-		maxComms: make(signal.Interleaving),
-		// newComms:    make(signal.Interleaving),
 		// corpusKnots: make(signal.Interleaving),
+		maxComms: make(signal.Interleaving),
+		newComms: make(signal.Interleaving),
 		maxKnots: make(signal.Interleaving),
-		// newKnots:    make(signal.Interleaving),
-
-		schedulingHints: make(map[string][]primitive.Segment),
+		newKnots: make(signal.Interleaving),
 
 		staleCount:  make(map[uint32]int),
 		checkResult: r.CheckResult,
@@ -630,32 +621,38 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 	}
 }
 
-// func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, readfrom signal.ReadFrom, serial primitive.SerialAccess) {
-// 	fuzzer.corpusMu.Lock()
-// 	defer fuzzer.corpusMu.Unlock()
-// 	fuzzer.threadedCorpus = append(fuzzer.threadedCorpus, &prog.ThreadedProg{
-// 		P:        p,
-// 		ReadFrom: readfrom,
-// 		Serial:   serial,
-// 		Prio:     readfrom.Len() * 2,
-// 	})
-// }
+// XXX: Below two functions' name are so confusing. Rename or merge
+// them
+func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, hint []primitive.Segment) {
+	fuzzer.corpusMu.Lock()
+	defer fuzzer.corpusMu.Unlock()
+	fuzzer.threadedCorpus = append(fuzzer.threadedCorpus, &prog.ThreadedProg{
+		P:    p,
+		Hint: hint,
+	})
+}
 
-// func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, info *ipc.ProgInfo, sig hash.Sig) {
-// 	// TODO: how to set the priority of threaded input?
-// 	rf := info.ContenderReadFrom(p.Contender)
-// 	serial := info.ContenderSerialAccess(p.Contender)
+func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, hint []primitive.Segment) {
+	// NOTE: We do not further mutate threaded prog so we do not add
+	// it to corpus. This can be possibly limiting the fuzzer, but we
+	// don't have any evidence of it.
 
-// 	const threadedPrio = 1000
-// 	fuzzer.__addInputToCorpus(p, sig, threadedPrio)
-// 	fuzzer.addInputToThreadedCorpus(p, rf, serial)
+	atomic.AddUint64(&fuzzer.stats[StatScheduleHint], uint64(len(hint)))
+	fuzzer.addInputToThreadedCorpus(p, hint)
 
-// 	fuzzer.signalMu.Lock()
-// 	defer fuzzer.signalMu.Unlock()
+	// TODO: How and when to manage the interleaving signals?
 
-// 	fuzzer.corpusReadFrom.Merge(rf)
-// 	fuzzer.maxReadFrom.Merge(rf)
-// }
+	// sign := signal.FromPrimitive(knots)
+
+	// fuzzer.signalMu.Lock()
+	// defer fuzzer.signalMu.Unlock()
+	// fuzzer.corpusComms.Merge()
+	// fuzzer.maxComms.Merge(sign)
+	// fuzzer.corpusKnots.Merge()
+
+	// fuzzer.maxKnots.Merge(sign)
+	// fuzzer.newKnots.Merge(sign)
+}
 
 func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
 	fuzzer.corpusMu.RLock()
@@ -726,42 +723,6 @@ func (fuzzer *Fuzzer) checkNewCallSignal(p *prog.Prog, info *ipc.CallInfo, call 
 	return true
 }
 
-// func (fuzzer *Fuzzer) mergeMaxReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo) {
-// 	fuzzer.signalMu.Lock()
-// 	defer fuzzer.signalMu.Unlock()
-// 	rf := info.ContenderReadFrom(contender)
-// 	fuzzer.maxReadFrom.Merge(rf)
-// 	fuzzer.newReadFrom.Merge(rf)
-// }
-
-// func (fuzzer *Fuzzer) addMaxReadFrom(rf signal.ReadFrom) {
-// 	fuzzer.signalMu.Lock()
-// 	defer fuzzer.signalMu.Unlock()
-// 	fuzzer.maxReadFrom.Merge(rf)
-// }
-
-func (fuzzer *Fuzzer) __checkNewReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo, readfrom signal.ReadFrom) bool {
-	rf := info.ContenderReadFrom(contender)
-	fuzzer.signalMu.RLock()
-	defer fuzzer.signalMu.RUnlock()
-	diff := readfrom.Diff(rf)
-	return !diff.Empty()
-}
-
-// func (fuzzer *Fuzzer) checkNewReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo) bool {
-// 	return fuzzer.__checkNewReadFrom(p, contender, info, fuzzer.corpusReadFrom)
-// }
-
-// func (fuzzer *Fuzzer) checkMaxReadFrom(p *prog.Prog, contender prog.Contender, info *ipc.ProgInfo) bool {
-// 	// if diff.Empty(), obtained read-from (i.e., depends
-// 	// relationship) does not give a clue for interesting read-from
-// 	// (i.e., conflicts). It might provide interesting results if we
-// 	// execute the threaded p, but it is somewhat unlikely. Give this
-// 	// case very low chance (i.e., 1%) to go into the threading
-// 	// workqueue.
-// 	return fuzzer.__checkNewReadFrom(p, contender, info, fuzzer.maxReadFrom) || rand.Intn(100) == 0
-// }
-
 func (fuzzer *Fuzzer) newSegment(base *signal.Interleaving, segs []primitive.Segment) []primitive.Segment {
 	diff := base.DiffMergePrimitive(segs)
 	if len(diff) == 0 {
@@ -793,12 +754,6 @@ func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog, calls prog.Contender) bool 
 		return true
 	}
 	return false
-}
-
-func (fuzzer *Fuzzer) handSchedulingHints(p *prog.Prog, hints []primitive.Segment) {
-	k := hash.String(p.Serialize())
-	atomic.AddUint64(&fuzzer.stats[StatScheduleHint], uint64(len(hints)))
-	fuzzer.schedulingHints[k] = append(fuzzer.schedulingHints[k], hints...)
 }
 
 func signalPrio(p *prog.Prog, info *ipc.CallInfo, call int) (prio uint8) {

@@ -158,7 +158,7 @@ func TestGenerateSchedPoint(t *testing.T) {
 				totalAcc[comm.Latter()] = struct{}{}
 			}
 		}
-		sched := Scheduler{knots: selected}
+		sched := Scheduler{Knots: selected}
 		sps, ok := sched.GenerateSchedPoints()
 		t.Logf("total %d sched points\n", len(sps))
 		for _, sp := range sps {
@@ -199,7 +199,7 @@ func TestSqueezeSchedPoints(t *testing.T) {
 	orch := orchestrator{knots: knots}
 	for len(orch.knots) != 0 {
 		selected := orch.selectHarmoniousKnots()
-		sched := Scheduler{knots: selected}
+		sched := Scheduler{Knots: selected}
 		full, ok := sched.GenerateSchedPoints()
 		if !ok {
 			t.Errorf("failed to generate a full schedule")

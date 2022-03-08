@@ -345,16 +345,14 @@ func (orch orchestrator) harmoniousKnot(knot primitive.Knot) bool {
 	return true
 }
 
-type SchedPoint primitive.Access
-
 type Scheduler struct {
 	// input
-	knots []primitive.Knot
+	Knots []primitive.Knot
 	// output
-	schedPoints []SchedPoint
+	schedPoints []primitive.Access
 }
 
-func (sched *Scheduler) GenerateSchedPoints() ([]SchedPoint, bool) {
+func (sched *Scheduler) GenerateSchedPoints() ([]primitive.Access, bool) {
 	dag := sched.buildDAG()
 	nodes, ok := dag.topologicalSort()
 	if !ok {
@@ -362,13 +360,13 @@ func (sched *Scheduler) GenerateSchedPoints() ([]SchedPoint, bool) {
 	}
 	for _, node := range nodes {
 		acc := node.(primitive.Access)
-		sched.schedPoints = append(sched.schedPoints, SchedPoint(acc))
+		sched.schedPoints = append(sched.schedPoints, primitive.Access(acc))
 	}
 	return sched.schedPoints, true
 }
 
-func (sched *Scheduler) SqueezeSchedPoints() []SchedPoint {
-	new := []SchedPoint{}
+func (sched *Scheduler) SqueezeSchedPoints() []primitive.Access {
+	new := []primitive.Access{}
 	preempted := make(map[uint64]bool)
 	for i := range sched.schedPoints {
 		if preempted[sched.schedPoints[i].Thread] {
@@ -389,10 +387,10 @@ func (sched *Scheduler) SqueezeSchedPoints() []SchedPoint {
 func (sched *Scheduler) buildDAG() dag {
 	d := newDAG()
 	threads := make(map[uint64][]primitive.Access)
-	for i /*, knot */ := range sched.knots {
-		for j /*, comm */ := range sched.knots[i] {
-			former := sched.knots[i][j].Former()
-			latter := sched.knots[i][j].Latter()
+	for i /*, knot */ := range sched.Knots {
+		for j /*, comm */ := range sched.Knots[i] {
+			former := sched.Knots[i][j].Former()
+			latter := sched.Knots[i][j].Latter()
 			d.addEdge(former, latter)
 			threads[former.Thread] = append(threads[former.Thread], former)
 			threads[latter.Thread] = append(threads[latter.Thread], latter)

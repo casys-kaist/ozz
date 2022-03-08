@@ -5,6 +5,7 @@ import (
 	"math/rand"
 
 	"github.com/google/syzkaller/pkg/primitive"
+	"github.com/google/syzkaller/pkg/scheduler"
 	"github.com/google/syzkaller/pkg/signal"
 )
 
@@ -77,39 +78,71 @@ func (p *Prog) removeDummyPoints() {
 	p.Schedule.points = p.Schedule.points[:i+1]
 }
 
-func (p *Prog) MutateSchedule(rs rand.Source, staleCount map[uint32]int, maxPoints, minPoints int, readfrom signal.ReadFrom, serial primitive.SerialAccess) bool {
+func (p *Prog) MutateSchedule(rs rand.Source, staleCount map[uint32]int, maxPoints, minPoints int, hint []primitive.Segment) bool {
 	if len(p.Contenders()) != 2 {
 		return false
 	}
-	r := newRand(p.Target, rs)
-	ctx := &scheduler{
-		p:          p,
-		r:          r,
-		maxPoints:  maxPoints,
-		minPoints:  minPoints,
-		readfrom:   readfrom,
-		staleCount: staleCount,
-		selected:   make(map[uint32]struct{}),
-		serial:     serial,
+
+	if len(hint) == 0 {
+		return false
 	}
-	ctx.initialize()
-	// If the length of actual scheduling point is 1, try to
-	// mutate more to increase the diversity of interleavings.
-	for stop := false; !stop; stop = r.oneOf(3) || (len(ctx.schedule) < ctx.minPoints && !r.oneOf(5)) {
-		switch {
-		case r.nOutOf(2, 5): // 40%
-			ctx.addPoint()
-		case r.nOutOf(5, 6): // 50%
-			ctx.movePoint()
-		default: // 10%
-			ctx.removePoint()
-		}
+
+	// TODO: Fix this unnecessary type conversion
+	hint0 := make([]primitive.Knot, len(hint))
+	for _, seg := range hint {
+		knot := seg.(primitive.Knot)
+		hint0 = append(hint0, knot)
 	}
-	ctx.finalize()
-	return ctx.mutated
+
+	scheduler := scheduler.Scheduler{Knots: hint0}
+	_, ok := scheduler.GenerateSchedPoints()
+	if !ok {
+		return false
+	}
+	schedule := scheduler.SqueezeSchedPoints()
+
+	p.applySchedule(schedule)
+
+	return ok
+
+	// TODO: Below code can be used to generate a scheduler if we
+	// don't have more hints. I don't delete the code (even though it
+	// is stored in Git) just in case.
+
+	// r := newRand(p.Target, rs)
+	// ctx := &scheduler{
+	// 	p:          p,
+	// 	r:          r,
+	// 	maxPoints:  maxPoints,
+	// 	minPoints:  minPoints,
+	// 	readfrom:   readfrom,
+	// 	staleCount: staleCount,
+	// 	selected:   make(map[uint32]struct{}),
+	// 	serial:     serial,
+	// }
+	// ctx.initialize()
+	// // If the length of actual scheduling point is 1, try to
+	// // mutate more to increase the diversity of interleavings.
+	// for stop := false; !stop; stop = r.oneOf(3) || (len(ctx.schedule) < ctx.minPoints && !r.oneOf(5)) {
+	// 	switch {
+	// 	case r.nOutOf(2, 5): // 40%
+	// 		ctx.addPoint()
+	// 	case r.nOutOf(5, 6): // 50%
+	// 		ctx.movePoint()
+	// 	default: // 10%
+	// 		ctx.removePoint()
+	// 	}
+	// }
+	// ctx.finalize()
+	// return ctx.mutated
 }
 
-type scheduler struct {
+func (p *Prog) applySchedule(schedule []primitive.Access) {
+	shapeScheduleFromAccesses(p, schedule)
+	p.appendDummyPoints()
+}
+
+type randScheduler struct {
 	p          *Prog
 	r          *randGen
 	maxPoints  int
@@ -124,7 +157,7 @@ type scheduler struct {
 	mutated  bool
 }
 
-func (ctx *scheduler) initialize() {
+func (ctx *randScheduler) initialize() {
 	ctx.candidate = ctx.readfrom.Flatting()
 	// TODO: inefficient. need refactoring
 	for _, point := range ctx.p.Schedule.points {
@@ -138,7 +171,7 @@ func (ctx *scheduler) initialize() {
 	ctx.p.removeDummyPoints()
 }
 
-func (ctx *scheduler) findAccess(point Point) (found primitive.Access, ok bool) {
+func (ctx *randScheduler) findAccess(point Point) (found primitive.Access, ok bool) {
 	// TODO: inefficient. need refactoring
 	for _, acc := range ctx.serial {
 		if acc.Inst == uint32(point.addr) && acc.Thread == point.call.Thread {
@@ -150,7 +183,7 @@ func (ctx *scheduler) findAccess(point Point) (found primitive.Access, ok bool) 
 	return
 }
 
-func (ctx *scheduler) addPoint() {
+func (ctx *randScheduler) addPoint() {
 	if len(ctx.candidate) == 0 {
 		// we don't have any candidate point
 		return
@@ -168,7 +201,7 @@ func (ctx *scheduler) addPoint() {
 	}
 }
 
-func (ctx *scheduler) makePoint(inst uint32) {
+func (ctx *randScheduler) makePoint(inst uint32) {
 	// We may have multiple Accesses executing inst. Select any of
 	// them.
 	accesses := ctx.serial.FindForeachThread(inst, 1)
@@ -182,7 +215,7 @@ func (ctx *scheduler) makePoint(inst uint32) {
 	ctx.selected[acc.Inst] = struct{}{}
 }
 
-func (ctx *scheduler) overused(addr uint32) bool {
+func (ctx *randScheduler) overused(addr uint32) bool {
 	// y=exp^(-(x^2) / 60pi)
 	x := ctx.staleCount[addr]
 	prob := math.Exp(float64(x*x*-1) / (60 * math.Pi))
@@ -199,7 +232,7 @@ func (ctx *scheduler) overused(addr uint32) bool {
 	return overused
 }
 
-func (ctx *scheduler) movePoint() {
+func (ctx *randScheduler) movePoint() {
 	// TODO: Is this really helpful? Why not just remove a point and
 	// then add another one?
 	if len(ctx.schedule) == 0 {
@@ -235,7 +268,7 @@ func (ctx *scheduler) movePoint() {
 	ctx.schedule.Add(acc0)
 }
 
-func (ctx *scheduler) removePoint() {
+func (ctx *randScheduler) removePoint() {
 	if len(ctx.schedule) == 0 {
 		return
 	}
@@ -244,20 +277,20 @@ func (ctx *scheduler) removePoint() {
 	ctx.mutated = true
 }
 
-func (ctx *scheduler) finalize() {
+func (ctx *randScheduler) finalize() {
 	// some calls may not have scheduling points. append dummy
 	// scheduling points to let QEMU know the execution order of
 	// remaining Calls.
-	ctx.shapeScheduleFromAccesses()
+	shapeScheduleFromAccesses(ctx.p, ctx.schedule)
 	ctx.p.appendDummyPoints()
 }
 
-func (ctx *scheduler) shapeScheduleFromAccesses() {
+func shapeScheduleFromAccesses(p *Prog, schedule []primitive.Access) {
 	prev := ^uint64(0)
 	order := uint64(0)
 	sched := Schedule{}
-	calls := ctx.p.Contenders()
-	for _, acc := range ctx.schedule {
+	calls := p.Contenders()
+	for _, acc := range schedule {
 		if acc.Thread == prev {
 			continue
 		}
@@ -279,5 +312,5 @@ func (ctx *scheduler) shapeScheduleFromAccesses() {
 		prev = thread
 		order++
 	}
-	ctx.p.Schedule = sched
+	p.Schedule = sched
 }
