@@ -124,12 +124,41 @@ static target_ulong qcsched_install_breakpoint(CPUState *cpu, target_ulong addr,
     return 0;
 }
 
+static void qcsched_activate_breakpoint_cpu(CPUState *cpu0, CPUState *cpu)
+{
+    struct qcsched_schedpoint_window *window;
+    int err;
+    int i;
+    bool need_hook = false;
+
+    // We don't install scheduling points on the master CPU
+    if (cpu->cpu_index == 0)
+        return;
+
+    window = &sched.schedpoint_window[cpu->cpu_index];
+    memset(window, 0, sizeof(*window));
+
+    // We don't install breakpoints until the hook is hit. Instead we
+    // count the number of scheduling points that will be installed on
+    // this CPU.
+    for (i = 0; i < sched.total; i++) {
+        if (sched.entries[i].cpu != cpu->cpu_index)
+            continue;
+        need_hook = true;
+        window->total++;
+    }
+
+    if (!need_hook)
+        return;
+
+    ASSERT(!(err = kvm_insert_breakpoint_cpu(cpu, vmi_info.hook_addr, 1,
+                                             GDB_BREAKPOINT_HW)),
+           "failed to insert a breakpoint at the hook err=%d\n", err);
+}
+
 static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
 {
-    int total, i;
-    bool need_hook;
     CPUState *cpu;
-    struct qcsched_entry *entry;
 
     DRPRINTF(cpu0, "%s\n", __func__);
 
@@ -142,8 +171,6 @@ static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
     if (!sanitize_breakpoint(&sched))
         return -EINVAL;
 
-    total = sched.total;
-
     // NOTE: kvm_insert_breakpoint_cpu() releases qemu_global_mutex
     // during run_on_cpu() and another CPU may acquire the mutex,
     // resulting in more than one CPU being in this function. To
@@ -153,41 +180,7 @@ static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
     sched.activated = true;
     sched.current = 0;
 
-    CPU_FOREACH(cpu)
-    {
-        int err;
-        if (cpu->cpu_index == 0)
-            continue;
-        need_hook = false;
-        for (i = 0; i < total; i++) {
-            entry = &sched.entries[i];
-
-            if (entry->cpu != cpu->cpu_index)
-                continue;
-
-            need_hook = true;
-
-            if (entry->schedpoint.addr == ~(target_ulong)(0)) {
-                DRPRINTF(cpu0, "Skip a dummy breakpoint on cpu#%d\n",
-                         entry->cpu);
-                continue;
-            }
-
-            DRPRINTF(cpu0, "Installing a breakpoint at %lx on cpu#%d\n",
-                     entry->schedpoint.addr, entry->cpu);
-            err = kvm_insert_breakpoint_cpu(cpu, entry->schedpoint.addr, 1,
-                                            GDB_BREAKPOINT_HW);
-            ASSERT(!err,
-                   "failed to insert a breakpiont at a scheduling point "
-                   "err=%d\n",
-                   err);
-        }
-        if (!need_hook)
-            continue;
-        err = kvm_insert_breakpoint_cpu(cpu, vmi_info.hook_addr, 1,
-                                        GDB_BREAKPOINT_HW);
-        ASSERT(!err, "failed to insert a breakpoint at the hook err=%d\n", err);
-    }
+    CPU_FOREACH(cpu) { qcsched_activate_breakpoint_cpu(cpu0, cpu); }
     return 0;
 }
 

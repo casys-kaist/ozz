@@ -7,6 +7,7 @@
 #include "exec/gdbstub.h"
 
 #include "qemu/qcsched/vmi.h"
+#include "qemu/qcsched/window.h"
 
 #define MAX_SCHEDPOINTS 8
 // TODO: Do not use macro
@@ -40,6 +41,7 @@ struct qcsched_breakpoint_record {
 struct qcsched {
     struct qcsched_entry entries[MAX_SCHEDPOINTS];
     struct qcsched_breakpoint_record last_breakpoint[MAX_CPUS];
+    struct qcsched_schedpoint_window schedpoint_window[MAX_CPUS];
     int total, current;
     bool activated;
     bool used;
@@ -74,18 +76,21 @@ struct qcsched_trampoline_info *get_trampoline_info(CPUState *cpu);
 void qcsched_handle_kick(CPUState *cpu);
 
 #ifdef _DEBUG
-#define DRPRINTF(cpu, fmt, ...) fprintf(stderr, "[CPU #%d] " fmt, cpu->cpu_index, ## __VA_ARGS__)
+#define DRPRINTF(cpu, fmt, ...)                                                \
+    fprintf(stderr, "[CPU #%d] " fmt, cpu->cpu_index, ##__VA_ARGS__)
 #else
-#define DRPRINTF(cpu, fmt, ...) do { } while(0)
+#define DRPRINTF(cpu, fmt, ...)                                                \
+    do {                                                                       \
+    } while (0)
 #endif
 
-#define ASSERT(cond, fmt, ...)                          \
-    do {                                                \
-        if (!(cond)) {                                  \
-            fprintf(stderr, fmt "\n", ##__VA_ARGS__);   \
-            exit(1);                                    \
-        }                                               \
-    } while(0);
+#define ASSERT(cond, fmt, ...)                                                 \
+    do {                                                                       \
+        if (!(cond)) {                                                         \
+            fprintf(stderr, fmt "\n", ##__VA_ARGS__);                          \
+            exit(1);                                                           \
+        }                                                                      \
+    } while (0);
 
 #define TRAMPOLINE_ESCAPE_MAGIC 0x75da1791
 
