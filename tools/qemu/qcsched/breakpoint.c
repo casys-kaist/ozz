@@ -8,6 +8,7 @@
 
 #include "qemu/qcsched/qcsched.h"
 #include "qemu/qcsched/vmi.h"
+#include "qemu/qcsched/window.h"
 
 #define RIP(cpu) (cpu->regs.rip)
 
@@ -72,6 +73,8 @@ static void resume_task(CPUState *cpu)
     cpu->qcsched_dirty = true;
     cpu->qcsched_force_wakeup = false;
     memset(trampoline, 0, sizeof(*trampoline) - sizeof(timer_t));
+
+    qcsched_window_expand_window(cpu);
 }
 
 static void hand_over_baton(CPUState *cpu)
@@ -145,6 +148,8 @@ static void __handle_breakpoint_hook(CPUState *cpu)
     // If the task can make a progress, we don't need to do something.
     if (!qcsched_vmi_can_progress(cpu))
         kidnap_task(cpu);
+    else
+        qcsched_window_expand_window(cpu);
 }
 
 static void __handle_breakpoint_trampoline(CPUState *cpu)
@@ -158,7 +163,9 @@ static void __handle_breakpoint_trampoline(CPUState *cpu)
 static void __handle_breakpoint_schedpoint(CPUState *cpu)
 {
     DRPRINTF(cpu, "%s (%llx)\n", __func__, RIP(cpu));
-    // Hand over the baton to the next task first
+    // Shrink the schedpoint window first
+    qcsched_window_shrink_window(cpu);
+    // Hand over the baton to the next task
     hand_over_baton(cpu);
     // and then kidnap the executing task
     kidnap_task(cpu);

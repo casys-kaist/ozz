@@ -6,6 +6,7 @@ qcsched_ss.add(when: 'CONFIG_QCSCHED', if_true: files(
   'vmi.c',
   'timer.c',
   'kssb.c',
+  'window.c',
 ))
 
 specific_ss.add_all(when: 'CONFIG_SOFTMMU', if_true: [qcsched_ss])

@@ -9,9 +9,11 @@
 #include "qemu/qcsched/vmi.h"
 #include "qemu/qcsched/window.h"
 
-#define MAX_SCHEDPOINTS 8
+#define MAX_SCHEDPOINTS 128
 // TODO: Do not use macro
 #define MAX_CPUS 8
+
+#define QCSCHED_DUMMY_BREAKPOINT ~(target_ulong)(0)
 
 struct qcschedpoint {
     target_ulong addr;
