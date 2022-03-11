@@ -97,8 +97,8 @@ qcsched_window_deactivate_entry(CPUState *cpu,
     // statements, leave they there just in case.
     err = kvm_remove_breakpoint_cpu(cpu, entry->schedpoint.addr, 1,
                                     GDB_BREAKPOINT_HW);
-    ASSERT(!err && err != -ENOENT,
-           "failed to insert a breakpiont at a scheduling point "
+    ASSERT(!err || err == -ENOENT,
+           "failed to remove a breakpiont at a scheduling point "
            "err=%d\n",
            err);
 
