@@ -12,6 +12,7 @@
 
 #include "qemu/qcsched/hcall.h"
 #include "qemu/qcsched/qcsched.h"
+#include "qemu/qcsched/state.h"
 #include "qemu/qcsched/vmi.h"
 
 static bool qcsched_entry_used(struct qcsched_entry *entry)
@@ -65,35 +66,49 @@ static target_ulong qcsched_reset(CPUState *cpu)
     sched.used = true;
     sched.activated = false;
 
-    // NOTE: qcsched_reset() should be executed in CPU with the index
-    // 0, and all other worker CPUs should be executed in CPU with the
-    // index other than 0. Otherwise, qcsched_reset() and other hcalls
-    // can race causing a deadlock.
+    // NOTE: qcsched_reset() should be executed in CPU0, and all other
+    // worker CPUs should be executed in CPU with the index other than
+    // 0. Otherwise, qcsched_reset() and other hcalls can race causing
+    // a deadlock.
     CPU_FOREACH(cpu0)
     {
         if (cpu0->cpu_index == 0)
             continue;
-        __remove_breakpoints_and_escape_cpu(cpu, cpu0);
+
+        if (!qcsched_check_cpu_state(cpu0, qcsched_cpu_deactivated))
+            __remove_breakpoints_and_escape_cpu(cpu, cpu0);
+
         memset(&sched.last_breakpoint[cpu0->cpu_index], 0,
                sizeof(struct qcsched_breakpoint_record));
+
+        qcsched_set_cpu_state(cpu0, qcsched_cpu_idle);
     }
     sched.total = sched.current = 0;
+    sched.nr_cpus = 0;
     memset(&sched.entries, 0, sizeof(struct qcsched_entry) * MAX_SCHEDPOINTS);
     return 0;
 }
 
-static target_ulong qcsched_prepare_breakpoint(CPUState *cpu, unsigned int num)
+static target_ulong qcsched_prepare(CPUState *cpu, unsigned int nr_bps,
+                                    unsigned int nr_cpus)
 {
     DRPRINTF(cpu, "%s\n", __func__);
-    DRPRINTF(cpu, "nr_bps: %u\n", num);
+    DRPRINTF(cpu, "nr_bps: %u\n", nr_bps);
 
     if (sched.total != 0)
         return -EBUSY;
 
-    if (num >= MAX_SCHEDPOINTS)
+    if (!vmi_info.hook_addr)
         return -EINVAL;
 
-    sched.total = num;
+    if (nr_bps >= MAX_SCHEDPOINTS)
+        return -EINVAL;
+
+    if (nr_cpus >= MAX_CPUS)
+        return -EINVAL;
+
+    sched.total = nr_bps;
+    sched.nr_cpus = nr_cpus;
     sched.used = false;
 
     return 0;
@@ -104,8 +119,10 @@ static target_ulong qcsched_install_breakpoint(CPUState *cpu, target_ulong addr,
 {
     struct qcsched_entry *entry;
 
+#ifdef __DEBUG_VERBOSE
     DRPRINTF(cpu, "%s\n", __func__);
     DRPRINTF(cpu, "addr: %lx, order: %d\n", addr, order);
+#endif
 
     if (!sched.total)
         return -EINVAL;
@@ -124,7 +141,7 @@ static target_ulong qcsched_install_breakpoint(CPUState *cpu, target_ulong addr,
     return 0;
 }
 
-static void qcsched_activate_breakpoint_cpu(CPUState *cpu0, CPUState *cpu)
+static void __do_activate_breakpoint(CPUState *cpu)
 {
     struct qcsched_schedpoint_window *window;
     int err;
@@ -156,31 +173,37 @@ static void qcsched_activate_breakpoint_cpu(CPUState *cpu0, CPUState *cpu)
            "failed to insert a breakpoint at the hook err=%d\n", err);
 }
 
-static target_ulong qcsched_activate_breakpoint(CPUState *cpu0)
+static target_ulong qcsched_activate_breakpoint(CPUState *cpu)
 {
-    CPUState *cpu;
+    DRPRINTF(cpu, "%s\n", __func__);
 
-    DRPRINTF(cpu0, "%s\n", __func__);
-
-    if (sched.activated || sched.used)
-        return -EBUSY;
-
-    if (!vmi_info.hook_addr)
+    if (sched.used)
         return -EINVAL;
+
+    // Allowed: idle, ready
+    if (qcsched_check_cpu_state(cpu, qcsched_cpu_activated))
+        return -EINVAL;
+
+    qcsched_set_cpu_state(cpu, qcsched_cpu_ready);
+
+    if (!qcsched_check_all_cpu_state(qcsched_cpu_ready))
+        return -EAGAIN;
 
     if (!sanitize_breakpoint(&sched))
         return -EINVAL;
 
-    // NOTE: kvm_insert_breakpoint_cpu() releases qemu_global_mutex
-    // during run_on_cpu() and another CPU may acquire the mutex,
-    // resulting in more than one CPU being in this function. To
-    // prevent breakpoints from being installed multiple times, set
-    // sched.activated true before installing breakpoints so the
-    // latter CPU returns early.
-    sched.activated = true;
-    sched.current = 0;
+    if (!qcsched_cpu_transition(cpu, qcsched_cpu_ready, qcsched_cpu_activated))
+        return -EINVAL;
 
-    CPU_FOREACH(cpu) { qcsched_activate_breakpoint_cpu(cpu0, cpu); }
+    // At this point, we assume all CPUs are ready and all schedules
+    // are sanitized.
+    __do_activate_breakpoint(cpu);
+
+    if (!sched.activated) {
+        sched.activated = true;
+        sched.current = 0;
+    }
+
     return 0;
 }
 
@@ -190,25 +213,31 @@ static target_ulong qcsched_deactivate_breakpoint(CPUState *cpu)
 
     DRPRINTF(cpu, "%s\n", __func__);
 
-    if (!sched.activated)
+    // Allowed: ready, activated, deactivated
+    if (!qcsched_check_cpu_state(cpu, qcsched_cpu_ready))
         return -EINVAL;
 
-    // NOTE: two reasons for falsifying sched.activated here: 1) the
-    // same reason for qcsched_activate_breakpoint(), and 2) let the
-    // trampoled CPUs see sched.activated as false so it can resume
-    // (see. qcsched_vmi_can_progress() called in
-    // __handle_breakpoint_hook()).
-    sched.activated = false;
+    qcsched_set_cpu_state(cpu, qcsched_cpu_deactivated);
 
-    // We don't want to reuse the schedule.
-    sched.used = true;
+    if (sched.activated) {
+        // NOTE: two reasons for falsifying sched.activated here: 1)
+        // to prevent a race condition during removing bps on other
+        // CPUs, and 2) let the trampoled CPUs see sched.activated as
+        // false so it can resume (see. qcsched_vmi_can_progress()
+        // called in __handle_breakpoint_hook()).
+        sched.activated = false;
 
-    CPU_FOREACH(cpu0)
-    {
-        if (cpu0->cpu_index == 0)
-            continue;
-        __remove_breakpoints_and_escape_cpu(cpu, cpu0);
+        // We don't want to reuse the schedule.
+        sched.used = true;
+
+        CPU_FOREACH(cpu0)
+        {
+            if (cpu0->cpu_index == 0)
+                continue;
+            __remove_breakpoints_and_escape_cpu(cpu, cpu0);
+        }
     }
+
     return 0;
 }
 
@@ -222,10 +251,13 @@ static target_ulong qcsched_clear_breakpoint(CPUState *cpu)
     if (sched.total == 0)
         return 0;
 
+    if (!qcsched_cpu_transition(cpu, qcsched_cpu_deactivated, qcsched_cpu_idle))
+        return -EINVAL;
+
     sched.total = sched.current = 0;
     memset(&sched.entries, 0, sizeof(struct qcsched_entry) * MAX_SCHEDPOINTS);
     // Calling this hcall means the syscall has been finished. We can
-    // remove breakpoints
+    // remove all breakpoints on this CPU
     kvm_remove_all_breakpoints_cpu(cpu);
     return 0;
 }
@@ -235,7 +267,7 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
     __u64 *args = run->hypercall.args;
     __u64 cmd = args[0];
     int order;
-    unsigned int num;
+    unsigned int nr_bps, nr_cpus;
     target_ulong addr, subcmd;
     target_ulong hcall_ret = 0;
 
@@ -244,9 +276,10 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
     case HCALL_RESET:
         qcsched_reset(cpu);
         break;
-    case HCALL_PREPARE_BP:
-        num = args[1];
-        hcall_ret = qcsched_prepare_breakpoint(cpu, num);
+    case HCALL_PREPARE:
+        nr_bps = args[1];
+        nr_cpus = args[2];
+        hcall_ret = qcsched_prepare(cpu, nr_bps, nr_cpus);
         break;
     case HCALL_INSTALL_BP:
         addr = args[1];
@@ -277,7 +310,16 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
         hcall_ret = -EINVAL;
         break;
     }
+
+#ifdef __DEBUG_VERBOSE
     DRPRINTF(cpu, "ret: %lx\n", hcall_ret);
+#else
+    if (hcall_ret != 0) {
+        if (cmd == HCALL_INSTALL_BP)
+            DRPRINTF(cpu, "HCALL_INSTALL_BP\n");
+        DRPRINTF(cpu, "ret: %lx\n", hcall_ret);
+    }
+#endif
     qemu_mutex_unlock_iothread();
 
     qcsched_commit_state(cpu, hcall_ret);

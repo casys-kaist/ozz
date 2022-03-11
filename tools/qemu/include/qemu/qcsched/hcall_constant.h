@@ -13,7 +13,7 @@
 #define KVM_EXIT_HCALL HCALL_EXIT_REASON
 
 // Commands saved in kvm_run->hypercall.args[0]
-#define HCALL_PREPARE_BP 0x23564d5a
+#define HCALL_PREPARE 0x23564d5a
 #define HCALL_INSTALL_BP 0xf477909a
 #define HCALL_ACTIVATE_BP 0x40ab903
 #define HCALL_DEACTIVATE_BP 0xf327524f

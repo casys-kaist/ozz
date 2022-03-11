@@ -6,14 +6,9 @@
 #include "cpu.h"
 #include "exec/gdbstub.h"
 
+#include "qemu/qcsched/state.h"
 #include "qemu/qcsched/vmi.h"
 #include "qemu/qcsched/window.h"
-
-#define MAX_SCHEDPOINTS 128
-// TODO: Do not use macro
-#define MAX_CPUS 8
-
-#define QCSCHED_DUMMY_BREAKPOINT ~(target_ulong)(0)
 
 struct qcschedpoint {
     target_ulong addr;
@@ -38,13 +33,13 @@ struct qcsched_breakpoint_record {
     int count;
 };
 
-#define WATCHDOG_BREAKPOINT_COUNT_MAX 10
-
 struct qcsched {
     struct qcsched_entry entries[MAX_SCHEDPOINTS];
     struct qcsched_breakpoint_record last_breakpoint[MAX_CPUS];
     struct qcsched_schedpoint_window schedpoint_window[MAX_CPUS];
+    enum qcsched_cpu_state cpu_state[MAX_CPUS];
     int total, current;
+    int nr_cpus;
     bool activated;
     bool used;
 };
@@ -93,7 +88,5 @@ void qcsched_handle_kick(CPUState *cpu);
             exit(1);                                                           \
         }                                                                      \
     } while (0);
-
-#define TRAMPOLINE_ESCAPE_MAGIC 0x75da1791
 
 #endif

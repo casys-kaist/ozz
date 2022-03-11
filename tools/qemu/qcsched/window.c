@@ -48,6 +48,7 @@ qcsched_window_activate_entry(CPUState *cpu,
            "err=%d\n",
            err);
 
+    entry->breakpoint.installed = true;
     window->activated++;
 }
 
@@ -101,7 +102,7 @@ qcsched_window_deactivate_entry(CPUState *cpu,
            "err=%d\n",
            err);
 
-    entry->schedpoint.installed = false;
+    entry->breakpoint.installed = false;
     window->activated--;
 }
 
