@@ -16,6 +16,8 @@ static struct qcsched_entry *
 qcsched_window_lookup_entry(CPUState *cpu,
                             struct qcsched_schedpoint_window *window, int from)
 {
+    if (from == END_OF_SCHEDPOINT_WINDOW)
+        return NULL;
     for (int i = from; i < sched.total; i++) {
         struct qcsched_entry *entry = &sched.entries[i];
         if (entry->cpu != cpu->cpu_index)
@@ -39,6 +41,12 @@ qcsched_window_activate_entry(CPUState *cpu,
         return;
     }
 
+    if (entry->breakpoint.installed) {
+        DRPRINTF(cpu, "[WARN] trying to actdivate the entry at %lx again\n",
+                 entry->schedpoint.addr);
+        return;
+    }
+
     DRPRINTF(cpu, "Installing a breakpoint at %lx on cpu#%d\n",
              entry->schedpoint.addr, entry->cpu);
 
@@ -49,7 +57,9 @@ qcsched_window_activate_entry(CPUState *cpu,
            err);
 
     entry->breakpoint.installed = true;
+
     window->activated++;
+    DRPRINTF(cpu, "Window size after expand: %d\n", window->activated);
 }
 
 static void
@@ -67,7 +77,10 @@ qcsched_window_expand_window_1(CPUState *cpu,
 
     next =
         qcsched_window_lookup_entry(cpu, window, entry->schedpoint.order + 1);
-    window->until = next->schedpoint.order;
+    if (next != NULL)
+        window->until = next->schedpoint.order;
+    else
+        window->until = END_OF_SCHEDPOINT_WINDOW;
 }
 
 void qcsched_window_expand_window_n(CPUState *cpu, int n)
@@ -88,6 +101,14 @@ qcsched_window_deactivate_entry(CPUState *cpu,
 
     ASSERT(!schedpoint_window_empty(window), "Schedpoint window is empty");
 
+    if (!entry->breakpoint.installed) {
+        DRPRINTF(cpu,
+                 "[WARN] trying to deactivate the entry at %lx that has not "
+                 "been activated\n",
+                 entry->schedpoint.addr);
+        return;
+    }
+
     DRPRINTF(cpu, "Installing a breakpoint at %lx on cpu#%d\n",
              entry->schedpoint.addr, entry->cpu);
 
@@ -103,7 +124,9 @@ qcsched_window_deactivate_entry(CPUState *cpu,
            err);
 
     entry->breakpoint.installed = false;
+
     window->activated--;
+    DRPRINTF(cpu, "Window size after shrink: %d\n", window->activated);
 }
 
 static void
@@ -116,10 +139,11 @@ qcsched_window_shrink_window_1(CPUState *cpu,
     if (entry != NULL)
         qcsched_window_deactivate_entry(cpu, window, entry);
 
-    window->activated--;
-
     next = qcsched_window_lookup_entry(cpu, window, window->from + 1);
-    window->from = next->schedpoint.order;
+    if (next != NULL)
+        window->from = next->schedpoint.order;
+    else
+        window->from = END_OF_SCHEDPOINT_WINDOW;
 }
 
 void qcsched_window_shrink_window_n(CPUState *cpu, int n)

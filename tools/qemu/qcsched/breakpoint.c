@@ -182,9 +182,9 @@ watchdog_breakpoint_check_count(CPUState *cpu,
     // In this project, there is no case that a breakpoint keep being
     // hit consecutively so far (we don't consider cases where an
     // instruction is executed multiple times, such as a loop; this
-    // will be fixed in the future). So if a breakpoint is hit
+    // will be addressed in the future). So if a breakpoint is hit
     // multiple times in a row, something goes wrong (e.g., race
-    // condition). This watchdog detects it early.
+    // condition in QEMU). This watchdog detects it early.
     ASSERT(++record->count < WATCHDOG_BREAKPOINT_COUNT_MAX,
            "watchdog failed: a breakpoint at %lx is hit %d times", record->RIP,
            record->count);
