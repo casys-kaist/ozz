@@ -50,7 +50,7 @@ static void __remove_breakpoints_and_escape_cpu(CPUState *this,
     qcsched_escape_if_trampoled(this, remote);
 }
 
-static target_ulong qcsched_reset(CPUState *cpu)
+static void qcsched_reset(CPUState *cpu)
 {
     CPUState *cpu0;
     DRPRINTF(cpu, "%s\n", __func__);
@@ -59,9 +59,6 @@ static target_ulong qcsched_reset(CPUState *cpu)
     // abnormally exited, a garbage schedule still resides in the
     // hypervisor. Fuzzer need to reset it before executing the next
     // schedule.
-
-    if (!sched.activated && !sched.total)
-        return 0;
 
     sched.used = true;
     sched.activated = false;
@@ -86,7 +83,6 @@ static target_ulong qcsched_reset(CPUState *cpu)
     sched.total = sched.current = 0;
     sched.nr_cpus = 0;
     memset(&sched.entries, 0, sizeof(struct qcsched_entry) * MAX_SCHEDPOINTS);
-    return 0;
 }
 
 static target_ulong qcsched_prepare(CPUState *cpu, unsigned int nr_bps,
@@ -128,6 +124,10 @@ static target_ulong qcsched_install_breakpoint(CPUState *cpu, target_ulong addr,
         return -EINVAL;
 
     if (sched.total <= order)
+        return -EINVAL;
+
+    // Allowed: idle
+    if (qcsched_check_cpu_state(cpu, qcsched_cpu_ready))
         return -EINVAL;
 
     entry = &sched.entries[order];
