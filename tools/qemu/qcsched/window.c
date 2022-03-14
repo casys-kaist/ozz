@@ -77,6 +77,7 @@ qcsched_window_expand_window_1(CPUState *cpu,
 
     next =
         qcsched_window_lookup_entry(cpu, window, entry->schedpoint.order + 1);
+
     if (next != NULL)
         window->until = next->schedpoint.order;
     else
@@ -109,7 +110,7 @@ qcsched_window_deactivate_entry(CPUState *cpu,
         return;
     }
 
-    DRPRINTF(cpu, "Installing a breakpoint at %lx on cpu#%d\n",
+    DRPRINTF(cpu, "Removing a breakpoint at %lx on cpu#%d\n",
              entry->schedpoint.addr, entry->cpu);
 
     // XXX: qcsched_handle_breakpoint_iolocked() always remove the hit

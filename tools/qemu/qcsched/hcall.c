@@ -50,6 +50,16 @@ static void __remove_breakpoints_and_escape_cpu(CPUState *this,
     qcsched_escape_if_trampoled(this, remote);
 }
 
+static void qcsched_reset_window(CPUState *cpu)
+{
+    struct qcsched_schedpoint_window *window =
+        &sched.schedpoint_window[cpu->cpu_index];
+
+    window->total = window->activated = 0;
+    window->from = window->until = END_OF_SCHEDPOINT_WINDOW;
+    window->cpu = cpu->cpu_index;
+}
+
 static void qcsched_reset(CPUState *cpu)
 {
     CPUState *cpu0;
@@ -79,6 +89,7 @@ static void qcsched_reset(CPUState *cpu)
                sizeof(struct qcsched_breakpoint_record));
 
         qcsched_set_cpu_state(cpu0, qcsched_cpu_idle);
+        qcsched_reset_window(cpu0);
     }
     sched.total = sched.current = 0;
     sched.nr_cpus = 0;
@@ -114,6 +125,7 @@ static target_ulong qcsched_install_breakpoint(CPUState *cpu, target_ulong addr,
                                                int order)
 {
     struct qcsched_entry *entry;
+    struct qcsched_schedpoint_window *window;
 
 #ifdef __DEBUG_VERBOSE
     DRPRINTF(cpu, "%s\n", __func__);
@@ -138,6 +150,13 @@ static target_ulong qcsched_install_breakpoint(CPUState *cpu, target_ulong addr,
     entry->schedpoint = (struct qcschedpoint){.addr = addr, .order = order};
     entry->cpu = cpu->cpu_index;
     qcsched_vmi_task(cpu, &entry->t);
+
+    window = &sched.schedpoint_window[cpu->cpu_index];
+    if (window->from == END_OF_SCHEDPOINT_WINDOW || window->from > order)
+        // until and from are same before activating, which means the
+        // window is [from, from), which means the window is empty.
+        window->until = window->from = order;
+
     return 0;
 }
 
@@ -153,7 +172,6 @@ static void __do_activate_breakpoint(CPUState *cpu)
         return;
 
     window = &sched.schedpoint_window[cpu->cpu_index];
-    memset(window, 0, sizeof(*window));
 
     // We don't install breakpoints until the hook is hit. Instead we
     // count the number of scheduling points that will be installed on
