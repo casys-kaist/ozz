@@ -32,9 +32,21 @@ static void __copy_registers(struct kvm_regs *dst, struct kvm_regs *src)
     *dst = *src;
 }
 
-static void __disable_irq(CPUState *cpu) { cpu->qcsched_disable_irq = true; }
+// XXX: Disabling and restoring IRQ somehow blocks a thread going back
+// from the trampoline. RelRazzer requires this to hold the store
+// buffer but RazzerV2 does not. During RazzerV2 I do not use this,
+// but when doing RelRazzer, we need to inspect what is
+// happening. Repeatedly running qcsched-test-simple/bypass will be
+// helpful.
+__attribute__((unused)) static void __disable_irq(CPUState *cpu)
+{
+    cpu->qcsched_disable_irq = true;
+}
 
-static void __restore_irq(CPUState *cpu) { cpu->qcsched_restore_irq = true; }
+__attribute__((unused)) static void __restore_irq(CPUState *cpu)
+{
+    cpu->qcsched_restore_irq = true;
+}
 
 static void kidnap_task(CPUState *cpu)
 {
@@ -51,7 +63,7 @@ static void kidnap_task(CPUState *cpu)
 
     DRPRINTF(cpu, "kidnapping\n");
     __copy_registers(&trampoline->orig_regs, &cpu->regs);
-    __disable_irq(cpu);
+    /* __disable_irq(cpu); */
     jump_into_trampoline(cpu);
     trampoline->trampoled = true;
     qcsched_arm_selfescape_timer(cpu);
@@ -69,7 +81,7 @@ static void resume_task(CPUState *cpu)
 
     DRPRINTF(cpu, "resumming (force: %d)\n", cpu->qcsched_force_wakeup);
     __copy_registers(&cpu->regs, &trampoline->orig_regs);
-    __restore_irq(cpu);
+    /* __restore_irq(cpu); */
     cpu->qcsched_dirty = true;
     cpu->qcsched_force_wakeup = false;
     memset(trampoline, 0, sizeof(*trampoline) - sizeof(timer_t));
