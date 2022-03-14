@@ -57,6 +57,7 @@ static void qcsched_reset_window(CPUState *cpu)
 
     window->total = window->activated = 0;
     window->from = window->until = END_OF_SCHEDPOINT_WINDOW;
+    window->left_behind = END_OF_SCHEDPOINT_WINDOW;
     window->cpu = cpu->cpu_index;
 }
 

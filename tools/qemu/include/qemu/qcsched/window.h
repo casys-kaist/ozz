@@ -26,6 +26,12 @@ struct qcsched_schedpoint_window {
     int from;
     int until;
     int cpu;
+    // When a CPU detects missed scheduling points, it removes
+    // breakpoints itself for the breakpoints installed on it, or
+    // defers the removing job to a corresponding CPU. the schedpoint
+    // window [left_behind, from) represents scheduling points that
+    // are deferred so will be removed later.
+    int left_behind;
 };
 
 void qcsched_window_expand_window_n(CPUState *, int);
@@ -35,12 +41,22 @@ void qcsched_window_shrink_window_n(CPUState *, int);
     qcsched_window_expand_window_n(cpu, SCHEDPOINT_WINDOW_SIZE)
 #define qcsched_window_shrink_window(cpu) qcsched_window_shrink_window_n(cpu, 1)
 
+void qcsched_window_prune_passed_schedpoint(CPUState *);
+void qcsched_window_cleanup_left_schedpoint(CPUState *);
+
+void forward_focus(CPUState *cpu, int step);
+#define hand_over_baton(cpu) forward_focus(cpu, 1)
+
 #else
 
 void qcsched_window_expand_window_n(CPUState *, int) {}
 void qcsched_window_shrink_window_n(CPUState *, int) {}
 void qcsched_window_expand_window(CPUState *) {}
 void qcsched_window_shrink_window(CPUState *) {}
+void qcsched_window_prune_passed_schedpoint(CPUState *) {}
+void qcsched_window_cleanup_left_schedpoint(CPUState *) {}
+void forward_focus(CPUState *cpu, int step) {}
+void hand_over_baton(cpu) {}
 
 #endif /* CONFIG_QCSCHED */
 

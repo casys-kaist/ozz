@@ -77,13 +77,6 @@ static void resume_task(CPUState *cpu)
     qcsched_window_expand_window(cpu);
 }
 
-static void hand_over_baton(CPUState *cpu)
-{
-    sched.current = sched.current + 1;
-    DRPRINTF(cpu, "Next scheduling point: %d, %lx\n", sched.current,
-             sched.entries[sched.current].schedpoint.addr);
-}
-
 void wake_cpu_up(CPUState *cpu, CPUState *wakeup)
 {
     int r;
@@ -135,7 +128,7 @@ static bool breakpoint_on_schedpoint(CPUState *cpu)
 
     for (i = 0; i < sched.total; i++) {
         entry = &sched.entries[i];
-        if (entry->schedpoint.addr == RIP(cpu) &&
+        if (entry->schedpoint.addr == RIP(cpu) && entry->breakpoint.installed &&
             vmi_same_task(&running, &entry->t))
             return true;
     }
@@ -163,7 +156,9 @@ static void __handle_breakpoint_trampoline(CPUState *cpu)
 static void __handle_breakpoint_schedpoint(CPUState *cpu)
 {
     DRPRINTF(cpu, "%s (%llx)\n", __func__, RIP(cpu));
-    // Shrink the schedpoint window first
+    // Prune out passed schedpoints first
+    qcsched_window_prune_passed_schedpoint(cpu);
+    // Shrink the schedpoint window
     qcsched_window_shrink_window(cpu);
     // Hand over the baton to the next task
     hand_over_baton(cpu);
@@ -225,6 +220,8 @@ static int qcsched_handle_breakpoint_iolocked(CPUState *cpu)
 
     watchdog_breakpoint(cpu);
 
+    qcsched_window_cleanup_left_schedpoint(cpu);
+
     if (breakpoint_on_hook(cpu)) {
         __handle_breakpoint_hook(cpu);
     } else if (breakpoint_on_trampoline(cpu)) {
@@ -232,8 +229,9 @@ static int qcsched_handle_breakpoint_iolocked(CPUState *cpu)
     } else if (breakpoint_on_schedpoint(cpu)) {
         __handle_breakpoint_schedpoint(cpu);
     } else {
-        // Unknown case. Might be an error.
-        DRPRINTF(cpu, "Unknown breakpoint: %llx\n", RIP(cpu));
+        // Two cases: 1) unknown breakpoint, which may be an error, 2)
+        // cleaned up before.
+        DRPRINTF(cpu, "Ignore breakpoint: %llx\n", RIP(cpu));
     }
     return 0;
 }
