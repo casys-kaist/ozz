@@ -268,6 +268,42 @@ void qcsched_window_cleanup_left_schedpoint(CPUState *cpu)
     window->left_behind = END_OF_SCHEDPOINT_WINDOW;
 }
 
+void qcsched_window_sync(CPUState *cpu)
+
+{
+    int i, left_behind;
+    struct qcsched_entry *entry;
+    struct qcsched_schedpoint_window *window;
+
+    window = &sched.schedpoint_window[cpu->cpu_index];
+
+    if (sched.current <= window->from)
+        return;
+
+    // The focus of the schedule has moved forward so the current
+    // window is stale. Let's synchronize the window.
+
+    left_behind = window->from;
+    for (i = sched.current; i < sched.total; i++) {
+        entry = &sched.entries[i];
+        if (entry->cpu == cpu->cpu_index) {
+            window->from = entry->schedpoint.order;
+            break;
+        }
+    }
+
+    if (left_behind < window->left_behind)
+        window->left_behind = left_behind;
+}
+
+bool qcsched_window_hit_stale_schedpoint(CPUState *cpu)
+{
+    struct qcsched_schedpoint_window *window =
+        &sched.schedpoint_window[cpu->cpu_index];
+    struct qcsched_entry *hit = lookup_entry_by_address(cpu, cpu->regs.rip);
+    return hit->schedpoint.order < window->from;
+}
+
 void forward_focus(CPUState *cpu, int step)
 {
     sched.current = sched.current + step;

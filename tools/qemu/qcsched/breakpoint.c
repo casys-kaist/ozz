@@ -168,6 +168,18 @@ static void __handle_breakpoint_trampoline(CPUState *cpu)
 static void __handle_breakpoint_schedpoint(CPUState *cpu)
 {
     DRPRINTF(cpu, "%s (%llx)\n", __func__, RIP(cpu));
+
+    // This function handles a scheduling point regardless of that it
+    // is behind the current focus.
+
+    if (qcsched_window_hit_stale_schedpoint(cpu)) {
+        // The general breakpoint handler already cleaned up left
+        // schedpoint. Nothing to do with this breakpoint but just
+        // expand the window.
+        qcsched_window_expand_window(cpu);
+        return;
+    }
+
     // Prune out passed schedpoints first
     qcsched_window_prune_passed_schedpoint(cpu);
     // Shrink the schedpoint window
@@ -232,6 +244,9 @@ static int qcsched_handle_breakpoint_iolocked(CPUState *cpu)
 
     watchdog_breakpoint(cpu);
 
+    // We need to synchronize thw window before cleaning up left
+    // schedpoint
+    qcsched_window_sync(cpu);
     qcsched_window_cleanup_left_schedpoint(cpu);
 
     if (breakpoint_on_hook(cpu)) {

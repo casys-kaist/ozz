@@ -44,6 +44,9 @@ void qcsched_window_shrink_window_n(CPUState *, int);
 void qcsched_window_prune_passed_schedpoint(CPUState *);
 void qcsched_window_cleanup_left_schedpoint(CPUState *);
 
+void qcsched_window_sync(CPUState *);
+bool qcsched_window_hit_stale_schedpoint(CPUState *);
+
 void forward_focus(CPUState *cpu, int step);
 #define hand_over_baton(cpu) forward_focus(cpu, 1)
 
@@ -57,6 +60,8 @@ void qcsched_window_prune_passed_schedpoint(CPUState *) {}
 void qcsched_window_cleanup_left_schedpoint(CPUState *) {}
 void forward_focus(CPUState *cpu, int step) {}
 void hand_over_baton(cpu) {}
+void qcsched_window_sync(CPUState *) {}
+bool qcsched_window_hit_stale_schedpoint(CPUState *) {}
 
 #endif /* CONFIG_QCSCHED */
 
