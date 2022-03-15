@@ -210,6 +210,24 @@ void qcsched_window_shrink_window_n(CPUState *cpu, int n)
         qcsched_window_shrink_window_1(cpu, window);
 }
 
+static void
+qcsched_window_close_window(CPUState *cpu,
+                            struct qcsched_schedpoint_window *window)
+{
+    int order;
+    struct qcsched_entry *entry;
+    for (order = window->from; order < sched.total; order++) {
+        entry = lookup_entry_by_order(cpu, order);
+        if (entry == NULL)
+            continue;
+        if (entry->breakpoint.installed)
+            qcsched_window_shrink_entry(cpu, window, entry);
+    }
+    window->from = window->until = END_OF_SCHEDPOINT_WINDOW;
+    ASSERT(window->activated == 0,
+           "window still contains activated entries after closing");
+}
+
 void qcsched_window_prune_passed_schedpoint(CPUState *cpu)
 {
     struct qcsched_schedpoint_window *window, *window0;
@@ -221,15 +239,26 @@ void qcsched_window_prune_passed_schedpoint(CPUState *cpu)
     hit = lookup_entry_by_address(cpu, cpu->regs.rip);
     legit = lookup_entry_by_order(cpu, window->from);
 
-    ASSERT(legit == NULL || legit->schedpoint.order >= sched.current,
-           "the legitimate schedpoint (%d) is behind the current focus (%d)",
-           legit->schedpoint.order, sched.current);
+    if (legit == NULL || hit == NULL) {
+        // There are two cases that legit or hit is NULL: 1) the
+        // window is closed (i.e., window->from ==
+        // END_OF_SCHEDPOINT_WINDOW), 2) another CPU resets the
+        // schedule. For either case, we close the window, and abort
+        // the schedule.
+        qcsched_window_close_window(cpu, window);
+        return;
+    }
+
+    ASSERT(hit->schedpoint.order >= window->from, "stale schedpoint");
 
     if (hit == legit)
         // We don't have missed schedpoints.
         return;
 
     missed = hit->schedpoint.order - legit->schedpoint.order;
+    // missed should be positive because hit is not a stale schedpoint
+    // and legit is the first schedpoint in the window.
+    ASSERT(missed > 0, "missed is negative");
 
     // NOTE: hit will be deactivated later
     for (order = legit->schedpoint.order; order < hit->schedpoint.order;

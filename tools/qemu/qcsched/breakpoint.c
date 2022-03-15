@@ -170,7 +170,7 @@ static void __handle_breakpoint_schedpoint(CPUState *cpu)
     DRPRINTF(cpu, "%s (%llx)\n", __func__, RIP(cpu));
 
     // This function handles a scheduling point regardless of that it
-    // is behind the current focus.
+    // is behind of the current window focus.
 
     if (qcsched_window_hit_stale_schedpoint(cpu)) {
         // The general breakpoint handler already cleaned up left
