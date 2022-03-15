@@ -53,7 +53,8 @@ qcsched_window_activate_entry(CPUState *cpu,
 {
     int err;
 
-    ASSERT(!schedpoint_window_full(window), "Schedpoint window is full");
+    ASSERT(!schedpoint_window_full(window), "CPU %d: Schedpoint window is full",
+           cpu->cpu_index);
 
     if (entry->schedpoint.addr == QCSCHED_DUMMY_BREAKPOINT) {
         DRPRINTF(cpu, "Skip a dummy breakpoint on cpu#%d\n", entry->cpu);
@@ -129,7 +130,8 @@ qcsched_window_deactivate_entry(CPUState *cpu,
 {
     int err;
 
-    ASSERT(!schedpoint_window_empty(window), "Schedpoint window is empty");
+    ASSERT(!schedpoint_window_empty(window),
+           "CPU %d: Schedpoint window is empty", cpu->cpu_index);
     ASSERT(window->cpu == entry->cpu,
            "window (%d) and entry (%d) have a different CPU index", window->cpu,
            entry->cpu);
@@ -180,7 +182,7 @@ qcsched_window_shrink_entry(CPUState *cpu,
            "entry (%d) is not the first activated entry of the window (%d)",
            entry->schedpoint.order, window->from);
 
-    if (entry != NULL)
+    if (entry != NULL && entry->breakpoint.installed)
         qcsched_window_deactivate_entry(cpu, window, entry);
 
     cpu0 = qemu_get_cpu(window->cpu);
@@ -190,6 +192,17 @@ qcsched_window_shrink_entry(CPUState *cpu,
         window->from = next->schedpoint.order;
     else
         window->from = END_OF_SCHEDPOINT_WINDOW;
+
+    if (window->from > window->until) {
+        // NOTE: This can be possible, for example, if cpu0 does not
+        // installed breakpoints yet, and cpu detects passed
+        // schedpoint.
+        next = lookup_entry_by_order(cpu0, window->from + 1);
+        if (next != NULL)
+            window->until = next->schedpoint.order;
+        else
+            window->until = END_OF_SCHEDPOINT_WINDOW;
+    }
 }
 
 static void
