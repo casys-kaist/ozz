@@ -91,6 +91,7 @@ static void qcsched_reset(CPUState *cpu)
 
         qcsched_set_cpu_state(cpu0, qcsched_cpu_idle);
         qcsched_reset_window(cpu0);
+        qcsched_vmi_lock_info_reset(cpu0);
     }
     sched.total = sched.current = 0;
     sched.nr_cpus = 0;

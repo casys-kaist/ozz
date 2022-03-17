@@ -43,6 +43,37 @@ static void qcsched_vmi_hint__ssb_do_emulate(CPUState *cpu, target_ulong addr)
     vmi_info.__ssb_do_emulate = addr;
 }
 
+static void qcsched_vmi_critical_section_enter(CPUState *cpu,
+                                               target_ulong lockdep_addr)
+{
+    struct qcsched_vmi_lock_info *lock_info =
+        &vmi_info.lock_info[cpu->cpu_index];
+    int cnt = lock_info->count;
+
+    // Can't hold more lock info
+    if (cnt >= MAX_LOCKS)
+        return;
+
+    lock_info->acquired[cnt] = lockdep_addr;
+    lock_info->count = cnt + 1;
+}
+
+static void qcsched_vmi_critical_section_exit(CPUState *cpu,
+                                              target_ulong lockdep_addr)
+{
+    struct qcsched_vmi_lock_info *lock_info =
+        &vmi_info.lock_info[cpu->cpu_index];
+    int cnt = lock_info->count;
+
+    for (int i = 0; i < cnt; i++) {
+        if (lockdep_addr == lock_info->acquired[i]) {
+            lock_info->acquired[i] = lock_info->acquired[cnt - 1];
+            lock_info->count--;
+            return;
+        }
+    }
+}
+
 target_ulong qcsched_vmi_hint(CPUState *cpu, target_ulong type,
                               target_ulong addr)
 {
@@ -65,11 +96,24 @@ target_ulong qcsched_vmi_hint(CPUState *cpu, target_ulong type,
     case VMI__SSB_DO_EMULATE:
         qcsched_vmi_hint__ssb_do_emulate(cpu, addr);
         break;
+    case VMI_CRITICAL_SECTION_ENTER:
+        qcsched_vmi_critical_section_enter(cpu, addr);
+        break;
+    case VMI_CRITICAL_SECTION_EXIT:
+        qcsched_vmi_critical_section_exit(cpu, addr);
+        break;
     default:
         DRPRINTF(cpu, "Unknown VMI type: %lx\n", type);
         return -EINVAL;
     }
     return 0;
+}
+
+void qcsched_vmi_lock_info_reset(CPUState *cpu)
+{
+    struct qcsched_vmi_lock_info *lock_info =
+        &vmi_info.lock_info[cpu->cpu_index];
+    lock_info->count = 0;
 }
 
 static target_ulong current_task(CPUState *cpu)
