@@ -43,12 +43,15 @@ static void qcsched_vmi_hint__ssb_do_emulate(CPUState *cpu, target_ulong addr)
     vmi_info.__ssb_do_emulate = addr;
 }
 
-static void qcsched_vmi_critical_section_enter(CPUState *cpu,
-                                               target_ulong lockdep_addr)
+static void qcsched_vmi_lock_acquire(CPUState *cpu, target_ulong lockdep_addr,
+                                     int trylock, int read)
 {
     struct qcsched_vmi_lock_info *lock_info =
         &vmi_info.lock_info[cpu->cpu_index];
     int cnt = lock_info->count;
+
+    DRPRINTF(cpu, "lock_acquire, addr=%lx, trylock=%d, read=%d\n", lockdep_addr,
+             trylock, read);
 
     // Can't hold more lock info
     if (cnt >= MAX_LOCKS)
@@ -58,12 +61,13 @@ static void qcsched_vmi_critical_section_enter(CPUState *cpu,
     lock_info->count = cnt + 1;
 }
 
-static void qcsched_vmi_critical_section_exit(CPUState *cpu,
-                                              target_ulong lockdep_addr)
+static void qcsched_vmi_lock_release(CPUState *cpu, target_ulong lockdep_addr)
 {
     struct qcsched_vmi_lock_info *lock_info =
         &vmi_info.lock_info[cpu->cpu_index];
     int cnt = lock_info->count;
+
+    DRPRINTF(cpu, "lock_release, addr=%lx\n", lockdep_addr);
 
     for (int i = 0; i < cnt; i++) {
         if (lockdep_addr == lock_info->acquired[i]) {
@@ -75,8 +79,9 @@ static void qcsched_vmi_critical_section_exit(CPUState *cpu,
 }
 
 target_ulong qcsched_vmi_hint(CPUState *cpu, target_ulong type,
-                              target_ulong addr)
+                              target_ulong addr, target_ulong misc)
 {
+    int trylock, read;
     int index;
     switch (type) {
     case VMI_TRAMPOLINE ... VMI_TRAMPOLINE + 1:
@@ -96,11 +101,13 @@ target_ulong qcsched_vmi_hint(CPUState *cpu, target_ulong type,
     case VMI__SSB_DO_EMULATE:
         qcsched_vmi_hint__ssb_do_emulate(cpu, addr);
         break;
-    case VMI_CRITICAL_SECTION_ENTER:
-        qcsched_vmi_critical_section_enter(cpu, addr);
+    case VMI_LOCK_ACQUIRE:
+        trylock = misc >> 2;
+        read = misc & 0x3;
+        qcsched_vmi_lock_acquire(cpu, addr, trylock, read);
         break;
-    case VMI_CRITICAL_SECTION_EXIT:
-        qcsched_vmi_critical_section_exit(cpu, addr);
+    case VMI_LOCK_RELEASE:
+        qcsched_vmi_lock_release(cpu, addr);
         break;
     default:
         DRPRINTF(cpu, "Unknown VMI type: %lx\n", type);

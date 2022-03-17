@@ -288,7 +288,7 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
     __u64 cmd = args[0];
     int order;
     unsigned int nr_bps, nr_cpus;
-    target_ulong addr, subcmd;
+    target_ulong addr, subcmd, misc;
     target_ulong hcall_ret = 0;
 
     qemu_mutex_lock_iothread();
@@ -318,7 +318,8 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
     case HCALL_VMI_HINT:
         subcmd = args[1];
         addr = args[2];
-        hcall_ret = qcsched_vmi_hint(cpu, subcmd, addr);
+        misc = args[3];
+        hcall_ret = qcsched_vmi_hint(cpu, subcmd, addr, misc);
         break;
     case HCALL_ENABLE_KSSB:
         hcall_ret = qcsched_enable_kssb(cpu);

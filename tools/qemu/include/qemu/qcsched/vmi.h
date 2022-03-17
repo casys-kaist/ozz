@@ -30,7 +30,7 @@ struct qcsched_vmi_task {
 extern struct qcsched_vmi_info vmi_info;
 
 target_ulong qcsched_vmi_hint(CPUState *cpu, target_ulong type,
-                              target_ulong addr);
+                              target_ulong addr, target_ulong misc);
 void qcsched_vmi_lock_info_reset(CPUState *cpu);
 
 void qcsched_vmi_task(CPUState *cpu, struct qcsched_vmi_task *t);

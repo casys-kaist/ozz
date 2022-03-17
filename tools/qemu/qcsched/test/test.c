@@ -156,4 +156,6 @@ int main(void)
     pthread_create(&pth2, NULL, th2, NULL);
     pthread_join(pth1, NULL);
     pthread_join(pth2, NULL);
+
+    hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
 }
