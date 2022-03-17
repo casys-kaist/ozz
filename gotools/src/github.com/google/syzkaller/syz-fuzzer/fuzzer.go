@@ -58,7 +58,6 @@ type Fuzzer struct {
 	corpusPrios    []int64
 	sumPrios       int64
 	threadedCorpus []*prog.ThreadedProg
-	staleCount     map[uint32]int
 
 	signalMu     sync.RWMutex
 	corpusSignal signal.Signal // signal of inputs in corpus
@@ -298,7 +297,6 @@ func main() {
 		maxKnots: make(signal.Interleaving),
 		newKnots: make(signal.Interleaving),
 
-		staleCount:  make(map[uint32]int),
 		checkResult: r.CheckResult,
 		generate:    *flagGen,
 	}

@@ -78,7 +78,7 @@ func (p *Prog) removeDummyPoints() {
 	p.Schedule.points = p.Schedule.points[:i+1]
 }
 
-func (p *Prog) MutateScheduleFromHint(rs rand.Source, staleCount map[uint32]int, maxPoints, minPoints int, hint []primitive.Segment) (bool, []primitive.Segment) {
+func (p *Prog) MutateScheduleFromHint(rs rand.Source, hint []primitive.Segment) (bool, []primitive.Segment) {
 	if len(p.Contenders()) != 2 {
 		return false, hint
 	}
