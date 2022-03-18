@@ -130,8 +130,6 @@ qcsched_window_deactivate_entry(CPUState *cpu,
 {
     int err;
 
-    ASSERT(!schedpoint_window_empty(window),
-           "CPU %d: Schedpoint window is empty", cpu->cpu_index);
     ASSERT(window->cpu == entry->cpu,
            "window (%d) and entry (%d) have a different CPU index", window->cpu,
            entry->cpu);
@@ -143,6 +141,9 @@ qcsched_window_deactivate_entry(CPUState *cpu,
                  entry->schedpoint.addr);
         return;
     }
+
+    ASSERT(!schedpoint_window_empty(window),
+           "CPU %d: Schedpoint window is empty", cpu->cpu_index);
 
     DRPRINTF(cpu, "Removing a breakpoint at %lx on cpu#%d\n",
              entry->schedpoint.addr, entry->cpu);
@@ -300,8 +301,11 @@ void qcsched_window_cleanup_left_schedpoint(CPUState *cpu)
         entry = lookup_entry_by_order(cpu, i);
         if (entry == NULL)
             break;
-        DRPRINTF(cpu, "Cleanup a schedpoint at %lx\n", entry->schedpoint.addr);
-        qcsched_window_deactivate_entry(cpu, window, entry);
+        if (entry->breakpoint.installed) {
+            DRPRINTF(cpu, "Cleanup a schedpoint at %lx\n",
+                     entry->schedpoint.addr);
+            qcsched_window_deactivate_entry(cpu, window, entry);
+        }
         next = lookup_entry_by_order(cpu, entry->schedpoint.order + 1);
         i = next->schedpoint.order;
     }
