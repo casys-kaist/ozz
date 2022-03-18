@@ -5,8 +5,11 @@
 #include <linux/kvm.h>
 #include <pthread.h>
 #include <sched.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -18,6 +21,29 @@ int vm;
 #include "hypercall.h"
 
 #define gettid() syscall(SYS_gettid)
+
+#ifdef SPINLOCK_TEST
+__thread int fd;
+__thread struct kmemcov_access *cover;
+#endif
+
+enum kmemcov_access_type {
+    KMEMCOV_ACCESS_STORE,
+    KMEMCOV_ACCESS_LOAD,
+};
+
+struct kmemcov_access {
+    unsigned long inst;
+    unsigned long addr;
+    size_t size;
+    enum kmemcov_access_type type;
+    uint64_t timestamp;
+};
+
+#define KMEMCOV_INIT_TRACE _IO('d', 100)
+#define KMEMCOV_ENABLE _IO('d', 101)
+#define KMEMCOV_DISABLE _IO('d', 102)
+#define COVER_SIZE (64 << 10)
 
 static void set_affinity(int cpu)
 {
@@ -48,6 +74,40 @@ static void install_schedpoint(struct schedpoint *sched, int size)
     } while (ret == -EAGAIN && --cnt);
 }
 
+static void th_init(void)
+{
+#ifdef SPINLOCK_TEST
+    fd = open("/sys/kernel/debug/kmemcov", O_RDWR);
+    if (fd == -1)
+        perror("open"), exit(1);
+    /* Setup trace mode and trace size. */
+    if (ioctl(fd, KMEMCOV_INIT_TRACE, COVER_SIZE))
+        perror("ioctl"), exit(1);
+    /* Mmap buffer shared between kernel- and user-space. */
+    cover = (struct kmemcov_access *)mmap(
+        NULL, COVER_SIZE * sizeof(struct kmemcov_access),
+        PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if ((void *)cover == MAP_FAILED)
+        perror("mmap"), exit(1);
+    /* Enable coverage collection on the current thread. */
+    if (ioctl(fd, KMEMCOV_ENABLE, 0))
+        perror("ioctl"), exit(1);
+#endif
+}
+
+static void th_clear(void)
+{
+#ifdef SPINLOCK_TEST
+    if (ioctl(fd, KMEMCOV_DISABLE, 0))
+        perror("ioctl"), exit(1);
+    /* Free resources. */
+    if (munmap(cover, COVER_SIZE * sizeof(struct kmemcov_access)))
+        perror("munmap"), exit(1);
+    if (close(fd))
+        perror("close"), exit(1);
+#endif
+}
+
 static void clear_schedpoint(void)
 {
     hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
@@ -57,6 +117,7 @@ static void clear_schedpoint(void)
 static void *th1(void *dummy)
 {
     set_affinity(1);
+    th_init();
     struct schedpoint sched[] = {
 #ifdef CVE20196974
 #include "schedpoint/cve-2019-6974-1.h"
@@ -64,7 +125,7 @@ static void *th1(void *dummy)
 #ifdef CVE20196974_MINIMAL
 #include "schedpoint/cve-2019-6974-minimal-1.h"
 #endif
-#ifdef SIMPLE_TEST
+#if defined(SIMPLE_TEST) || defined(SPINLOCK_TEST)
 #include "schedpoint/simple-1.h"
 #endif
 #ifdef BYPASS_TEST
@@ -78,17 +139,23 @@ static void *th1(void *dummy)
                                    .flags = 0};
     ioctl(vm, KVM_CREATE_DEVICE, &cd);
 #endif
-#if defined(SIMPLE_TEST) || defined(BYPASS_TEST)
+#if defined(SIMPLE_TEST) || defined(BYPASS_TEST) || defined(SPINLOCK_TEST)
+    int typ = 1;
+#ifdef SPINLOCK_TEST
+    typ = 2;
+#endif
 #define SYS_qcshed_simple_write 509
-    syscall(SYS_qcshed_simple_write);
+    syscall(SYS_qcshed_simple_write, typ);
 #endif
     clear_schedpoint();
+    th_clear();
     return NULL;
 }
 
 static void *th2(void *dummy)
 {
     set_affinity(2);
+    th_init();
     struct schedpoint sched[] = {
 #ifdef CVE20196974
 #include "schedpoint/cve-2019-6974-2.h"
@@ -96,7 +163,7 @@ static void *th2(void *dummy)
 #ifdef CVE20196974_MINIMAL
 #include "schedpoint/cve-2019-6974-minimal-2.h"
 #endif
-#ifdef SIMPLE_TEST
+#if defined(SIMPLE_TEST) || defined(SPINLOCK_TEST)
 #include "schedpoint/simple-2.h"
 #endif
 #ifdef BYPASS_TEST
@@ -108,11 +175,16 @@ static void *th2(void *dummy)
 #if defined(CVE20196974) || defined(CVE20196974_MINIMAL)
     close(predicted_fd);
 #endif
-#if defined(SIMPLE_TEST) || defined(BYPASS_TEST)
+#if defined(SIMPLE_TEST) || defined(BYPASS_TEST) || defined(SPINLOCK_TEST)
+    int typ = 1;
+#ifdef SPINLOCK_TEST
+    typ = 2;
+#endif
 #define SYS_qcshed_simple_read 510
-    syscall(SYS_qcshed_simple_read);
+    syscall(SYS_qcshed_simple_read, typ);
 #endif
     clear_schedpoint();
+    th_clear();
     return NULL;
 }
 
@@ -143,7 +215,7 @@ int main(void)
 #ifdef CVE20196974_MINIMAL
     nr_bps = 2;
 #endif
-#if defined(SIMPLE_TEST) || defined(BYPASS_TEST)
+#if defined(SIMPLE_TEST) || defined(BYPASS_TEST) || defined(SPINLOCK_TEST)
     nr_bps = 20;
 #endif
     hypercall(HCALL_RESET, 0, 0, 0);
