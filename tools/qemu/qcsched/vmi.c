@@ -7,6 +7,7 @@
 #include "qemu/qcsched/hcall_constant.h"
 #include "qemu/qcsched/qcsched.h"
 #include "qemu/qcsched/vmi.h"
+#include "qemu/qcsched/window.h"
 
 struct qcsched_vmi_info vmi_info;
 
@@ -50,15 +51,31 @@ static void qcsched_vmi_lock_acquire(CPUState *cpu, target_ulong lockdep_addr,
         &vmi_info.lock_info[cpu->cpu_index];
     int cnt = lock_info->count;
 
+    // Allowed: activated
+    if (!qcsched_check_cpu_state(cpu, qcsched_cpu_activated) ||
+        qcsched_check_cpu_state(cpu, qcsched_cpu_deactivated))
+        return;
+
+#ifdef _DEBUG_VERBOSE
     DRPRINTF(cpu, "lock_acquire, addr=%lx, trylock=%d, read=%d\n", lockdep_addr,
              trylock, read);
+#endif
 
     // Can't hold more lock info
     if (cnt >= MAX_LOCKS)
         return;
 
-    lock_info->acquired[cnt] = lockdep_addr;
+    lock_info->acquired[cnt] = (struct qcsched_vmi_lock){
+        .lockdep_addr = lockdep_addr, .trylock = trylock, .read = read};
     lock_info->count = cnt + 1;
+
+    if (qcsched_window_lock_contending(cpu)) {
+        // This CPU is trying to acquire a lock and another CPU has
+        // already acquired it. Let's yield a turn
+        DRPRINTF(cpu, "Contending on a lock. Yield a turn.\n");
+        qcsched_commit_state(cpu, HCALL_SUCCESS);
+        qcsched_yield_turn(cpu);
+    }
 }
 
 static void qcsched_vmi_lock_release(CPUState *cpu, target_ulong lockdep_addr)
@@ -67,10 +84,17 @@ static void qcsched_vmi_lock_release(CPUState *cpu, target_ulong lockdep_addr)
         &vmi_info.lock_info[cpu->cpu_index];
     int cnt = lock_info->count;
 
+    // Allowed: activated
+    if (!qcsched_check_cpu_state(cpu, qcsched_cpu_activated) ||
+        qcsched_check_cpu_state(cpu, qcsched_cpu_deactivated))
+        return;
+
+#ifdef _DEBUG_VERBOSE
     DRPRINTF(cpu, "lock_release, addr=%lx\n", lockdep_addr);
+#endif
 
     for (int i = 0; i < cnt; i++) {
-        if (lockdep_addr == lock_info->acquired[i]) {
+        if (lockdep_addr == lock_info->acquired[i].lockdep_addr) {
             lock_info->acquired[i] = lock_info->acquired[cnt - 1];
             lock_info->count--;
             return;
@@ -174,4 +198,47 @@ bool qcsched_vmi_can_progress(CPUState *cpu)
     return !__vmi_scheduling_subject(&running) ||
            vmi_same_task(&running, &entry->t) || sched.total == sched.current ||
            cpu->qcsched_force_wakeup || !sched.activated;
+}
+
+static bool lock_contending(struct qcsched_vmi_lock *l0,
+                            struct qcsched_vmi_lock *l1)
+{
+    if (l0->lockdep_addr != l1->lockdep_addr)
+        return false;
+
+    if (l0->trylock || l1->trylock)
+        return false;
+
+    // TODO: How to handle read == 2?
+    if (l0->read != 0 && l1->read != 0)
+        return false;
+
+    // (l0->lockdep_addr == l1->lockdep_addr) && (the same lock)
+    // (l0->read == 0 || l1->read == 0)       && (at least one is exclusive)
+    // (!l0->trylock && l1->trylock)          && (both need to acquire the
+    // lock)
+    return true;
+}
+
+static bool vmi_lock_info_contending(struct qcsched_vmi_lock_info *li0,
+                                     struct qcsched_vmi_lock_info *li1)
+{
+    // NOTE: We could do this in O(n) using a hashmap, but we double
+    // iterate over lock info because the number of locks at a given
+    // time (= n) is not that large.
+    int i, j;
+    for (i = 0; i < li0->count; i++) {
+        for (j = 0; j < li1->count; j++)
+            if (lock_contending(&li0->acquired[i], &li1->acquired[j]))
+                return true;
+    }
+    return false;
+}
+
+bool qcsched_vmi_lock_contending(CPUState *cpu0, CPUState *cpu1)
+{
+    struct qcsched_vmi_lock_info *li0, *li1;
+    li0 = &vmi_info.lock_info[cpu0->cpu_index];
+    li1 = &vmi_info.lock_info[cpu1->cpu_index];
+    return vmi_lock_info_contending(li0, li1);
 }

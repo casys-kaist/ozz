@@ -9,6 +9,7 @@
 #include "sysemu/kvm.h"
 
 #include "qemu/qcsched/qcsched.h"
+#include "qemu/qcsched/vmi.h"
 
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -53,15 +54,20 @@ void qcsched_post_run(CPUState *cpu)
     ASSERT(!kvm_read_registers(cpu, &cpu->regs), "failed to read registers");
 }
 
-static void qcsched_skip_executed_vmcall(struct kvm_regs *regs)
+static void qcsched_skip_executed_vmcall(CPUState *cpu)
 {
 #define VMCALL_INSN_LEN 3
-    regs->rip += VMCALL_INSN_LEN;
+    cpu->regs.rip += VMCALL_INSN_LEN;
+}
+
+bool qcsched_jumped_into_trampoline(CPUState *cpu)
+{
+    return cpu->regs.rip == vmi_info.trampoline_entry_addr;
 }
 
 void qcsched_commit_state(CPUState *cpu, target_ulong hcall_ret)
 {
-    qcsched_skip_executed_vmcall(&cpu->regs);
+    qcsched_skip_executed_vmcall(cpu);
     cpu->regs.rax = hcall_ret;
     cpu->qcsched_dirty = true;
 }

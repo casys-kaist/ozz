@@ -129,7 +129,7 @@ static target_ulong qcsched_install_breakpoint(CPUState *cpu, target_ulong addr,
     struct qcsched_entry *entry;
     struct qcsched_schedpoint_window *window;
 
-#ifdef __DEBUG_VERBOSE
+#ifdef _DEBUG_VERBOSE
     DRPRINTF(cpu, "%s\n", __func__);
     DRPRINTF(cpu, "addr: %lx, order: %d\n", addr, order);
 #endif
@@ -332,7 +332,7 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
         break;
     }
 
-#ifdef __DEBUG_VERBOSE
+#ifdef _DEBUG_VERBOSE
     DRPRINTF(cpu, "ret: %lx\n", hcall_ret);
 #else
     if (hcall_ret != 0) {
@@ -343,5 +343,6 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
 #endif
     qemu_mutex_unlock_iothread();
 
-    qcsched_commit_state(cpu, hcall_ret);
+    if (!qcsched_jumped_into_trampoline(cpu))
+        qcsched_commit_state(cpu, hcall_ret);
 }

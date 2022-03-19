@@ -7,9 +7,15 @@
 
 #define MAX_LOCKS 128
 
+struct qcsched_vmi_lock {
+    target_ulong lockdep_addr;
+    int trylock;
+    int read;
+};
+
 struct qcsched_vmi_lock_info {
     int count;
-    target_ulong acquired[MAX_LOCKS];
+    struct qcsched_vmi_lock acquired[MAX_LOCKS];
 };
 
 struct qcsched_vmi_info {
@@ -35,6 +41,8 @@ void qcsched_vmi_lock_info_reset(CPUState *cpu);
 
 void qcsched_vmi_task(CPUState *cpu, struct qcsched_vmi_task *t);
 bool qcsched_vmi_can_progress(CPUState *cpu);
+bool qcsched_vmi_lock_contending(CPUState *, CPUState *);
+
 bool vmi_same_task(struct qcsched_vmi_task *t0, struct qcsched_vmi_task *t1);
 
 #endif

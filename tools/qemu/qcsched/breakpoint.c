@@ -165,6 +165,33 @@ static void __handle_breakpoint_trampoline(CPUState *cpu)
         resume_task(cpu);
 }
 
+void qcsched_yield_turn(CPUState *cpu)
+{
+    // Hand over the baton to the next task
+    hand_over_baton(cpu);
+    // and then kidnap the executing task
+    kidnap_task(cpu);
+    // And then wake others up
+    wake_others_up(cpu);
+}
+
+void qcsched_keep_this_cpu_going(CPUState *cpu)
+{
+    int step;
+    struct qcsched_schedpoint_window *window =
+        &sched.schedpoint_window[cpu->cpu_index];
+    struct qcsched_entry *this_cpu_next =
+        lookup_entry_by_order(cpu, window->from + 1);
+
+    if (!this_cpu_next)
+        // We are done. Move the focus to the end of the schedule
+        step = sched.total - sched.current;
+    else
+        step = this_cpu_next->schedpoint.order - sched.current;
+
+    forward_focus(cpu, step);
+}
+
 static void __handle_breakpoint_schedpoint(CPUState *cpu)
 {
     DRPRINTF(cpu, "%s (%llx)\n", __func__, RIP(cpu));
@@ -184,12 +211,16 @@ static void __handle_breakpoint_schedpoint(CPUState *cpu)
     qcsched_window_prune_passed_schedpoint(cpu);
     // Shrink the schedpoint window
     qcsched_window_shrink_window(cpu);
-    // Hand over the baton to the next task
-    hand_over_baton(cpu);
-    // and then kidnap the executing task
-    kidnap_task(cpu);
-    // And then wake others up
-    wake_others_up(cpu);
+
+    if (qcsched_window_lock_contending(cpu)) {
+        // If the next scheduling point is not reachable because of lock
+        // contention, just keep this CPU going
+        DRPRINTF(cpu, "Contending on a lock. Keep this CPU going\n");
+        qcsched_window_expand_window(cpu);
+        qcsched_keep_this_cpu_going(cpu);
+    } else {
+        qcsched_yield_turn(cpu);
+    }
 }
 
 static void

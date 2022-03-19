@@ -47,8 +47,13 @@ void qcsched_window_cleanup_left_schedpoint(CPUState *);
 void qcsched_window_sync(CPUState *);
 bool qcsched_window_hit_stale_schedpoint(CPUState *);
 
+bool qcsched_window_lock_contending(CPUState *);
+
 void forward_focus(CPUState *cpu, int step);
 #define hand_over_baton(cpu) forward_focus(cpu, 1)
+
+struct qcsched_entry *lookup_entry_by_order(CPUState *cpu, int from);
+struct qcsched_entry *lookup_entry_by_address(CPUState *cpu, target_ulong inst);
 
 #else
 
@@ -59,9 +64,12 @@ void qcsched_window_shrink_window(CPUState *) {}
 void qcsched_window_prune_passed_schedpoint(CPUState *) {}
 void qcsched_window_cleanup_left_schedpoint(CPUState *) {}
 void forward_focus(CPUState *cpu, int step) {}
-void hand_over_baton(cpu) {}
+void hand_over_baton(CPUState *cpu) {}
 void qcsched_window_sync(CPUState *) {}
 bool qcsched_window_hit_stale_schedpoint(CPUState *) {}
+bool qcsched_window_lock_contending(CPUState *) {}
+struct qcsched_entry *lookup_entry_by_order(CPUState *, int) {}
+struct qcsched_entry *lookup_entry_by_address(CPUState *, target_ulong) {}
 
 #endif /* CONFIG_QCSCHED */
 

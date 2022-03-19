@@ -13,7 +13,7 @@
     (window->activated == SCHEDPOINT_WINDOW_SIZE)
 #define schedpoint_window_empty(window) (window->activated == 0)
 
-static struct qcsched_entry *lookup_entry_by_order(CPUState *cpu, int from)
+struct qcsched_entry *lookup_entry_by_order(CPUState *cpu, int from)
 {
     if (from == END_OF_SCHEDPOINT_WINDOW)
         return NULL;
@@ -26,8 +26,7 @@ static struct qcsched_entry *lookup_entry_by_order(CPUState *cpu, int from)
     return NULL;
 }
 
-static struct qcsched_entry *lookup_entry_by_address(CPUState *cpu,
-                                                     target_ulong inst)
+struct qcsched_entry *lookup_entry_by_address(CPUState *cpu, target_ulong inst)
 {
     struct qcsched_schedpoint_window *window =
         &sched.schedpoint_window[cpu->cpu_index];
@@ -212,6 +211,10 @@ qcsched_window_shrink_window_1(CPUState *cpu,
 {
     struct qcsched_entry *entry = lookup_entry_by_order(cpu, window->from);
 
+    if (!entry)
+        // The window is already closed. Nothing to do.
+        return;
+
     qcsched_window_shrink_entry(cpu, window, entry);
 }
 
@@ -307,6 +310,8 @@ void qcsched_window_cleanup_left_schedpoint(CPUState *cpu)
             qcsched_window_deactivate_entry(cpu, window, entry);
         }
         next = lookup_entry_by_order(cpu, entry->schedpoint.order + 1);
+        if (!next)
+            break;
         i = next->schedpoint.order;
     }
     // We don't touch window->left_behind when expanding the window,
@@ -338,6 +343,14 @@ void qcsched_window_sync(CPUState *cpu)
         }
     }
 
+    if (i == sched.total)
+        // We don't have an entry anymore. Move to the end of the
+        // schedpoint window.
+        window->from = END_OF_SCHEDPOINT_WINDOW;
+
+    if (window->until < window->from)
+        window->until = window->from;
+
     if (left_behind < window->left_behind)
         window->left_behind = left_behind;
 }
@@ -347,6 +360,12 @@ bool qcsched_window_hit_stale_schedpoint(CPUState *cpu)
     struct qcsched_schedpoint_window *window =
         &sched.schedpoint_window[cpu->cpu_index];
     struct qcsched_entry *hit = lookup_entry_by_address(cpu, cpu->regs.rip);
+    if (hit == NULL)
+        // Cannot find the entry. Possibly sched is reset (i.e.,
+        // sched.total == 0) or the window is closed (i.e.,
+        // window->from == END_OF_SCHEDPOINT_WINDOW). Either cases
+        // mean that the breakpoint is stale.
+        return true;
     return hit->schedpoint.order < window->from;
 }
 
@@ -355,4 +374,39 @@ void forward_focus(CPUState *cpu, int step)
     sched.current = sched.current + step;
     DRPRINTF(cpu, "Next scheduling point: %d, %lx\n", sched.current,
              sched.entries[sched.current].schedpoint.addr);
+}
+
+bool qcsched_window_lock_contending(CPUState *cpu)
+{
+    CPUState *next_cpu;
+    struct qcsched_schedpoint_window *window =
+        &sched.schedpoint_window[cpu->cpu_index];
+    struct qcsched_entry *entry = lookup_entry_by_order(NULL, window->from + 1);
+
+    // Allowed: activated
+    if (!qcsched_check_cpu_state(cpu, qcsched_cpu_activated) ||
+        qcsched_check_cpu_state(cpu, qcsched_cpu_deactivated))
+        return false;
+
+    if (!entry) {
+        // XXX: Although at this point we support only two CPUs and
+        // this makes sense, the problem is that we don't have a
+        // mechanism to determine the next CPU after the last
+        // scheduling point. Need to fix it.
+        bool found = false;
+        CPU_FOREACH(next_cpu)
+        {
+            if (next_cpu != cpu &&
+                sched.cpu_state[next_cpu->cpu_index] == qcsched_cpu_activated) {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            return false;
+    } else {
+        next_cpu = qemu_get_cpu(entry->cpu);
+    }
+
+    return qcsched_vmi_lock_contending(cpu, next_cpu);
 }
