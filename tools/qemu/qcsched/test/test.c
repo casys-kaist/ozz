@@ -68,10 +68,11 @@ static void install_schedpoint(struct schedpoint *sched, int size)
     unsigned long ret;
 #define EAGAIN 11
     int cnt = 10;
-    do {
-        ret = hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
+    ret = hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
+    while (ret == -EAGAIN && --cnt) {
         usleep(5 * 1000);
-    } while (ret == -EAGAIN && --cnt);
+        ret = hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
+    }
 }
 
 static void th_init(void)
