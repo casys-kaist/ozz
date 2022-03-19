@@ -47,12 +47,12 @@ int kvm_arch_insert_hw_breakpoint_cpu(CPUState *cpu, target_ulong addr,
         return -ENOSYS;
     }
 
-    if (hw_breakpoint[cpu->cpu_index].nb == 4) {
-        return -ENOBUFS;
-    }
-
     if (find_hw_breakpoint_cpu(cpu, addr, len, type) >= 0) {
         return -EEXIST;
+    }
+
+    if (hw_breakpoint[cpu->cpu_index].nb == 4) {
+        return -ENOBUFS;
     }
 
     nb = hw_breakpoint[cpu->cpu_index].nb;
