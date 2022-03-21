@@ -61,7 +61,6 @@ struct schedpoint {
 
 static void install_schedpoint(struct schedpoint *sched, int size)
 {
-    printf("hihi %d\n", size);
     for (int i = 0; i < size; i++) {
         hypercall(HCALL_INSTALL_BP, sched[i].addr, sched[i].order, 0);
     }
@@ -204,21 +203,28 @@ static void init()
 #endif
 }
 
+struct schedpoint total[] = {
+#ifdef CVE20196974
+#include "schedpoint/cve-2019-6974-1.h"
+#include "schedpoint/cve-2019-6974-2.h"
+#endif
+#ifdef CVE20196974_MINIMAL
+#include "schedpoint/cve-2019-6974-minimal-1.h"
+#include "schedpoint/cve-2019-6974-minimal-2.h"
+#endif
+#if defined(SIMPLE_TEST) || defined(BYPASS_TEST) || defined(SPINLOCK_TEST)
+#include "schedpoint/simple-1.h"
+#include "schedpoint/simple-2.h"
+#endif
+};
+
 int main(void)
 {
     pthread_t pth1, pth2;
     int nr_bps = -1;
 
     set_affinity(0);
-#ifdef CVE20196974
-    nr_bps = 22;
-#endif
-#ifdef CVE20196974_MINIMAL
-    nr_bps = 2;
-#endif
-#if defined(SIMPLE_TEST) || defined(BYPASS_TEST) || defined(SPINLOCK_TEST)
-    nr_bps = 20;
-#endif
+    nr_bps = sizeof(total) / sizeof(total[0]);
     hypercall(HCALL_RESET, 0, 0, 0);
     hypercall(HCALL_PREPARE_BP, nr_bps, 2, 0);
     hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
