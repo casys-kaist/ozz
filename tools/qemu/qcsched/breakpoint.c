@@ -168,6 +168,7 @@ static void __handle_breakpoint_trampoline(CPUState *cpu)
 void qcsched_yield_turn(CPUState *cpu)
 {
     // Hand over the baton to the next task
+    // TODO: The logic of hand_over_baton is fragile
     hand_over_baton(cpu);
     // and then kidnap the executing task
     kidnap_task(cpu);
@@ -212,10 +213,11 @@ static void __handle_breakpoint_schedpoint(CPUState *cpu)
     // Shrink the schedpoint window
     qcsched_window_shrink_window(cpu);
 
-    if (qcsched_window_lock_contending(cpu)) {
-        // If the next scheduling point is not reachable because of lock
-        // contention, just keep this CPU going
-        DRPRINTF(cpu, "Contending on a lock. Keep this CPU going\n");
+    if (qcsched_window_lock_contending(cpu) ||
+        qcsched_window_consecutive_schedpoint(cpu)) {
+        // If the next scheduling point is not reachable because of
+        // lock contention or installed on the same CPU, just keep
+        // this CPU going
         qcsched_window_expand_window(cpu);
         qcsched_keep_this_cpu_going(cpu);
     } else {

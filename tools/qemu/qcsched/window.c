@@ -17,9 +17,11 @@ struct qcsched_entry *lookup_entry_by_order(CPUState *cpu, int from)
 {
     if (from == END_OF_SCHEDPOINT_WINDOW)
         return NULL;
+    if (cpu == NULL && from < sched.total)
+        return &sched.entries[from];
     for (int i = from; i < sched.total; i++) {
         struct qcsched_entry *entry = &sched.entries[i];
-        if (cpu != NULL && entry->cpu != cpu->cpu_index)
+        if (entry->cpu != cpu->cpu_index)
             continue;
         return entry;
     }
@@ -379,6 +381,7 @@ void forward_focus(CPUState *cpu, int step)
 bool qcsched_window_lock_contending(CPUState *cpu)
 {
     CPUState *next_cpu;
+    bool contending;
     struct qcsched_schedpoint_window *window =
         &sched.schedpoint_window[cpu->cpu_index];
     struct qcsched_entry *entry = lookup_entry_by_order(NULL, window->from + 1);
@@ -408,5 +411,25 @@ bool qcsched_window_lock_contending(CPUState *cpu)
         next_cpu = qemu_get_cpu(entry->cpu);
     }
 
-    return qcsched_vmi_lock_contending(cpu, next_cpu);
+    contending = qcsched_vmi_lock_contending(cpu, next_cpu);
+    if (contending)
+        DRPRINTF(cpu, "Contending on a lock\n");
+    return contending;
+}
+
+bool qcsched_window_consecutive_schedpoint(CPUState *cpu)
+{
+    struct qcsched_entry *entry;
+    int next_order = sched.current + 1;
+
+    if (next_order == sched.total)
+        // We reach the end of the schedule window
+        return true;
+
+    entry = lookup_entry_by_order(NULL, next_order);
+    if (entry == NULL)
+        // Schedule is reset. Just let this CPU keep executing.
+        return true;
+
+    return entry->cpu == cpu->cpu_index;
 }
