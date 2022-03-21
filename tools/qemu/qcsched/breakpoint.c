@@ -182,7 +182,7 @@ void qcsched_keep_this_cpu_going(CPUState *cpu)
     struct qcsched_schedpoint_window *window =
         &sched.schedpoint_window[cpu->cpu_index];
     struct qcsched_entry *this_cpu_next =
-        lookup_entry_by_order(cpu, window->from + 1);
+        lookup_entry_by_order(cpu, window->from);
 
     if (!this_cpu_next)
         // We are done. Move the focus to the end of the schedule
@@ -213,6 +213,10 @@ static void __handle_breakpoint_schedpoint(CPUState *cpu)
     // Shrink the schedpoint window
     qcsched_window_shrink_window(cpu);
 
+    // NOTE: At this point window->from points to the next scheduling
+    // point in its scheduling window, and sched.current points to the
+    // current focus (i.e., not moved forward yet). Below function
+    // calls should be aware of this.
     if (qcsched_window_lock_contending(cpu) ||
         qcsched_window_consecutive_schedpoint(cpu)) {
         // If the next scheduling point is not reachable because of

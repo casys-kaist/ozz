@@ -238,6 +238,8 @@ static bool vmi_lock_info_contending(struct qcsched_vmi_lock_info *li0,
 bool qcsched_vmi_lock_contending(CPUState *cpu0, CPUState *cpu1)
 {
     struct qcsched_vmi_lock_info *li0, *li1;
+    if (cpu0 == cpu1)
+        return false;
     li0 = &vmi_info.lock_info[cpu0->cpu_index];
     li1 = &vmi_info.lock_info[cpu1->cpu_index];
     return vmi_lock_info_contending(li0, li1);

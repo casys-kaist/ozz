@@ -382,9 +382,8 @@ bool qcsched_window_lock_contending(CPUState *cpu)
 {
     CPUState *next_cpu;
     bool contending;
-    struct qcsched_schedpoint_window *window =
-        &sched.schedpoint_window[cpu->cpu_index];
-    struct qcsched_entry *entry = lookup_entry_by_order(NULL, window->from + 1);
+    struct qcsched_entry *entry =
+        lookup_entry_by_order(NULL, sched.current + 1);
 
     // Allowed: activated
     if (!qcsched_check_cpu_state(cpu, qcsched_cpu_activated) ||
@@ -392,7 +391,7 @@ bool qcsched_window_lock_contending(CPUState *cpu)
         return false;
 
     if (!entry) {
-        // XXX: Although at this point we support only two CPUs and
+        // XXX: Although at this point we support only two CPUs so
         // this makes sense, the problem is that we don't have a
         // mechanism to determine the next CPU after the last
         // scheduling point. Need to fix it.
