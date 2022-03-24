@@ -283,11 +283,11 @@ static target_ulong qcsched_clear_breakpoint(CPUState *cpu)
     if (sched.activated)
         return -EBUSY;
 
-    if (sched.total == 0)
-        return 0;
-
     if (!qcsched_cpu_transition(cpu, qcsched_cpu_deactivated, qcsched_cpu_idle))
         return -EINVAL;
+
+    if (sched.total == 0)
+        return 0;
 
     sched.total = sched.current = 0;
     memset(&sched.entries, 0, sizeof(struct qcsched_entry) * MAX_SCHEDPOINTS);
