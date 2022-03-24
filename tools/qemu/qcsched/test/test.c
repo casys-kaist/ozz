@@ -95,7 +95,7 @@ static void th_init(void)
 #endif
 }
 
-static void th_clear(void)
+static void th_clear()
 {
 #ifdef SPINLOCK_TEST
     if (ioctl(fd, KMEMCOV_DISABLE, 0))
@@ -111,6 +111,14 @@ static void th_clear(void)
 static void clear_schedpoint(void)
 {
     hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
+#ifdef FOOTPRINT_TEST
+    uint64_t count = 0;
+    uint64_t arr[128];
+    hypercall(HCALL_FOOTPRINT_BP, (unsigned long)&count, (unsigned long)arr, 0);
+    printf("Schedpoint count: %lu\n", count);
+    for (int i = 0; i < count; i++)
+        printf("  %ld\n", arr[i]);
+#endif
     hypercall(HCALL_CLEAR_BP, 0, 0, 0);
 }
 
@@ -128,7 +136,7 @@ static void *th1(void *dummy)
 #if defined(SIMPLE_TEST) || defined(SPINLOCK_TEST)
 #include "schedpoint/simple-1.h"
 #endif
-#ifdef BYPASS_TEST
+#if defined(BYPASS_TEST) || defined(FOOTPRINT_TEST)
 #include "schedpoint/bypass-1.h"
 #endif
     };
@@ -139,7 +147,8 @@ static void *th1(void *dummy)
                                    .flags = 0};
     ioctl(vm, KVM_CREATE_DEVICE, &cd);
 #endif
-#if defined(SIMPLE_TEST) || defined(BYPASS_TEST) || defined(SPINLOCK_TEST)
+#if defined(SIMPLE_TEST) || defined(BYPASS_TEST) || defined(SPINLOCK_TEST) ||  \
+    defined(FOOTPRINT_TEST)
     int typ = 1;
 #ifdef SPINLOCK_TEST
     typ = 2;
@@ -166,7 +175,7 @@ static void *th2(void *dummy)
 #if defined(SIMPLE_TEST) || defined(SPINLOCK_TEST)
 #include "schedpoint/simple-2.h"
 #endif
-#ifdef BYPASS_TEST
+#if defined(BYPASS_TEST) || defined(FOOTPRINT_TEST)
 #include "schedpoint/bypass-2.h"
 #endif
     };
@@ -175,7 +184,8 @@ static void *th2(void *dummy)
 #if defined(CVE20196974) || defined(CVE20196974_MINIMAL)
     close(predicted_fd);
 #endif
-#if defined(SIMPLE_TEST) || defined(BYPASS_TEST) || defined(SPINLOCK_TEST)
+#if defined(SIMPLE_TEST) || defined(BYPASS_TEST) || defined(SPINLOCK_TEST) ||  \
+    defined(FOOTPRINT_TEST)
     int typ = 1;
 #ifdef SPINLOCK_TEST
     typ = 2;
@@ -212,7 +222,8 @@ struct schedpoint total[] = {
 #include "schedpoint/cve-2019-6974-minimal-1.h"
 #include "schedpoint/cve-2019-6974-minimal-2.h"
 #endif
-#if defined(SIMPLE_TEST) || defined(BYPASS_TEST) || defined(SPINLOCK_TEST)
+#if defined(SIMPLE_TEST) || defined(BYPASS_TEST) || defined(SPINLOCK_TEST) ||  \
+    defined(FOOTPRINT_TEST)
 #include "schedpoint/simple-1.h"
 #include "schedpoint/simple-2.h"
 #endif
@@ -226,7 +237,7 @@ int main(void)
     set_affinity(0);
     nr_bps = sizeof(total) / sizeof(total[0]);
     hypercall(HCALL_RESET, 0, 0, 0);
-    hypercall(HCALL_PREPARE_BP, nr_bps, 2, 0);
+    hypercall(HCALL_PREPARE, nr_bps, 2, 0);
     hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
 
     init();
