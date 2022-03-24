@@ -8,6 +8,7 @@
 #include "exec/gdbstub.h"
 #include "qemu-common.h"
 #include "qemu/main-loop.h"
+#include "sysemu/cpus.h"
 #include "sysemu/kvm.h"
 
 #include "qemu/qcsched/hcall.h"
@@ -276,6 +277,33 @@ static target_ulong qcsched_deactivate_breakpoint(CPUState *cpu)
     return 0;
 }
 
+static target_ulong
+qcsched_footprint_breakpoint(CPUState *cpu, target_ulong cnt, target_ulong data)
+{
+    struct qcsched_entry *entry;
+    target_ulong footprintul;
+    int i, idx;
+
+    DRPRINTF(cpu, "%s\n", __func__);
+
+    if (!qcsched_check_cpu_state(cpu, qcsched_cpu_deactivated))
+        return -EINVAL;
+
+    for (i = 0, idx = 0; i < sched.total; i++, idx += 8) {
+        entry = &sched.entries[i];
+        if (entry->cpu != cpu->cpu_index)
+            continue;
+        footprintul = (target_ulong)entry->schedpoint.footprint;
+        ASSERT(!cpu_memory_rw_debug(cpu, data + idx, &footprintul, 8, 1),
+               "Can't write order");
+    }
+
+    ASSERT(!cpu_memory_rw_debug(cpu, cnt, &sched.total, 8, 1),
+           "Can't write unstable count");
+
+    return 0;
+}
+
 static target_ulong qcsched_clear_breakpoint(CPUState *cpu)
 {
     DRPRINTF(cpu, "%s\n", __func__);
@@ -304,7 +332,7 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
     int order;
     unsigned int nr_bps, nr_cpus;
     target_ulong addr, subcmd, misc;
-    target_ulong hcall_ret = 0;
+    target_ulong ret = 0;
 
     qemu_mutex_lock_iothread();
     switch (cmd) {
@@ -314,50 +342,55 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
     case HCALL_PREPARE:
         nr_bps = args[1];
         nr_cpus = args[2];
-        hcall_ret = qcsched_prepare(cpu, nr_bps, nr_cpus);
+        ret = qcsched_prepare(cpu, nr_bps, nr_cpus);
         break;
     case HCALL_INSTALL_BP:
         addr = args[1];
         order = args[2];
-        hcall_ret = qcsched_install_breakpoint(cpu, addr, order);
+        ret = qcsched_install_breakpoint(cpu, addr, order);
         break;
     case HCALL_ACTIVATE_BP:
-        hcall_ret = qcsched_activate_breakpoint(cpu);
+        ret = qcsched_activate_breakpoint(cpu);
         break;
     case HCALL_DEACTIVATE_BP:
-        hcall_ret = qcsched_deactivate_breakpoint(cpu);
+        ret = qcsched_deactivate_breakpoint(cpu);
+        break;
+    case HCALL_FOOTPRINT_BP:
+        addr = args[1];
+        misc = args[2];
+        ret = qcsched_footprint_breakpoint(cpu, addr, misc);
         break;
     case HCALL_CLEAR_BP:
-        hcall_ret = qcsched_clear_breakpoint(cpu);
+        ret = qcsched_clear_breakpoint(cpu);
         break;
     case HCALL_VMI_HINT:
         subcmd = args[1];
         addr = args[2];
         misc = args[3];
-        hcall_ret = qcsched_vmi_hint(cpu, subcmd, addr, misc);
+        ret = qcsched_vmi_hint(cpu, subcmd, addr, misc);
         break;
     case HCALL_ENABLE_KSSB:
-        hcall_ret = qcsched_enable_kssb(cpu);
+        ret = qcsched_enable_kssb(cpu);
         break;
     case HCALL_DISABLE_KSSB:
-        hcall_ret = qcsched_disable_kssb(cpu);
+        ret = qcsched_disable_kssb(cpu);
         break;
     default:
-        hcall_ret = -EINVAL;
+        ret = -EINVAL;
         break;
     }
 
 #ifdef _DEBUG_VERBOSE
-    DRPRINTF(cpu, "ret: %lx\n", hcall_ret);
+    DRPRINTF(cpu, "ret: %lx\n", ret);
 #else
-    if (hcall_ret != 0) {
+    if (ret != 0) {
         if (cmd == HCALL_INSTALL_BP)
             DRPRINTF(cpu, "HCALL_INSTALL_BP\n");
-        DRPRINTF(cpu, "ret: %lx\n", hcall_ret);
+        DRPRINTF(cpu, "ret: %lx\n", ret);
     }
 #endif
     qemu_mutex_unlock_iothread();
 
     if (!qcsched_jumped_into_trampoline(cpu))
-        qcsched_commit_state(cpu, hcall_ret);
+        qcsched_commit_state(cpu, ret);
 }
