@@ -287,6 +287,7 @@ void qcsched_window_prune_passed_schedpoint(CPUState *cpu)
 
         window0 = &sched.schedpoint_window[entry->cpu];
 
+        qcsched_window_leave_footprint(cpu, footprint_missed);
         qcsched_window_shrink_entry(cpu, window0, entry);
     }
 
@@ -309,6 +310,7 @@ void qcsched_window_cleanup_left_schedpoint(CPUState *cpu)
         if (entry->breakpoint.installed) {
             DRPRINTF(cpu, "Cleanup a schedpoint at %lx\n",
                      entry->schedpoint.addr);
+            qcsched_window_leave_footprint_at(cpu, footprint_dropped, i);
             qcsched_window_deactivate_entry(cpu, window, entry);
         }
         next = lookup_entry_by_order(cpu, entry->schedpoint.order + 1);
@@ -431,4 +433,32 @@ bool qcsched_window_consecutive_schedpoint(CPUState *cpu)
         return true;
 
     return entry->cpu == cpu->cpu_index;
+}
+
+void qcsched_window_leave_footprint_at(CPUState *cpu,
+                                       enum qcschedpoint_footprint footprint,
+                                       int order)
+{
+    // We don't use lookup_entry_by_order() as we want an entry
+    // exactly at order
+    struct qcsched_entry *entry;
+
+    ASSERT(order >= sched.total, "wrong order");
+
+    entry = &sched.entries[order];
+    if (entry->cpu != cpu->cpu_index)
+        return;
+
+    if (entry->schedpoint.footprint != footprint_preserved)
+        DRPRINTF(cpu, "[WARN] footprint is already made\n");
+
+    entry->schedpoint.footprint = footprint;
+}
+
+void qcsched_window_leave_footprint(CPUState *cpu,
+                                    enum qcschedpoint_footprint footprint)
+{
+    struct qcsched_schedpoint_window *window =
+        &sched.schedpoint_window[cpu->cpu_index];
+    qcsched_window_leave_footprint_at(cpu, footprint, window->from);
 }

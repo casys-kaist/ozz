@@ -7,6 +7,8 @@
 
 #ifdef CONFIG_QCSCHED
 
+#include "qemu/qcsched/constant.h"
+
 // The maximum size of a scheduling window is (the number of hardware
 // breakpoints - 1 (dedicated for escaping the trampoline).
 #define SCHEDPOINT_WINDOW_SIZE 3
@@ -53,6 +55,12 @@ bool qcsched_window_consecutive_schedpoint(CPUState *cpu);
 void forward_focus(CPUState *cpu, int step);
 #define hand_over_baton(cpu) forward_focus(cpu, 1)
 
+void qcsched_window_leave_footprint(CPUState *cpu,
+                                    enum qcschedpoint_footprint footprint);
+void qcsched_window_leave_footprint_at(CPUState *cpu,
+                                       enum qcschedpoint_footprint footprint,
+                                       int order);
+
 struct qcsched_entry *lookup_entry_by_order(CPUState *cpu, int from);
 struct qcsched_entry *lookup_entry_by_address(CPUState *cpu, target_ulong inst);
 
@@ -70,6 +78,15 @@ void qcsched_window_sync(CPUState *) {}
 bool qcsched_window_hit_stale_schedpoint(CPUState *) {}
 bool qcsched_window_lock_contending(CPUState *) {}
 bool qcsched_window_consecutive_schedpoint(CPUState *cpu) {}
+void qcsched_window_leave_footprint(CPUState *cpu,
+                                    enum qcschedpoint_footprint footprint)
+{
+}
+void qcsched_window_leave_footprint_at(CPUState *cpu,
+                                       enum qcschedpoint_footprint footprint,
+                                       int order)
+{
+}
 struct qcsched_entry *lookup_entry_by_order(CPUState *, int) {}
 struct qcsched_entry *lookup_entry_by_address(CPUState *, target_ulong) {}
 

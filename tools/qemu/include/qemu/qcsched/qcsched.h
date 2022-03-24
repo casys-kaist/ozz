@@ -6,6 +6,7 @@
 #include "cpu.h"
 #include "exec/gdbstub.h"
 
+#include "qemu/qcsched/constant.h"
 #include "qemu/qcsched/state.h"
 #include "qemu/qcsched/vmi.h"
 #include "qemu/qcsched/window.h"
@@ -13,12 +14,12 @@
 struct qcschedpoint {
     target_ulong addr;
     int order;
+    enum qcschedpoint_footprint footprint;
 };
 
 struct qcsched_breakpoint {
     struct qcschedpoint *schedpoint;
     bool installed;
-    bool suspended;
 };
 
 struct qcsched_entry {

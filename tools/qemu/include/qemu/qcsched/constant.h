@@ -13,4 +13,11 @@
 
 #define TRAMPOLINE_ESCAPE_MAGIC 0x75da1791
 
+enum qcschedpoint_footprint {
+    footprint_preserved = 0,
+    footprint_missed,
+    footprint_hit,
+    footprint_dropped,
+};
+
 #endif /* __QCSCHED_CONSTANT_H */
