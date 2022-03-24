@@ -235,6 +235,7 @@ qcsched_window_close_window(CPUState *cpu,
 {
     int order;
     struct qcsched_entry *entry;
+    DRPRINTF(cpu, "Closing the window\n");
     for (order = window->from; order < sched.total; order++) {
         entry = lookup_entry_by_order(cpu, order);
         if (entry == NULL)
@@ -289,7 +290,8 @@ void qcsched_window_prune_missed_schedpoint(CPUState *cpu)
 
         window0 = &sched.schedpoint_window[entry->cpu];
 
-        qcsched_window_leave_footprint(cpu, footprint_missed);
+        qcsched_window_leave_footprint_at(cpu, footprint_missed,
+                                          entry->schedpoint.order);
         qcsched_window_shrink_entry(cpu, window0, entry);
     }
 
@@ -445,7 +447,10 @@ void qcsched_window_leave_footprint_at(CPUState *cpu,
     // exactly at order
     struct qcsched_entry *entry;
 
-    ASSERT(order >= sched.total, "wrong order");
+    if (order >= sched.total)
+        // This is possible for example one clears breakpoints and the
+        // other deacitavtes late.
+        return;
 
     entry = &sched.entries[order];
     if (entry->cpu != cpu->cpu_index)
@@ -453,7 +458,9 @@ void qcsched_window_leave_footprint_at(CPUState *cpu,
 
     if (entry->schedpoint.footprint != footprint_preserved)
         DRPRINTF(cpu, "[WARN] footprint is already left\n");
-
+#ifdef _DEBUG_VERBOSE
+    DRPRINTF(cpu, "Leave footprint %d at an entry #%d\n", footprint, order);
+#endif
     entry->schedpoint.footprint = footprint;
 }
 

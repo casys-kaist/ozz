@@ -277,11 +277,12 @@ static target_ulong qcsched_deactivate_breakpoint(CPUState *cpu)
     return 0;
 }
 
-static target_ulong
-qcsched_footprint_breakpoint(CPUState *cpu, target_ulong cnt, target_ulong data)
+static target_ulong qcsched_footprint_breakpoint(CPUState *cpu,
+                                                 target_ulong cnt_uptr,
+                                                 target_ulong data_uptr)
 {
     struct qcsched_entry *entry;
-    target_ulong footprintul;
+    target_ulong footprintul, cntul;
     int i, idx;
 
     DRPRINTF(cpu, "%s\n", __func__);
@@ -289,16 +290,25 @@ qcsched_footprint_breakpoint(CPUState *cpu, target_ulong cnt, target_ulong data)
     if (!qcsched_check_cpu_state(cpu, qcsched_cpu_deactivated))
         return -EINVAL;
 
-    for (i = 0, idx = 0; i < sched.total; i++, idx += 8) {
+    cntul = 0;
+    for (i = 0, idx = 0; i < sched.total; i++) {
         entry = &sched.entries[i];
         if (entry->cpu != cpu->cpu_index)
             continue;
         footprintul = (target_ulong)entry->schedpoint.footprint;
-        ASSERT(!cpu_memory_rw_debug(cpu, data + idx, &footprintul, 8, 1),
+#ifdef _DEBUG_VERBOSE
+        DRPRINTF(cpu, "footprint at %d: %lu\n", i, footprintul);
+#endif
+        ASSERT(!cpu_memory_rw_debug(cpu, data_uptr + idx, &footprintul, 8, 1),
                "Can't write order");
+        idx += 8;
+        cntul++;
     }
 
-    ASSERT(!cpu_memory_rw_debug(cpu, cnt, &sched.total, 8, 1),
+#ifdef _DEBUG_VERBOSE
+    DRPRINTF(cpu, "local entries %lu\n", cntul);
+#endif
+    ASSERT(!cpu_memory_rw_debug(cpu, cnt_uptr, &cntul, 8, 1),
            "Can't write unstable count");
 
     return 0;
