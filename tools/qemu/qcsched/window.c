@@ -197,7 +197,7 @@ qcsched_window_shrink_entry(CPUState *cpu,
 
     if (window->from > window->until) {
         // NOTE: This can be possible, for example, if cpu0 does not
-        // installed breakpoints yet, and cpu detects passed
+        // installed breakpoints yet, and cpu detects missed
         // schedpoint.
         next = lookup_entry_by_order(cpu0, window->from + 1);
         if (next != NULL)
@@ -239,15 +239,17 @@ qcsched_window_close_window(CPUState *cpu,
         entry = lookup_entry_by_order(cpu, order);
         if (entry == NULL)
             continue;
-        if (entry->breakpoint.installed)
+        if (entry->breakpoint.installed) {
+            qcsched_window_leave_footprint_at(cpu, footprint_missed, order);
             qcsched_window_shrink_entry(cpu, window, entry);
+        }
     }
     window->from = window->until = END_OF_SCHEDPOINT_WINDOW;
     ASSERT(window->activated == 0,
            "window still contains activated entries after closing");
 }
 
-void qcsched_window_prune_passed_schedpoint(CPUState *cpu)
+void qcsched_window_prune_missed_schedpoint(CPUState *cpu)
 {
     struct qcsched_schedpoint_window *window, *window0;
     struct qcsched_entry *hit, *legit, *entry;
@@ -450,7 +452,7 @@ void qcsched_window_leave_footprint_at(CPUState *cpu,
         return;
 
     if (entry->schedpoint.footprint != footprint_preserved)
-        DRPRINTF(cpu, "[WARN] footprint is already made\n");
+        DRPRINTF(cpu, "[WARN] footprint is already left\n");
 
     entry->schedpoint.footprint = footprint;
 }

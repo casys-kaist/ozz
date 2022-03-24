@@ -208,8 +208,8 @@ static void __handle_breakpoint_schedpoint(CPUState *cpu)
         return;
     }
 
-    // Prune out passed schedpoints first
-    qcsched_window_prune_passed_schedpoint(cpu);
+    // Prune out missed schedpoints first
+    qcsched_window_prune_missed_schedpoint(cpu);
     // Leave the footprint before we shrink the window
     qcsched_window_leave_footprint(cpu, footprint_hit);
     // Shrink the schedpoint window

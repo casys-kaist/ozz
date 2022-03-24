@@ -14,10 +14,14 @@
 #define TRAMPOLINE_ESCAPE_MAGIC 0x75da1791
 
 enum qcschedpoint_footprint {
+    // Not yet handled
     footprint_preserved = 0,
+    // The schedpoint was missed. Should be removed from the scheudle
     footprint_missed,
-    footprint_hit,
+    // The schedpoint was dropped. Should try again.
     footprint_dropped,
+    // The schedpoint is hit.
+    footprint_hit,
 };
 
 #endif /* __QCSCHED_CONSTANT_H */

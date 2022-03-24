@@ -43,7 +43,7 @@ void qcsched_window_shrink_window_n(CPUState *, int);
     qcsched_window_expand_window_n(cpu, SCHEDPOINT_WINDOW_SIZE)
 #define qcsched_window_shrink_window(cpu) qcsched_window_shrink_window_n(cpu, 1)
 
-void qcsched_window_prune_passed_schedpoint(CPUState *);
+void qcsched_window_prune_missed_schedpoint(CPUState *);
 void qcsched_window_cleanup_left_schedpoint(CPUState *);
 
 void qcsched_window_sync(CPUState *);
@@ -70,7 +70,7 @@ void qcsched_window_expand_window_n(CPUState *, int) {}
 void qcsched_window_shrink_window_n(CPUState *, int) {}
 void qcsched_window_expand_window(CPUState *) {}
 void qcsched_window_shrink_window(CPUState *) {}
-void qcsched_window_prune_passed_schedpoint(CPUState *) {}
+void qcsched_window_prune_missed_schedpoint(CPUState *) {}
 void qcsched_window_cleanup_left_schedpoint(CPUState *) {}
 void forward_focus(CPUState *cpu, int step) {}
 void hand_over_baton(CPUState *cpu) {}
