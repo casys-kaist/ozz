@@ -124,8 +124,9 @@ static target_ulong qcsched_prepare(CPUState *cpu, unsigned int nr_bps,
     return 0;
 }
 
-static target_ulong qcsched_install_breakpoint(CPUState *cpu, target_ulong addr,
-                                               int order)
+static target_ulong
+qcsched_install_breakpoint(CPUState *cpu, target_ulong addr, int order,
+                           enum qcschedpoint_footprint footprint)
 {
     struct qcsched_entry *entry;
     struct qcsched_schedpoint_window *window;
@@ -150,7 +151,13 @@ static target_ulong qcsched_install_breakpoint(CPUState *cpu, target_ulong addr,
     if (qcsched_entry_used(entry))
         return -EBUSY;
 
-    entry->schedpoint = (struct qcschedpoint){.addr = addr, .order = order};
+    if (footprint != 1)
+        // We will skip entries with footprint 1. All others are
+        // benign.
+        footprint = 0;
+
+    entry->schedpoint = (struct qcschedpoint){
+        .addr = addr, .order = order, .footprint = footprint};
     entry->cpu = cpu->cpu_index;
     qcsched_vmi_task(cpu, &entry->t);
 
@@ -163,11 +170,11 @@ static target_ulong qcsched_install_breakpoint(CPUState *cpu, target_ulong addr,
     return 0;
 }
 
-static void __do_activate_breakpoint(CPUState *cpu)
+static void do_activate_breakpoint(CPUState *cpu)
 {
+    struct qcsched_entry *entry;
     struct qcsched_schedpoint_window *window;
-    int err;
-    int i;
+    int err, i;
     bool need_hook = false;
 
     // We don't install scheduling points on the master CPU
@@ -180,7 +187,8 @@ static void __do_activate_breakpoint(CPUState *cpu)
     // count the number of scheduling points that will be installed on
     // this CPU.
     for (i = 0; i < sched.total; i++) {
-        if (sched.entries[i].cpu != cpu->cpu_index)
+        entry = &sched.entries[i];
+        if (entry->cpu != cpu->cpu_index)
             continue;
         need_hook = true;
         window->total++;
@@ -218,7 +226,7 @@ static target_ulong qcsched_activate_breakpoint(CPUState *cpu)
 
     // At this point, we assume all CPUs are ready and all schedules
     // are sanitized.
-    __do_activate_breakpoint(cpu);
+    do_activate_breakpoint(cpu);
 
     if (!sched.activated) {
         sched.activated = true;
@@ -343,10 +351,11 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
 {
     __u64 *args = run->hypercall.args;
     __u64 cmd = args[0];
+    target_ulong ret = 0;
     int order;
     unsigned int nr_bps, nr_cpus;
     target_ulong addr, subcmd, misc;
-    target_ulong ret = 0;
+    enum qcschedpoint_footprint footprint;
 
     qemu_mutex_lock_iothread();
     switch (cmd) {
@@ -361,7 +370,8 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
     case HCALL_INSTALL_BP:
         addr = args[1];
         order = args[2];
-        ret = qcsched_install_breakpoint(cpu, addr, order);
+        footprint = args[3];
+        ret = qcsched_install_breakpoint(cpu, addr, order, footprint);
         break;
     case HCALL_ACTIVATE_BP:
         ret = qcsched_activate_breakpoint(cpu);
