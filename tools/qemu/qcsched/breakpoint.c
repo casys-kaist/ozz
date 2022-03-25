@@ -168,7 +168,6 @@ static void __handle_breakpoint_trampoline(CPUState *cpu)
 void qcsched_yield_turn(CPUState *cpu)
 {
     // Hand over the baton to the next task
-    // TODO: The logic of hand_over_baton is fragile
     hand_over_baton(cpu);
     // and then kidnap the executing task
     kidnap_task(cpu);

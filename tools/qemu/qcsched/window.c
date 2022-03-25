@@ -17,11 +17,12 @@ struct qcsched_entry *lookup_entry_by_order(CPUState *cpu, int from)
 {
     if (from == END_OF_SCHEDPOINT_WINDOW)
         return NULL;
-    if (cpu == NULL && from < sched.total)
-        return &sched.entries[from];
     for (int i = from; i < sched.total; i++) {
         struct qcsched_entry *entry = &sched.entries[i];
-        if (entry->cpu != cpu->cpu_index)
+        if (cpu && entry->cpu != cpu->cpu_index)
+            continue;
+        if (entry->schedpoint.footprint == footprint_missed)
+            // Don't touch entries installed with footprint_missed
             continue;
         return entry;
     }
@@ -45,6 +46,16 @@ struct qcsched_entry *lookup_entry_by_address(CPUState *cpu, target_ulong inst)
         return entry;
     }
     return NULL;
+}
+
+static int next_valid_order(void)
+{
+    struct qcsched_entry *entry =
+        lookup_entry_by_order(NULL, sched.current + 1);
+    if (entry == NULL)
+        return sched.total;
+    else
+        return entry->schedpoint.order;
 }
 
 static void
@@ -330,7 +341,7 @@ void qcsched_window_cleanup_left_schedpoint(CPUState *cpu)
 void qcsched_window_sync(CPUState *cpu)
 
 {
-    int i, left_behind;
+    int left_behind;
     struct qcsched_entry *entry;
     struct qcsched_schedpoint_window *window;
 
@@ -343,18 +354,11 @@ void qcsched_window_sync(CPUState *cpu)
     // window is stale. Let's synchronize the window.
 
     left_behind = window->from;
-    for (i = sched.current; i < sched.total; i++) {
-        entry = &sched.entries[i];
-        if (entry->cpu == cpu->cpu_index) {
-            window->from = entry->schedpoint.order;
-            break;
-        }
-    }
-
-    if (i == sched.total)
-        // We don't have an entry anymore. Move to the end of the
-        // schedpoint window.
+    entry = lookup_entry_by_order(cpu, sched.current);
+    if (entry == NULL)
         window->from = END_OF_SCHEDPOINT_WINDOW;
+    else
+        window->from = entry->schedpoint.order;
 
     if (window->until < window->from)
         window->until = window->from;
@@ -379,9 +383,25 @@ bool qcsched_window_hit_stale_schedpoint(CPUState *cpu)
 
 void forward_focus(CPUState *cpu, int step)
 {
-    sched.current = sched.current + step;
-    DRPRINTF(cpu, "Next scheduling point: %d, %lx\n", sched.current,
-             sched.entries[sched.current].schedpoint.addr);
+    int current = sched.current + step;
+    enum qcschedpoint_footprint footprint =
+        sched.entries[current].schedpoint.footprint;
+
+    if (footprint)
+        DRPRINTF(
+            cpu,
+            "[WARN] moving the focus to an invalid entry: %d (footprint %d)",
+            current, footprint);
+    sched.current = current;
+
+    DRPRINTF(cpu, "Next scheduling point: %d, %lx\n", current,
+             sched.entries[current].schedpoint.addr);
+}
+
+void hand_over_baton(CPUState *cpu)
+{
+    int next_order = next_valid_order();
+    forward_focus(cpu, next_order - sched.current);
 }
 
 bool qcsched_window_lock_contending(CPUState *cpu)
@@ -425,7 +445,7 @@ bool qcsched_window_lock_contending(CPUState *cpu)
 bool qcsched_window_consecutive_schedpoint(CPUState *cpu)
 {
     struct qcsched_entry *entry;
-    int next_order = sched.current + 1;
+    int next_order = next_valid_order();
 
     if (next_order == sched.total)
         // We reach the end of the schedule window

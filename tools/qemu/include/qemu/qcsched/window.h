@@ -53,7 +53,7 @@ bool qcsched_window_lock_contending(CPUState *);
 bool qcsched_window_consecutive_schedpoint(CPUState *cpu);
 
 void forward_focus(CPUState *cpu, int step);
-#define hand_over_baton(cpu) forward_focus(cpu, 1)
+void hand_over_baton(CPUState *cpu);
 
 void qcsched_window_leave_footprint(CPUState *cpu,
                                     enum qcschedpoint_footprint footprint);
