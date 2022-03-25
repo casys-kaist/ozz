@@ -92,12 +92,10 @@ func (p *Prog) MutateScheduleFromHint(rs rand.Source, hint []primitive.Segment) 
 	selected := orch.SelectHarmoniousKnots()
 
 	scheduler := scheduler.Scheduler{Knots: selected}
-	_, ok := scheduler.GenerateSchedPoints()
+	schedule, ok := scheduler.GenerateSchedPoints()
 	if !ok {
 		return false, hint
 	}
-	schedule := scheduler.SqueezeSchedPoints()
-
 	p.applySchedule(schedule)
 
 	return ok, orch.Segs
@@ -283,14 +281,10 @@ func (ctx *randScheduler) finalize() {
 }
 
 func shapeScheduleFromAccesses(p *Prog, schedule []primitive.Access) {
-	prev := ^uint64(0)
 	order := uint64(0)
 	sched := Schedule{}
 	calls := p.Contenders()
 	for _, acc := range schedule {
-		if acc.Thread == prev {
-			continue
-		}
 		thread := acc.Thread
 		var call *Call
 		for _, c := range calls {
@@ -306,7 +300,6 @@ func shapeScheduleFromAccesses(p *Prog, schedule []primitive.Access) {
 			addr:  0xffffffff00000000 | uint64(acc.Inst),
 			order: order,
 		})
-		prev = thread
 		order++
 	}
 	p.Schedule = sched
