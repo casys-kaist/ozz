@@ -316,6 +316,9 @@ static target_ulong qcsched_footprint_breakpoint(CPUState *cpu,
 
 static target_ulong qcsched_clear_breakpoint(CPUState *cpu)
 {
+    struct qcsched_entry *entry;
+    int i;
+
     DRPRINTF(cpu, "%s\n", __func__);
 
     if (sched.activated)
@@ -324,11 +327,12 @@ static target_ulong qcsched_clear_breakpoint(CPUState *cpu)
     if (!qcsched_cpu_transition(cpu, qcsched_cpu_deactivated, qcsched_cpu_idle))
         return -EINVAL;
 
-    if (sched.total == 0)
-        return 0;
-
-    sched.total = sched.current = 0;
-    memset(&sched.entries, 0, sizeof(struct qcsched_entry) * MAX_SCHEDPOINTS);
+    for (i = 0; i < sched.total; i++) {
+        entry = &sched.entries[i];
+        if (entry->cpu != cpu->cpu_index)
+            continue;
+        memset(entry, 0, sizeof(struct qcsched_entry));
+    }
     // Calling this hcall means the syscall has been finished. We can
     // remove all breakpoints on this CPU
     kvm_remove_all_breakpoints_cpu(cpu);
