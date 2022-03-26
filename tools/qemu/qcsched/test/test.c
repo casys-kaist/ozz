@@ -154,7 +154,7 @@ static void th_clear()
 
 static bool clear_schedpoint(int idx)
 {
-    bool ret = true;
+    unsigned long long ret = 0;
 #ifdef TEST_REPEAT
     struct schedpoint *sched = (idx == 1 ? sched1 : sched2);
 #endif
@@ -162,19 +162,18 @@ static bool clear_schedpoint(int idx)
 #if defined(FOOTPRINT_TEST) || defined(TEST_REPEAT)
     uint64_t count = 0;
     uint64_t arr[128];
-    hypercall(HCALL_FOOTPRINT_BP, (unsigned long)&count, (unsigned long)arr, 0);
+    hypercall(HCALL_FOOTPRINT_BP, (unsigned long)&count, (unsigned long)arr,
+              (unsigned long)&ret);
+    printf("retry: %llu\n", ret);
     for (int i = 0; i < count; i++) {
         printf("  %ld\n", arr[i]);
-#define FOOTPRINT_MISSED 1
-        if (arr[i] == FOOTPRINT_MISSED)
-            ret = false;
 #ifdef TEST_REPEAT
         sched[i].footprint = arr[i];
 #endif
     }
 #endif
     hypercall(HCALL_CLEAR_BP, 0, 0, 0);
-    return ret;
+    return !!ret;
 }
 
 static void *th1(void *dummy)
@@ -226,6 +225,7 @@ static void *th2(void *dummy)
     return NULL;
 }
 
+#ifdef TEST_REPEAT
 static void print_sched(int id, struct schedpoint *sched, int size)
 {
     printf("Sched %d\n", id);
@@ -233,6 +233,7 @@ static void print_sched(int id, struct schedpoint *sched, int size)
         printf("%llx  %d  %d\n", sched[i].addr, sched[i].order,
                sched[i].footprint);
 }
+#endif
 
 static void init()
 {
@@ -276,7 +277,7 @@ int main(void)
         pthread_join(pth1, &ret1);
         pthread_join(pth2, &ret2);
 
-        if ((bool)ret1 && (bool)ret2) {
+        if ((bool)!ret1 && (bool)!ret2) {
 #ifdef TEST_REPEAT
             break;
 #endif
