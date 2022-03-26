@@ -5,6 +5,7 @@
 #include <linux/kvm.h>
 #include <pthread.h>
 #include <sched.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +16,17 @@
 
 // TODO:
 
+enum qcschedpoint_footprint {
+    // Not yet handled
+    footprint_preserved = 0,
+    // The schedpoint was missed. Should be removed from the scheudle
+    footprint_missed,
+    // The schedpoint was dropped. Should try again.
+    footprint_dropped,
+    // The schedpoint is hit.
+    footprint_hit,
+};
+
 int predicted_fd = -1;
 int vm;
 
@@ -22,7 +34,7 @@ int vm;
 
 #define gettid() syscall(SYS_gettid)
 
-#ifdef SPINLOCK_TEST
+#ifdef TEST_KMEMCOV
 __thread int fd;
 __thread struct kmemcov_access *cover;
 #endif
@@ -57,12 +69,44 @@ static void set_affinity(int cpu)
 struct schedpoint {
     unsigned long long addr;
     int order;
+    enum qcschedpoint_footprint footprint;
+};
+
+struct schedpoint sched1[] = {
+#ifdef CVE20196974
+#include "schedpoint/cve-2019-6974-1.h"
+#endif
+#ifdef CVE20196974_MINIMAL
+#include "schedpoint/cve-2019-6974-minimal-1.h"
+#endif
+#if defined(SIMPLE_TEST) || defined(SPINLOCK_TEST)
+#include "schedpoint/simple-1.h"
+#endif
+#if defined(BYPASS_TEST) || defined(FOOTPRINT_TEST)
+#include "schedpoint/bypass-1.h"
+#endif
+};
+
+struct schedpoint sched2[] = {
+#ifdef CVE20196974
+#include "schedpoint/cve-2019-6974-2.h"
+#endif
+#ifdef CVE20196974_MINIMAL
+#include "schedpoint/cve-2019-6974-minimal-2.h"
+#endif
+#if defined(SIMPLE_TEST) || defined(SPINLOCK_TEST)
+#include "schedpoint/simple-2.h"
+#endif
+#if defined(BYPASS_TEST) || defined(FOOTPRINT_TEST)
+#include "schedpoint/bypass-2.h"
+#endif
 };
 
 static void install_schedpoint(struct schedpoint *sched, int size)
 {
     for (int i = 0; i < size; i++) {
-        hypercall(HCALL_INSTALL_BP, sched[i].addr, sched[i].order, 0);
+        hypercall(HCALL_INSTALL_BP, sched[i].addr, sched[i].order,
+                  sched[i].footprint);
     }
     unsigned long ret;
 #define EAGAIN 11
@@ -76,7 +120,7 @@ static void install_schedpoint(struct schedpoint *sched, int size)
 
 static void th_init(void)
 {
-#ifdef SPINLOCK_TEST
+#ifdef TEST_KMEMCOV
     fd = open("/sys/kernel/debug/kmemcov", O_RDWR);
     if (fd == -1)
         perror("open"), exit(1);
@@ -97,7 +141,7 @@ static void th_init(void)
 
 static void th_clear()
 {
-#ifdef SPINLOCK_TEST
+#ifdef TEST_KMEMCOV
     if (ioctl(fd, KMEMCOV_DISABLE, 0))
         perror("ioctl"), exit(1);
     /* Free resources. */
@@ -108,39 +152,37 @@ static void th_clear()
 #endif
 }
 
-static void clear_schedpoint(void)
+static bool clear_schedpoint(int idx)
 {
+    bool ret = true;
+#ifdef TEST_REPEAT
+    struct schedpoint *sched = (idx == 1 ? sched1 : sched2);
+#endif
     hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
-#ifdef FOOTPRINT_TEST
+#if defined(FOOTPRINT_TEST) || defined(TEST_REPEAT)
     uint64_t count = 0;
     uint64_t arr[128];
     hypercall(HCALL_FOOTPRINT_BP, (unsigned long)&count, (unsigned long)arr, 0);
-    printf("Schedpoint count: %lu\n", count);
-    for (int i = 0; i < count; i++)
+    for (int i = 0; i < count; i++) {
         printf("  %ld\n", arr[i]);
+#define FOOTPRINT_MISSED 1
+        if (arr[i] == FOOTPRINT_MISSED)
+            ret = false;
+#ifdef TEST_REPEAT
+        sched[i].footprint = arr[i];
+#endif
+    }
 #endif
     hypercall(HCALL_CLEAR_BP, 0, 0, 0);
+    return ret;
 }
 
 static void *th1(void *dummy)
 {
+    bool ret;
     set_affinity(1);
     th_init();
-    struct schedpoint sched[] = {
-#ifdef CVE20196974
-#include "schedpoint/cve-2019-6974-1.h"
-#endif
-#ifdef CVE20196974_MINIMAL
-#include "schedpoint/cve-2019-6974-minimal-1.h"
-#endif
-#if defined(SIMPLE_TEST) || defined(SPINLOCK_TEST)
-#include "schedpoint/simple-1.h"
-#endif
-#if defined(BYPASS_TEST) || defined(FOOTPRINT_TEST)
-#include "schedpoint/bypass-1.h"
-#endif
-    };
-    install_schedpoint(sched, sizeof(sched) / sizeof(sched[0]));
+    install_schedpoint(sched1, sizeof(sched1) / sizeof(sched1[0]));
 #if defined(CVE20196974) || defined(CVE20196974_MINIMAL)
     struct kvm_create_device cd = {.type = KVM_DEV_TYPE_VFIO,
                                    .fd = -1, // outparm
@@ -156,31 +198,17 @@ static void *th1(void *dummy)
 #define SYS_qcshed_simple_write 509
     syscall(SYS_qcshed_simple_write, typ);
 #endif
-    clear_schedpoint();
+    ret = clear_schedpoint(1);
     th_clear();
-    return NULL;
+    return (void *)ret;
 }
 
 static void *th2(void *dummy)
 {
     set_affinity(2);
     th_init();
-    struct schedpoint sched[] = {
-#ifdef CVE20196974
-#include "schedpoint/cve-2019-6974-2.h"
-#endif
-#ifdef CVE20196974_MINIMAL
-#include "schedpoint/cve-2019-6974-minimal-2.h"
-#endif
-#if defined(SIMPLE_TEST) || defined(SPINLOCK_TEST)
-#include "schedpoint/simple-2.h"
-#endif
-#if defined(BYPASS_TEST) || defined(FOOTPRINT_TEST)
-#include "schedpoint/bypass-2.h"
-#endif
-    };
 
-    install_schedpoint(sched, sizeof(sched) / sizeof(sched[0]));
+    install_schedpoint(sched2, sizeof(sched2) / sizeof(sched2[0]));
 #if defined(CVE20196974) || defined(CVE20196974_MINIMAL)
     close(predicted_fd);
 #endif
@@ -193,13 +221,25 @@ static void *th2(void *dummy)
 #define SYS_qcshed_simple_read 510
     syscall(SYS_qcshed_simple_read, typ);
 #endif
-    clear_schedpoint();
+    clear_schedpoint(2);
     th_clear();
     return NULL;
 }
 
+static void print_sched(int id, struct schedpoint *sched, int size)
+{
+    printf("Sched %d\n", id);
+    for (int i = 0; i < size; i++)
+        printf("%llx  %d  %d\n", sched[i].addr, sched[i].order,
+               sched[i].footprint);
+}
+
 static void init()
 {
+#ifdef TEST_REPEAT
+    print_sched(1, sched1, sizeof(sched1) / sizeof(sched1[0]));
+    print_sched(2, sched2, sizeof(sched2) / sizeof(sched2[0]));
+#endif
 #if defined(CVE20196974) || defined(CVE20196974_MINIMAL)
     predicted_fd = -1;
     int kvm = open("/dev/kvm", O_RDWR);
@@ -213,39 +253,38 @@ static void init()
 #endif
 }
 
-struct schedpoint total[] = {
-#ifdef CVE20196974
-#include "schedpoint/cve-2019-6974-1.h"
-#include "schedpoint/cve-2019-6974-2.h"
-#endif
-#ifdef CVE20196974_MINIMAL
-#include "schedpoint/cve-2019-6974-minimal-1.h"
-#include "schedpoint/cve-2019-6974-minimal-2.h"
-#endif
-#if defined(SIMPLE_TEST) || defined(BYPASS_TEST) || defined(SPINLOCK_TEST) ||  \
-    defined(FOOTPRINT_TEST)
-#include "schedpoint/simple-1.h"
-#include "schedpoint/simple-2.h"
-#endif
-};
-
 int main(void)
 {
     pthread_t pth1, pth2;
     int nr_bps = -1;
+    void *ret1, *ret2;
 
-    set_affinity(0);
-    nr_bps = sizeof(total) / sizeof(total[0]);
-    hypercall(HCALL_RESET, 0, 0, 0);
-    hypercall(HCALL_PREPARE, nr_bps, 2, 0);
-    hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
+#ifdef TEST_REPEAT
+    for (;;) {
+#endif
+        set_affinity(0);
+        nr_bps = (sizeof(sched1) / sizeof(sched1[0])) +
+                 (sizeof(sched2) / sizeof(sched2[0]));
+        hypercall(HCALL_RESET, 0, 0, 0);
+        hypercall(HCALL_PREPARE, nr_bps, 2, 0);
+        hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
 
-    init();
+        init();
 
-    pthread_create(&pth1, NULL, th1, NULL);
-    pthread_create(&pth2, NULL, th2, NULL);
-    pthread_join(pth1, NULL);
-    pthread_join(pth2, NULL);
+        pthread_create(&pth1, NULL, th1, NULL);
+        pthread_create(&pth2, NULL, th2, NULL);
+        pthread_join(pth1, &ret1);
+        pthread_join(pth2, &ret2);
 
-    hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
+        if ((bool)ret1 && (bool)ret2) {
+#ifdef TEST_REPEAT
+            break;
+#endif
+        }
+
+        hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
+#ifdef TEST_REPEAT
+        getchar();
+    }
+#endif
 }
