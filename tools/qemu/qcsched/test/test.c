@@ -118,7 +118,7 @@ static void install_schedpoint(struct schedpoint *sched, int size)
     }
 }
 
-static void th_init(void)
+static void th_init(void *gop)
 {
 #ifdef TEST_KMEMCOV
     fd = open("/sys/kernel/debug/kmemcov", O_RDWR);
@@ -133,6 +133,10 @@ static void th_init(void)
         PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if ((void *)cover == MAP_FAILED)
         perror("mmap"), exit(1);
+#endif
+    while (!*(int *)gop)
+        ;
+#ifdef TEST_KMEMCOV
     /* Enable coverage collection on the current thread. */
     if (ioctl(fd, KMEMCOV_ENABLE, 0))
         perror("ioctl"), exit(1);
@@ -176,11 +180,11 @@ static bool clear_schedpoint(int idx)
     return !!ret;
 }
 
-static void *th1(void *dummy)
+static void *th1(void *gop)
 {
     bool ret;
     set_affinity(1);
-    th_init();
+    th_init(gop);
     install_schedpoint(sched1, sizeof(sched1) / sizeof(sched1[0]));
 #if defined(CVE20196974) || defined(CVE20196974_MINIMAL)
     struct kvm_create_device cd = {.type = KVM_DEV_TYPE_VFIO,
@@ -202,10 +206,11 @@ static void *th1(void *dummy)
     return (void *)ret;
 }
 
-static void *th2(void *dummy)
+static void *th2(void *gop)
 {
+    bool ret;
     set_affinity(2);
-    th_init();
+    th_init(gop);
 
     install_schedpoint(sched2, sizeof(sched2) / sizeof(sched2[0]));
 #if defined(CVE20196974) || defined(CVE20196974_MINIMAL)
@@ -220,9 +225,9 @@ static void *th2(void *dummy)
 #define SYS_qcshed_simple_read 510
     syscall(SYS_qcshed_simple_read, typ);
 #endif
-    clear_schedpoint(2);
+    ret = clear_schedpoint(2);
     th_clear();
-    return NULL;
+    return (void *)ret;
 }
 
 #ifdef TEST_REPEAT
@@ -263,6 +268,7 @@ int main(void)
 #ifdef TEST_REPEAT
     for (;;) {
 #endif
+        int go = false;
         set_affinity(0);
         nr_bps = (sizeof(sched1) / sizeof(sched1[0])) +
                  (sizeof(sched2) / sizeof(sched2[0]));
@@ -270,18 +276,20 @@ int main(void)
         hypercall(HCALL_PREPARE, nr_bps, 2, 0);
         hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
 
-        init();
+        pthread_create(&pth1, NULL, th1, &go);
+        pthread_create(&pth2, NULL, th2, &go);
 
-        pthread_create(&pth1, NULL, th1, NULL);
-        pthread_create(&pth2, NULL, th2, NULL);
+        usleep(300 * 1000);
+        init();
+        go = true;
+
         pthread_join(pth1, &ret1);
         pthread_join(pth2, &ret2);
 
-        if ((bool)!ret1 && (bool)!ret2) {
 #ifdef TEST_REPEAT
+        if ((bool)!ret1 && (bool)!ret2)
             break;
 #endif
-        }
 
         hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
 #ifdef TEST_REPEAT
