@@ -19,6 +19,9 @@
 // of hardware breakpoints, we window the scheduling points.
 struct qcsched_schedpoint_window {
     int total;
+    // This indicates the number of missed schedpoints of "previous"
+    // run.
+    int missed_schedpoint;
     int activated;
     // from is the order of a breakpoint that is installed and will be
     // hit first. until is the order of a next breakpoint of the last

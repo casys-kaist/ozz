@@ -56,7 +56,9 @@ static void qcsched_reset_window(CPUState *cpu)
     struct qcsched_schedpoint_window *window =
         &sched.schedpoint_window[cpu->cpu_index];
 
-    window->total = window->activated = 0;
+    window->total = 0;
+    window->missed_schedpoint = 0;
+    window->activated = 0;
     window->from = window->until = END_OF_SCHEDPOINT_WINDOW;
     window->left_behind = END_OF_SCHEDPOINT_WINDOW;
     window->cpu = cpu->cpu_index;
@@ -191,8 +193,10 @@ static void do_activate_breakpoint(CPUState *cpu)
         entry = &sched.entries[i];
         if (entry->cpu != cpu->cpu_index)
             continue;
-        need_hook = true;
         window->total++;
+        if (entry->schedpoint.footprint == footprint_missed)
+            window->missed_schedpoint++;
+        need_hook = true;
     }
 
     if (!need_hook)
@@ -288,11 +292,13 @@ static target_ulong qcsched_deactivate_breakpoint(CPUState *cpu)
 
 static target_ulong qcsched_footprint_breakpoint(CPUState *cpu,
                                                  target_ulong cnt_uptr,
-                                                 target_ulong data_uptr)
+                                                 target_ulong data_uptr,
+                                                 target_ulong retry_uptr)
 {
+    struct qcsched_schedpoint_window *window;
     struct qcsched_entry *entry;
-    target_ulong footprintul, cntul;
-    int i, idx;
+    target_ulong footprintul, cntul, retryul;
+    int i, idx, missed_schedpoint;
 
     DRPRINTF(cpu, "%s\n", __func__);
 
@@ -300,6 +306,7 @@ static target_ulong qcsched_footprint_breakpoint(CPUState *cpu,
         return -EINVAL;
 
     cntul = 0;
+    missed_schedpoint = 0;
     for (i = 0, idx = 0; i < sched.total; i++) {
         entry = &sched.entries[i];
         if (entry->cpu != cpu->cpu_index)
@@ -308,18 +315,27 @@ static target_ulong qcsched_footprint_breakpoint(CPUState *cpu,
 #ifdef _DEBUG_VERBOSE
         DRPRINTF(cpu, "footprint at %d: %lu\n", i, footprintul);
 #endif
-        ASSERT(!cpu_memory_rw_debug(cpu, data_uptr + idx, &footprintul, 8, 1),
+        if (footprintul == footprint_missed)
+            missed_schedpoint++;
+        ASSERT(!cpu_memory_rw_debug(cpu, data_uptr + idx, &footprintul,
+                                    sizeof(target_ulong), 1),
                "Can't write order");
         idx += 8;
         cntul++;
     }
 
+    window = &sched.schedpoint_window[cpu->cpu_index];
+    retryul = missed_schedpoint != window->missed_schedpoint;
+
 #ifdef _DEBUG_VERBOSE
     DRPRINTF(cpu, "local entries %lu\n", cntul);
 #endif
-    ASSERT(!cpu_memory_rw_debug(cpu, cnt_uptr, &cntul, 8, 1),
-           "Can't write unstable count");
-
+    ASSERT(!cpu_memory_rw_debug(cpu, cnt_uptr, &cntul, sizeof(target_ulong), 1),
+           "Can't write count");
+    DRPRINTF(cpu, "Retry: %lu\n", retryul);
+    ASSERT(!cpu_memory_rw_debug(cpu, retry_uptr, &retryul, sizeof(target_ulong),
+                                1),
+           "Can't write retry");
     return 0;
 }
 
@@ -356,6 +372,7 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
     int order;
     unsigned int nr_bps, nr_cpus;
     target_ulong addr, subcmd, misc;
+    target_ulong data, retry;
     enum qcschedpoint_footprint footprint;
 
     qemu_mutex_lock_iothread();
@@ -382,8 +399,9 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
         break;
     case HCALL_FOOTPRINT_BP:
         addr = args[1];
-        misc = args[2];
-        ret = qcsched_footprint_breakpoint(cpu, addr, misc);
+        data = args[2];
+        retry = args[3];
+        ret = qcsched_footprint_breakpoint(cpu, addr, data, retry);
         break;
     case HCALL_CLEAR_BP:
         ret = qcsched_clear_breakpoint(cpu);
