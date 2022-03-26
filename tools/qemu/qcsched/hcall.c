@@ -133,7 +133,8 @@ qcsched_install_breakpoint(CPUState *cpu, target_ulong addr, int order,
 
 #ifdef _DEBUG_VERBOSE
     DRPRINTF(cpu, "%s\n", __func__);
-    DRPRINTF(cpu, "addr: %lx, order: %d\n", addr, order);
+    DRPRINTF(cpu, "addr: %lx, order: %d, footprint: %d\n", addr, order,
+             footprint);
 #endif
 
     if (!sched.total)

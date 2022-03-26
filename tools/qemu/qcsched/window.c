@@ -79,6 +79,12 @@ qcsched_window_activate_entry(CPUState *cpu,
         return;
     }
 
+    if (entry->schedpoint.footprint != footprint_preserved)
+        DRPRINTF(cpu,
+                 "[WARN] the footprint of the entry at %lx is not preserved. "
+                 "Footprint: %d\n",
+                 entry->schedpoint.addr, entry->schedpoint.footprint);
+
     DRPRINTF(cpu, "Installing a breakpoint at %lx on cpu#%d\n",
              entry->schedpoint.addr, entry->cpu);
 
