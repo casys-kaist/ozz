@@ -48,10 +48,9 @@ struct qcsched_entry *lookup_entry_by_address(CPUState *cpu, target_ulong inst)
     return NULL;
 }
 
-static int next_valid_order(void)
+static int next_valid_order_of(CPUState *cpu, int order)
 {
-    struct qcsched_entry *entry =
-        lookup_entry_by_order(NULL, sched.current + 1);
+    struct qcsched_entry *entry = lookup_entry_by_order(NULL, order + 1);
     if (entry == NULL)
         return sched.total;
     else
@@ -400,9 +399,9 @@ void forward_focus(CPUState *cpu, int step)
              sched.entries[current].schedpoint.addr);
 }
 
-void hand_over_baton(CPUState *cpu)
+void hand_over_baton_from(CPUState *cpu, int order)
 {
-    int next_order = next_valid_order();
+    int next_order = next_valid_order_of(cpu, order);
     forward_focus(cpu, next_order - sched.current);
 }
 
@@ -444,10 +443,10 @@ bool qcsched_window_lock_contending(CPUState *cpu)
     return contending;
 }
 
-bool qcsched_window_consecutive_schedpoint(CPUState *cpu)
+bool qcsched_window_consecutive_schedpoint(CPUState *cpu, int current_order)
 {
     struct qcsched_entry *entry;
-    int next_order = next_valid_order();
+    int next_order = next_valid_order_of(cpu, current_order);
 
     if (next_order == sched.total)
         // We reach the end of the schedule window

@@ -49,6 +49,7 @@ static void qcsched_vmi_lock_acquire(CPUState *cpu, target_ulong lockdep_addr,
 {
     struct qcsched_vmi_lock_info *lock_info =
         &vmi_info.lock_info[cpu->cpu_index];
+    struct qcsched_schedpoint_window *window;
     int cnt = lock_info->count;
 
     // Allowed: activated
@@ -73,8 +74,9 @@ static void qcsched_vmi_lock_acquire(CPUState *cpu, target_ulong lockdep_addr,
         // This CPU is trying to acquire a lock and another CPU has
         // already acquired it. Let's yield a turn
         DRPRINTF(cpu, "Contending on a lock. Yield a turn.\n");
+        window = &sched.schedpoint_window[cpu->cpu_index];
         qcsched_commit_state(cpu, HCALL_SUCCESS);
-        qcsched_yield_turn(cpu);
+        qcsched_yield_turn_from(cpu, window->from);
     }
 }
 

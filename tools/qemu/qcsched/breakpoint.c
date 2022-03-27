@@ -165,10 +165,10 @@ static void __handle_breakpoint_trampoline(CPUState *cpu)
         resume_task(cpu);
 }
 
-void qcsched_yield_turn(CPUState *cpu)
+void qcsched_yield_turn_from(CPUState *cpu, int current_order)
 {
     // Hand over the baton to the next task
-    hand_over_baton(cpu);
+    hand_over_baton_from(cpu, current_order);
     // and then kidnap the executing task
     kidnap_task(cpu);
     // And then wake others up
@@ -194,6 +194,9 @@ void qcsched_keep_this_cpu_going(CPUState *cpu)
 
 static void __handle_breakpoint_schedpoint(CPUState *cpu)
 {
+    struct qcsched_entry *current_entry;
+    int current_order;
+
     DRPRINTF(cpu, "%s (%llx)\n", __func__, RIP(cpu));
 
     // This function handles a scheduling point regardless of that it
@@ -207,6 +210,9 @@ static void __handle_breakpoint_schedpoint(CPUState *cpu)
         return;
     }
 
+    current_entry = lookup_entry_by_address(cpu, cpu->regs.rip);
+    current_order = current_entry->schedpoint.order;
+
     // Prune out missed schedpoints first
     qcsched_window_prune_missed_schedpoint(cpu);
     // Leave the footprint before we shrink the window
@@ -219,14 +225,14 @@ static void __handle_breakpoint_schedpoint(CPUState *cpu)
     // current focus (i.e., not moved forward yet). Below function
     // calls should be aware of this.
     if (qcsched_window_lock_contending(cpu) ||
-        qcsched_window_consecutive_schedpoint(cpu)) {
+        qcsched_window_consecutive_schedpoint(cpu, current_order)) {
         // If the next scheduling point is not reachable because of
         // lock contention or installed on the same CPU, just keep
         // this CPU going
         qcsched_window_expand_window(cpu);
         qcsched_keep_this_cpu_going(cpu);
     } else {
-        qcsched_yield_turn(cpu);
+        qcsched_yield_turn_from(cpu, current_order);
     }
 }
 
