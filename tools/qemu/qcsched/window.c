@@ -117,6 +117,9 @@ qcsched_window_expand_window_1(CPUState *cpu,
         window->until = next->schedpoint.order;
     else
         window->until = END_OF_SCHEDPOINT_WINDOW;
+
+    DRPRINTF(cpu, "Window after expand: [%d, %d)\n", window->from,
+             window->until);
 }
 
 void qcsched_window_expand_window_n(CPUState *cpu, int n)
@@ -197,8 +200,8 @@ qcsched_window_shrink_entry(CPUState *cpu,
            "window (%d) and entry (%d) have a different CPU index", window->cpu,
            entry->cpu);
     ASSERT(entry->schedpoint.order == window->from,
-           "entry (%d) is not the first activated entry of the window (%d)",
-           entry->schedpoint.order, window->from);
+           "%d entry (%d) is not the first activated entry of the window (%d)",
+           cpu->cpu_index, entry->schedpoint.order, window->from);
 
     if (entry != NULL && entry->breakpoint.installed)
         qcsched_window_deactivate_entry(cpu, window, entry);
@@ -221,6 +224,9 @@ qcsched_window_shrink_entry(CPUState *cpu,
         else
             window->until = END_OF_SCHEDPOINT_WINDOW;
     }
+
+    DRPRINTF(cpu, "Window after shrink: [%d, %d)\n", window->from,
+             window->until);
 }
 
 static void
@@ -388,10 +394,10 @@ void forward_focus(CPUState *cpu, int step)
     enum qcschedpoint_footprint footprint =
         sched.entries[current].schedpoint.footprint;
 
-    if (footprint)
+    if (footprint == footprint_missed)
         DRPRINTF(
             cpu,
-            "[WARN] moving the focus to an invalid entry: %d (footprint %d)",
+            "[WARN] moving the focus to an invalid entry: %d (footprint %d)\n",
             current, footprint);
     sched.current = current;
 
