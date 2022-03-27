@@ -105,10 +105,16 @@ qcsched_window_expand_window_1(CPUState *cpu,
 {
     struct qcsched_entry *next,
         *entry = lookup_entry_by_order(cpu, window->until);
+    bool first_entry;
 
     if (!entry)
         // We are done with all breakpoints on this CPU
         return;
+
+    first_entry = schedpoint_window_empty(window);
+
+    if (first_entry)
+        window->from = entry->schedpoint.order;
 
     qcsched_window_activate_entry(cpu, window, entry);
 
