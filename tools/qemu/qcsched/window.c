@@ -271,7 +271,7 @@ void qcsched_window_prune_missed_schedpoint(CPUState *cpu)
 {
     struct qcsched_schedpoint_window *window, *window0;
     struct qcsched_entry *hit, *legit, *entry;
-    int order, missed;
+    int order;
 
     window = &sched.schedpoint_window[cpu->cpu_index];
 
@@ -294,10 +294,8 @@ void qcsched_window_prune_missed_schedpoint(CPUState *cpu)
         // We don't have missed schedpoints.
         return;
 
-    missed = hit->schedpoint.order - legit->schedpoint.order;
-    // missed should be positive because hit is not a stale schedpoint
-    // and legit is the first schedpoint in the window.
-    ASSERT(missed > 0, "missed is negative");
+    DRPRINTF(cpu, "missing schedpoints [%d, %d)\n", legit->schedpoint.order,
+             hit->schedpoint.order);
 
     // NOTE: hit will be deactivated later
     for (order = legit->schedpoint.order; order < hit->schedpoint.order;
@@ -311,8 +309,6 @@ void qcsched_window_prune_missed_schedpoint(CPUState *cpu)
                                           entry->schedpoint.order);
         qcsched_window_shrink_entry(cpu, window0, entry);
     }
-
-    forward_focus(cpu, missed);
 }
 
 void qcsched_window_cleanup_left_schedpoint(CPUState *cpu)
