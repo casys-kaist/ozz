@@ -244,9 +244,6 @@ static target_ulong qcsched_activate_breakpoint(CPUState *cpu)
 static target_ulong qcsched_deactivate_breakpoint(CPUState *cpu)
 {
     CPUState *cpu0;
-    enum qcschedpoint_footprint footprint;
-    struct qcsched_entry *entry;
-    int i;
 
     DRPRINTF(cpu, "%s\n", __func__);
 
@@ -256,17 +253,7 @@ static target_ulong qcsched_deactivate_breakpoint(CPUState *cpu)
 
     qcsched_set_cpu_state(cpu, qcsched_cpu_deactivated);
 
-    for (i = 0; i < sched.total; i++) {
-        entry = &sched.entries[i];
-        if (entry->cpu != cpu->cpu_index)
-            continue;
-        if (entry->schedpoint.footprint != footprint_preserved)
-            continue;
-        footprint = (entry->breakpoint.installed ? footprint_missed
-                                                 : footprint_dropped);
-        qcsched_window_leave_footprint_at(cpu, footprint,
-                                          entry->schedpoint.order);
-    }
+    qcsched_window_close_window(cpu);
 
     if (sched.activated) {
         // NOTE: two reasons for falsifying sched.activated here: 1)

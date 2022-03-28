@@ -206,8 +206,9 @@ qcsched_window_shrink_entry(CPUState *cpu,
            "window (%d) and entry (%d) have a different CPU index", window->cpu,
            entry->cpu);
     ASSERT(entry->schedpoint.order == window->from,
-           "%d entry (%d) is not the first activated entry of the window (%d)",
-           cpu->cpu_index, entry->schedpoint.order, window->from);
+           "%d %d entry (%d) is not the first activated entry of the window "
+           "(%d)",
+           cpu->cpu_index, entry->cpu, entry->schedpoint.order, window->from);
 
     if (entry != NULL && entry->breakpoint.installed)
         qcsched_window_deactivate_entry(cpu, window, entry);
@@ -257,25 +258,44 @@ void qcsched_window_shrink_window_n(CPUState *cpu, int n)
         qcsched_window_shrink_window_1(cpu, window);
 }
 
-static void
-qcsched_window_close_window(CPUState *cpu,
-                            struct qcsched_schedpoint_window *window)
+void qcsched_window_close_window(CPUState *cpu)
 {
     int order;
+    struct qcsched_schedpoint_window *window;
     struct qcsched_entry *entry;
+
     DRPRINTF(cpu, "Closing the window\n");
-    for (order = window->from; order < sched.total; order++) {
-        entry = lookup_entry_by_order(cpu, order);
+
+    window = &sched.schedpoint_window[cpu->cpu_index];
+
+    for (order = 0; order < sched.total; order++) {
+        entry = &sched.entries[order];
         if (entry == NULL)
             continue;
+
+        if (entry->cpu != cpu->cpu_index)
+            continue;
+
+        if (entry->schedpoint.footprint != footprint_preserved)
+            continue;
+
         if (entry->breakpoint.installed) {
             qcsched_window_leave_footprint_at(cpu, footprint_missed, order);
             qcsched_window_shrink_entry(cpu, window, entry);
+        } else {
+            qcsched_window_leave_footprint_at(cpu, footprint_dropped, order);
         }
     }
     window->from = window->until = END_OF_SCHEDPOINT_WINDOW;
+    window->total = 0;
     ASSERT(window->activated == 0,
            "window still contains activated entries after closing");
+}
+
+static bool
+qcsched_window_window_closed(struct qcsched_schedpoint_window *window)
+{
+    return window->total == 0;
 }
 
 void qcsched_window_prune_missed_schedpoint(CPUState *cpu)
@@ -295,7 +315,7 @@ void qcsched_window_prune_missed_schedpoint(CPUState *cpu)
         // END_OF_SCHEDPOINT_WINDOW), 2) another CPU resets the
         // schedule. For either case, we close the window, and abort
         // the schedule.
-        qcsched_window_close_window(cpu, window);
+        qcsched_window_close_window(cpu);
         return;
     }
 
@@ -315,6 +335,8 @@ void qcsched_window_prune_missed_schedpoint(CPUState *cpu)
         ASSERT(entry, "entry should not be NULL. order=%d", order);
 
         window0 = &sched.schedpoint_window[entry->cpu];
+        if (qcsched_window_window_closed(window0))
+            continue;
 
         qcsched_window_leave_footprint_at(cpu, footprint_missed,
                                           entry->schedpoint.order);
