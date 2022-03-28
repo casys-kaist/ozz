@@ -260,6 +260,9 @@ static void watchdog_breakpoint(CPUState *cpu)
 
     watchdog_breakpoint_check_count(cpu, record);
 
+    if (record->RIP == RIP(cpu))
+        return;
+
     record->RIP = RIP(cpu);
     record->count = 0;
 }
