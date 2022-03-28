@@ -124,8 +124,8 @@ qcsched_window_expand_window_1(CPUState *cpu,
     else
         window->until = END_OF_SCHEDPOINT_WINDOW;
 
-    DRPRINTF(cpu, "Window after expand: [%d, %d)\n", window->from,
-             window->until);
+    DRPRINTF(cpu, "Window#%d after expand: [%d, %d)\n", window->cpu,
+             window->from, window->until);
 }
 
 void qcsched_window_expand_window_n(CPUState *cpu, int n)
@@ -150,11 +150,31 @@ qcsched_window_deactivate_entry_remote(CPUState *cpu,
 }
 
 static void
+qcsched_window_deactivate_entry_local(CPUState *cpu,
+                                      struct qcsched_schedpoint_window *window,
+                                      struct qcsched_entry *entry)
+{
+    int err;
+    // NOTE: qcsched_handle_breakpoint_iolocked() always remove the
+    // hit breakpoint so in this function -ENOENT is fine here
+    err = kvm_remove_breakpoint_cpu(cpu, entry->schedpoint.addr, 1,
+                                    GDB_BREAKPOINT_HW);
+    ASSERT(!err || err == -ENOENT,
+           "failed to remove a breakpiont at a scheduling point "
+           "err=%d\n",
+           err);
+
+    entry->breakpoint.installed = false;
+
+    window->activated--;
+    DRPRINTF(cpu, "Window size after shrink: %d\n", window->activated);
+}
+
+static void
 qcsched_window_deactivate_entry(CPUState *cpu,
                                 struct qcsched_schedpoint_window *window,
                                 struct qcsched_entry *entry)
 {
-    int err;
 
     ASSERT(window->cpu == entry->cpu,
            "window (%d) and entry (%d) have a different CPU index", window->cpu,
@@ -174,24 +194,10 @@ qcsched_window_deactivate_entry(CPUState *cpu,
     DRPRINTF(cpu, "Removing a breakpoint at %lx on cpu#%d\n",
              entry->schedpoint.addr, entry->cpu);
 
-    if (cpu->cpu_index != entry->cpu) {
+    if (cpu->cpu_index != entry->cpu)
         qcsched_window_deactivate_entry_remote(cpu, window, entry);
-        return;
-    }
-
-    // NOTE: qcsched_handle_breakpoint_iolocked() always remove the
-    // hit breakpoint so in this function -ENOENT is fine here
-    err = kvm_remove_breakpoint_cpu(cpu, entry->schedpoint.addr, 1,
-                                    GDB_BREAKPOINT_HW);
-    ASSERT(!err || err == -ENOENT,
-           "failed to remove a breakpiont at a scheduling point "
-           "err=%d\n",
-           err);
-
-    entry->breakpoint.installed = false;
-
-    window->activated--;
-    DRPRINTF(cpu, "Window size after shrink: %d\n", window->activated);
+    else
+        qcsched_window_deactivate_entry_local(cpu, window, entry);
 }
 
 static void
@@ -221,19 +227,14 @@ qcsched_window_shrink_entry(CPUState *cpu,
     else
         window->from = END_OF_SCHEDPOINT_WINDOW;
 
-    if (window->from > window->until) {
+    if (window->from > window->until)
         // NOTE: This can be possible, for example, if cpu0 does not
         // installed breakpoints yet, and cpu detects missed
         // schedpoint.
-        next = lookup_entry_by_order(cpu0, window->from + 1);
-        if (next != NULL)
-            window->until = next->schedpoint.order;
-        else
-            window->until = END_OF_SCHEDPOINT_WINDOW;
-    }
+        window->until = window->from;
 
-    DRPRINTF(cpu, "Window after shrink: [%d, %d)\n", window->from,
-             window->until);
+    DRPRINTF(cpu, "Window#%d after shrink: [%d, %d)\n", window->cpu,
+             window->from, window->until);
 }
 
 static void

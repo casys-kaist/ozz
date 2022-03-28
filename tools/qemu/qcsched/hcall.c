@@ -164,7 +164,8 @@ qcsched_install_breakpoint(CPUState *cpu, target_ulong addr, int order,
     qcsched_vmi_task(cpu, &entry->t);
 
     window = &sched.schedpoint_window[cpu->cpu_index];
-    if (window->from == END_OF_SCHEDPOINT_WINDOW || window->from > order)
+    if ((window->from == END_OF_SCHEDPOINT_WINDOW || window->from > order) &&
+        footprint == 0)
         // until and from are same before activating, which means the
         // window is [from, from), which means the window is empty.
         window->until = window->from = order;
