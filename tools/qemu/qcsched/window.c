@@ -283,7 +283,8 @@ void qcsched_window_close_window(CPUState *cpu)
             qcsched_window_leave_footprint_at(cpu, footprint_missed, order);
             qcsched_window_shrink_entry(cpu, window, entry);
         } else {
-            qcsched_window_leave_footprint_at(cpu, footprint_dropped, order);
+            qcsched_window_leave_footprint_at(cpu, footprint_not_addressed,
+                                              order);
         }
     }
     window->from = window->until = END_OF_SCHEDPOINT_WINDOW;

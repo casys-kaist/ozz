@@ -57,7 +57,6 @@ static void qcsched_reset_window(CPUState *cpu)
         &sched.schedpoint_window[cpu->cpu_index];
 
     window->total = 0;
-    window->missed_schedpoint = 0;
     window->activated = 0;
     window->from = window->until = END_OF_SCHEDPOINT_WINDOW;
     window->left_behind = END_OF_SCHEDPOINT_WINDOW;
@@ -194,8 +193,6 @@ static void do_activate_breakpoint(CPUState *cpu)
         if (entry->cpu != cpu->cpu_index)
             continue;
         window->total++;
-        if (entry->schedpoint.footprint == footprint_missed)
-            window->missed_schedpoint++;
         need_hook = true;
     }
 
@@ -282,10 +279,9 @@ static target_ulong qcsched_footprint_breakpoint(CPUState *cpu,
                                                  target_ulong data_uptr,
                                                  target_ulong retry_uptr)
 {
-    struct qcsched_schedpoint_window *window;
     struct qcsched_entry *entry;
     target_ulong footprintul, cntul, retryul;
-    int i, idx, missed_schedpoint;
+    int i, idx;
 
     DRPRINTF(cpu, "%s\n", __func__);
 
@@ -293,26 +289,26 @@ static target_ulong qcsched_footprint_breakpoint(CPUState *cpu,
         return -EINVAL;
 
     cntul = 0;
-    missed_schedpoint = 0;
+    retryul = 0;
     for (i = 0, idx = 0; i < sched.total; i++) {
         entry = &sched.entries[i];
         if (entry->cpu != cpu->cpu_index)
             continue;
+
+        if (entry->schedpoint.footprint == footprint_not_addressed ||
+            entry->schedpoint.footprint == footprint_dropped)
+            retryul = 1;
+
         footprintul = (target_ulong)entry->schedpoint.footprint;
 #ifdef _DEBUG_VERBOSE
         DRPRINTF(cpu, "footprint at %d: %lu\n", i, footprintul);
 #endif
-        if (footprintul == footprint_missed)
-            missed_schedpoint++;
         ASSERT(!cpu_memory_rw_debug(cpu, data_uptr + idx, &footprintul,
                                     sizeof(target_ulong), 1),
                "Can't write order");
         idx += 8;
         cntul++;
     }
-
-    window = &sched.schedpoint_window[cpu->cpu_index];
-    retryul = missed_schedpoint != window->missed_schedpoint;
 
 #ifdef _DEBUG_VERBOSE
     DRPRINTF(cpu, "local entries %lu\n", cntul);
