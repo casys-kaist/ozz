@@ -330,11 +330,15 @@ void qcsched_window_prune_missed_schedpoint(CPUState *cpu)
     DRPRINTF(cpu, "missing schedpoints [%d, %d)\n", legit->schedpoint.order,
              hit->schedpoint.order);
 
-    // NOTE: hit will be deactivated later
+    // shrink an entry *before* hit since hit will be deactivated
+    // later
     for (order = legit->schedpoint.order; order < hit->schedpoint.order;
          order++) {
-        entry = lookup_entry_by_order(NULL, order);
-        ASSERT(entry, "entry should not be NULL. order=%d", order);
+        // Do not use lookup_entry_by_order() since it may returns an
+        // entry with an order larger than "order".
+        entry = &sched.entries[order];
+        if (entry->schedpoint.footprint == footprint_missed)
+            continue;
 
         window0 = &sched.schedpoint_window[entry->cpu];
         if (qcsched_window_window_closed(window0))
