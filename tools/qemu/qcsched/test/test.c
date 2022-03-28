@@ -14,6 +14,14 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#ifdef VERBOSE
+#define __printf printf
+#else
+#define __printf(...)                                                          \
+    do {                                                                       \
+    } while (0)
+#endif
+
 // TODO:
 
 enum qcschedpoint_footprint {
@@ -168,9 +176,9 @@ static bool clear_schedpoint(int idx)
     uint64_t arr[128];
     hypercall(HCALL_FOOTPRINT_BP, (unsigned long)&count, (unsigned long)arr,
               (unsigned long)&ret);
-    printf("retry: %llu\n", ret);
+    __printf("retry: %llu\n", ret);
     for (int i = 0; i < count; i++) {
-        printf("  %ld\n", arr[i]);
+        __printf("  %ld\n", arr[i]);
 #ifdef TEST_REPEAT
         sched[i].footprint = arr[i];
 #endif
@@ -233,10 +241,10 @@ static void *th2(void *gop)
 #ifdef TEST_REPEAT
 static void print_sched(int id, struct schedpoint *sched, int size)
 {
-    printf("Sched %d\n", id);
+    __printf("Sched %d\n", id);
     for (int i = 0; i < size; i++)
-        printf("%llx  %d  %d\n", sched[i].addr, sched[i].order,
-               sched[i].footprint);
+        __printf("%llx  %d  %d\n", sched[i].addr, sched[i].order,
+                 sched[i].footprint);
 }
 #endif
 
