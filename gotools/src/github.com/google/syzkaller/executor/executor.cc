@@ -1488,15 +1488,15 @@ void execute_call(thread_t* th)
 		th->soft_fail_state = true;
 	}
 
-	coverage_pre_call(th);
-
 	// For pseudo-syscalls and user-space functions NONFAILING can abort before assigning to th->res.
 	// Arrange for res = -1 and errno = EFAULT result for such case.
 	th->res = -1;
 	errno = EFAULT;
 	setup_schedule(th->num_sched, th->sched);
+	coverage_pre_call(th);
 	NONFAILING(th->res = execute_syscall(call, th->args));
 	clear_schedule(th->num_sched);
+	coverage_post_call(th);
 	th->reserrno = errno;
 	// Our pseudo-syscalls may misbehave.
 	if ((th->res == -1 && th->reserrno == 0) || call->attrs.ignore_return)
@@ -1504,7 +1504,6 @@ void execute_call(thread_t* th)
 	// Reset the flag before the first possible fail().
 	th->soft_fail_state = false;
 
-	coverage_post_call(th);
 
 	th->fault_injected = false;
 
