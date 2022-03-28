@@ -13,7 +13,10 @@ func buildTestBinImage(t *testing.T) *BinaryImage {
 		t.Fatalf("the binary image is missing")
 		return nil
 	}
-	binimage := BuildBinaryImage(testImage)
+	binimage, err := BuildBinaryImage(testImage)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
 	if binimage == nil {
 		// Do not have the test image
 		t.Fatalf("failed to build the binary image")

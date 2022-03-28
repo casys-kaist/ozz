@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/google/syzkaller/dashboard/dashapi"
+	"github.com/google/syzkaller/pkg/binimage"
 	"github.com/google/syzkaller/pkg/cover"
 	"github.com/google/syzkaller/pkg/csource"
 	"github.com/google/syzkaller/pkg/db"
@@ -79,6 +80,8 @@ type Manager struct {
 	seedType string
 
 	dash *dashapi.Dashboard
+
+	binImage *binimage.BinaryImage
 
 	mu                    sync.Mutex
 	phase                 int
@@ -168,6 +171,12 @@ func RunManager(cfg *mgrconfig.Config) {
 		log.Fatalf("%v", err)
 	}
 
+	vmlinux := filepath.Join(cfg.KernelObj, "vmlinux")
+	binImage, err := binimage.BuildBinaryImage(vmlinux)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+
 	mgr := &Manager{
 		cfg:              cfg,
 		vmPool:           vmPool,
@@ -191,6 +200,7 @@ func RunManager(cfg *mgrconfig.Config) {
 		usedFiles:        make(map[string]time.Time),
 		saturatedCalls:   make(map[string]bool),
 		seedType:         *flagSeed,
+		binImage:         binImage,
 	}
 
 	mgr.preloadCorpus()

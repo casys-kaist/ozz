@@ -24,18 +24,22 @@ type BinaryImage struct {
 	symToDir map[elf.Symbol]string
 	// address of __sanitizer_cov_trace_pc
 	kcov uint64
+	// address of sanitize_memcov_trace_load
+	kmemcovLoad uint64
+	// address of sanitize_memcov_trace_store
+	kmemcovStore uint64
 }
 
-func BuildBinaryImage(image string) *BinaryImage {
+func BuildBinaryImage(image string) (*BinaryImage, error) {
 	f, err := os.Open(image)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	_elf, err := elf.NewFile(f)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return buildBinaryImage(_elf)
+	return buildBinaryImage(_elf), nil
 }
 
 func buildBinaryImage(_elf *elf.File) *BinaryImage {
@@ -64,23 +68,29 @@ func buildBinaryImage(_elf *elf.File) *BinaryImage {
 		return symbols[i].Value < symbols[j].Value
 	})
 
-	kcov := uint64(0)
+	kcov, kmemcovLoad, kmemcovStore := uint64(0), uint64(0), uint64(0)
 	for _, sym := range symbols {
 		if sym.Name == KCOV_FUNCNAME {
 			kcov = sym.Value
+		} else if sym.Name == KMEMCOV_STORE_FUNCNAME {
+			kmemcovStore = sym.Value
+		} else if sym.Name == KMEMCOV_LOAD_FUNCNAME {
+			kmemcovLoad = sym.Value
 		}
 	}
 
 	symToDir := make(map[elf.Symbol]string)
 
 	return &BinaryImage{
-		_elf:     _elf,
-		_dwarf:   _dwarf,
-		reader:   reader,
-		Section:  text,
-		symbols:  symbols,
-		symToDir: symToDir,
-		kcov:     kcov,
+		_elf:         _elf,
+		_dwarf:       _dwarf,
+		reader:       reader,
+		Section:      text,
+		symbols:      symbols,
+		symToDir:     symToDir,
+		kcov:         kcov,
+		kmemcovLoad:  kmemcovLoad,
+		kmemcovStore: kmemcovStore,
 	}
 }
 
@@ -123,4 +133,8 @@ func fileFromAddr(reader *dwarf.Reader, addr uint64) string {
 	return f
 }
 
-const KCOV_FUNCNAME = "__sanitizer_cov_trace_pc"
+const (
+	KCOV_FUNCNAME          = "__sanitizer_cov_trace_pc"
+	KMEMCOV_STORE_FUNCNAME = ""
+	KMEMCOV_LOAD_FUNCNAME  = ""
+)
