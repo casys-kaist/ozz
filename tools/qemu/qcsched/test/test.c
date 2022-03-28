@@ -33,6 +33,8 @@ enum qcschedpoint_footprint {
     footprint_dropped,
     // The schedpoint is hit.
     footprint_hit,
+    // The schedpoint is not addressed
+    footprint_not_addressed,
 };
 
 int predicted_fd = -1;
