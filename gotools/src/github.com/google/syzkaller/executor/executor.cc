@@ -1534,15 +1534,11 @@ void setup_schedule(int num_sched, schedule_t* sched)
 
 	int attempt = 10;
 	uint64 res = hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
-	while (res == (uint64)(-EINVAL) && --attempt) {
+	while (res == (uint64)(-EAGAIN) && --attempt) {
 		sleep_ms(10);
 		res = hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
 	}
-	// hypercall(HCALL_ACTIVATE_BP) can return -EBUSY if another
-	// thread already asked QCMU to activate the schedule, and it
-	// is the only case of the return value of -EBUSY. So -EBUSY
-	// is fine.
-	if (res != 0 && res != (unsigned long long)(-EBUSY))
+	if (res != 0)
 		debug("failed to setup a schedule: %llx\n", res);
 }
 
