@@ -139,13 +139,6 @@ func (p *Prog) sanitizeRazzerThreaded() error {
 	if calls[0].Epoch != calls[1].Epoch {
 		return fmt.Errorf("two contenders do not share epoch %v, %v", calls[0].Epoch, calls[1].Epoch)
 	}
-	var call *Call
-	for _, point := range p.Schedule.points {
-		if call == point.call {
-			return fmt.Errorf("two scheduling points are on the same call: %v", call.Meta.Name)
-		}
-		call = point.call
-	}
 	return nil
 }
 
