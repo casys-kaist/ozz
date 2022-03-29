@@ -735,16 +735,22 @@ void reply_execute(int status)
 		fail("control pipe write failed");
 }
 
-int count_contenders()
+static void prepare_schedule(void)
 {
-	int num = 0;
+	bool need_prepare = false;
+	int num_schedpoints = 0;
+	int num_cpus = 0;
 	for (int i = 0; i < kMaxThreads; i++) {
 		thread_t* th = get_thread(i);
 		if (!th->created || !event_isset(&th->ready) || th->num_sched == 0 || !run_in_epoch(th))
 			continue;
-		num++;
+		num_cpus++;
+		num_schedpoints += th->num_sched;
+		need_prepare = true;
 	}
-	return num;
+	if (!need_prepare)
+		return;
+	hypercall(HCALL_PREPARE_BP, num_schedpoints, num_cpus, 0);
 }
 
 void resume_pending_call(int thread, thread_t* pended)
@@ -783,9 +789,7 @@ void start_epoch()
 	// Signal threads that are ready to execute. Each thread will
 	// reset th->ready after th->start is set.
 	debug("start epoch %d\n", global_epoch);
-	int num_contender = count_contenders();
-	if (num_contender != 0)
-		hypercall(HCALL_PREPARE_BP, num_contender, 0, 0);
+	prepare_schedule();
 	for (int i = 0; i < kMaxThreads; i++) {
 		thread_t* th = get_thread(i);
 		if (th->created && event_isset(&th->ready)) {
@@ -1503,7 +1507,6 @@ void execute_call(thread_t* th)
 		th->reserrno = EINVAL;
 	// Reset the flag before the first possible fail().
 	th->soft_fail_state = false;
-
 
 	th->fault_injected = false;
 
