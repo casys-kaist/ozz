@@ -76,7 +76,7 @@ typedef unsigned char uint8;
 // Some common_OS.h files know about this constant for RLIMIT_NOFILE.
 const int kMaxFd = 250;
 const int kMaxThreads = 4;
-const int kMaxSchedule = 4;
+const int kMaxSchedule = 128;
 const int kMaxFallbackThreads = 3;
 const int kMaxPendingThreads = 1;
 const int kInPipeFd = kMaxFd - 1; // remapped from stdin
@@ -84,7 +84,7 @@ const int kOutPipeFd = kMaxFd - 2; // remapped from stdout
 const int kCoverFd = kOutPipeFd - (kMaxThreads * kMaxFallbackThreads) * nr_cov_type;
 const int kMaxArgs = 9;
 const int kMaxCPU = 8;
-#define __mask(n) (1 << n)
+#define __mask(n) (1 << (n))
 const int kCPUMask[kMaxCPU] = {
     __mask(0),
     __mask(1),
@@ -998,10 +998,18 @@ retry:
 		uint64 num_sched = read_input(&input_pos);
 		schedule_t sched[kMaxSchedule];
 		for (uint64 i = 0; i < num_sched; i++) {
-			sched[i].thread = read_input(&input_pos);
-			sched[i].addr = read_input(&input_pos);
-			sched[i].order = read_input(&input_pos);
+			uint64 thread, addr, order;
+			thread = read_input(&input_pos);
+			addr = read_input(&input_pos);
+			order = read_input(&input_pos);
+			if (i >= kMaxSchedule)
+				continue;
+			sched[i].thread = thread;
+			sched[i].addr = addr;
+			sched[i].order = order;
 		}
+		if (num_sched > kMaxSchedule)
+			num_sched = kMaxSchedule;
 		schedule_call(call_index++, call_num, colliding, copyout_index,
 			      num_args, args, thread, epoch, num_sched, sched, input_pos);
 	}
