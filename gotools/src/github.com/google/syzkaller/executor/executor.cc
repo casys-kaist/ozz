@@ -126,6 +126,20 @@ void debug_dump_data(const char* data, int length);
 #define debug_verbose(...) (void)0
 #endif
 
+#define _DEBUG
+#ifdef _DEBUG
+#define WARN_ON_NOT_NULL(exp, name)                                                 \
+	{                                                                           \
+		unsigned long _ret = exp;                                           \
+		if (_ret != 0)                                                      \
+			debug("[WARN] %s returns non-zero, ret=%lu\n", name, _ret); \
+	}
+#else
+#define WARN_ON_NOT_NULL(exp, name) \
+	do {                        \
+	} while (0)
+#endif
+
 static void receive_execute();
 static void reply_execute(int status);
 
@@ -283,6 +297,8 @@ struct thread_t {
 	int epoch;
 	uint64 num_sched;
 	schedule_t sched[kMaxSchedule];
+	uint64 footprint[kMaxSchedule];
+	bool retry;
 	intptr_t res;
 	uint32 reserrno;
 	bool fault_injected;
@@ -410,7 +426,7 @@ static void write_call_output(thread_t* th, bool finished);
 static void write_extra_output();
 static void execute_call(thread_t* th);
 static void setup_schedule(int num_sched, schedule_t* sched);
-static void clear_schedule(int num_sched);
+static bool clear_schedule(int num_sched, uint64* footprint);
 static int lookup_available_cpu(int id);
 static void coverage_pre_call(thread_t* th);
 static void coverage_post_call(thread_t* th);
@@ -750,7 +766,7 @@ static void prepare_schedule(void)
 	}
 	if (!need_prepare)
 		return;
-	hypercall(HCALL_PREPARE_BP, num_schedpoints, num_cpus, 0);
+	WARN_ON_NOT_NULL(hypercall(HCALL_PREPARE, num_schedpoints, num_cpus, 0), "HCALL_PREPARE");
 }
 
 void resume_pending_call(int thread, thread_t* pended)
@@ -850,8 +866,8 @@ bool run_in_epoch(thread_t* th)
 // execute_one executes program stored in input_data.
 void execute_one()
 {
-	hypercall(HCALL_RESET, 0, 0, 0);
-	hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
+	WARN_ON_NOT_NULL(hypercall(HCALL_RESET, 0, 0, 0), "HCALL_RESET");
+	WARN_ON_NOT_NULL(hypercall(HCALL_ENABLE_KSSB, 0, 0, 0), "HCALL_ENABLE_KSSB");
 	// Duplicate global collide variable on stack.
 	// Fuzzer once come up with ioctl(fd, FIONREAD, 0x920000),
 	// where 0x920000 was exactly collide address, so every iteration reset collide to 0.
@@ -1075,7 +1091,7 @@ retry:
 		goto retry;
 	}
 
-	hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
+	WARN_ON_NOT_NULL(hypercall(HCALL_DISABLE_KSSB, 0, 0, 0), "HCALL_DISABLE_KSSB");
 }
 
 // Get a thread to run a call
@@ -1263,6 +1279,7 @@ void handle_completion(thread_t* th)
 		write_call_output(th, true);
 		write_extra_output();
 	}
+	th->retry = false;
 	th->executing = false;
 	running--;
 	if (running < 0) {
@@ -1507,7 +1524,7 @@ void execute_call(thread_t* th)
 	setup_schedule(th->num_sched, th->sched);
 	coverage_pre_call(th);
 	NONFAILING(th->res = execute_syscall(call, th->args));
-	clear_schedule(th->num_sched);
+	th->retry = clear_schedule(th->num_sched, th->footprint);
 	coverage_post_call(th);
 	th->reserrno = errno;
 	// Our pseudo-syscalls may misbehave.
@@ -1536,9 +1553,8 @@ void setup_schedule(int num_sched, schedule_t* sched)
 	if (num_sched == 0)
 		return;
 	debug("installing breakpoint bp=%d\n", num_sched);
-	for (int i = 0; i < num_sched; i++) {
-		hypercall(HCALL_INSTALL_BP, sched[i].addr, sched[i].order, 0);
-	}
+	for (int i = 0; i < num_sched; i++)
+		WARN_ON_NOT_NULL(hypercall(HCALL_INSTALL_BP, sched[i].addr, sched[i].order, 0), "HCALL_INSTALL_BP");
 
 	int attempt = 10;
 	uint64 res = hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
@@ -1550,12 +1566,22 @@ void setup_schedule(int num_sched, schedule_t* sched)
 		debug("failed to setup a schedule: %llx\n", res);
 }
 
-void clear_schedule(int num_sched)
+bool clear_schedule(int num_sched, uint64* footprint)
 {
-	if (num_sched != 0) {
-		hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
-		hypercall(HCALL_CLEAR_BP, 0, 0, 0);
-	}
+	if (num_sched == 0)
+		return false;
+
+	uint64_t count;
+	uint64_t retry;
+
+	WARN_ON_NOT_NULL(hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0), "HCALL_DEACTIVATE_BP");
+	WARN_ON_NOT_NULL(hypercall(HCALL_FOOTPRINT_BP, (unsigned long)&count, (unsigned long)footprint,
+				   (unsigned long)&retry),
+			 "HCALL_FOOTPRINT_BP");
+	if ((int)count != num_sched)
+		debug("[WARN] count != num_sched, count=%d, num_sched=%d\n", (int)count, num_sched);
+	WARN_ON_NOT_NULL(hypercall(HCALL_CLEAR_BP, 0, 0, 0), "HCALL_CLEAR_BP");
+	return !!retry;
 }
 
 int lookup_available_cpu(int id)
