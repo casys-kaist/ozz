@@ -1524,8 +1524,8 @@ void execute_call(thread_t* th)
 	setup_schedule(th->num_sched, th->sched);
 	coverage_pre_call(th);
 	NONFAILING(th->res = execute_syscall(call, th->args));
-	th->retry = clear_schedule(th->num_sched, th->footprint);
 	coverage_post_call(th);
+	th->retry = clear_schedule(th->num_sched, th->footprint);
 	th->reserrno = errno;
 	// Our pseudo-syscalls may misbehave.
 	if ((th->res == -1 && th->reserrno == 0) || call->attrs.ignore_return)
