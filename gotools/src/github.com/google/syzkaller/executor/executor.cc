@@ -278,6 +278,7 @@ struct schedule_t {
 	uint64_t thread;
 	uint64_t addr;
 	uint64_t order;
+	uint64_t filter;
 };
 
 struct thread_t {
@@ -895,15 +896,16 @@ retry:
 	uint64 prog_extra_timeout = 0;
 	uint64 prog_extra_cover_timeout = 0;
 	int filter_size;
-	// TODO: Fragile. Each thread has kMaxSchedule schedpoints at
-	// maximum, the size of filter should be enough to hold all of
-	// them (= kMaxSchedule * racing calls). Fow now the number of
-	// racing calls is 2.
-	int filter[kMaxSchedule * 2];
+	int filter[kMaxSchedule];
 
 	filter_size = (int)read_input(&input_pos);
-	for (int i = 0; i < filter_size; i++)
+	for (int i = 0; i < filter_size; i++) {
+		if (i >= kMaxSchedule)
+			continue;
 		filter[i] = (int)read_input(&input_pos);
+	}
+	if (filter_size > kMaxSchedule)
+		filter_size = kMaxSchedule;
 
 	for (;;) {
 		uint64 call_num = read_input(&input_pos);
@@ -1035,6 +1037,7 @@ retry:
 			sched[i].thread = thread;
 			sched[i].addr = addr;
 			sched[i].order = order;
+			sched[i].filter = (order < kMaxSchedule ? filter[order] : 1);
 		}
 		if (num_sched > kMaxSchedule)
 			num_sched = kMaxSchedule;
@@ -1571,8 +1574,11 @@ void setup_schedule(int num_sched, schedule_t* sched)
 	if (num_sched == 0)
 		return;
 	debug("installing breakpoint bp=%d\n", num_sched);
-	for (int i = 0; i < num_sched; i++)
-		WARN_ON_NOT_NULL(hypercall(HCALL_INSTALL_BP, sched[i].addr, sched[i].order, 0), "HCALL_INSTALL_BP");
+	for (int i = 0; i < num_sched; i++) {
+		WARN_ON_NOT_NULL(hypercall(HCALL_INSTALL_BP, sched[i].addr,
+					   sched[i].order, sched[i].filter),
+				 "HCALL_INSTALL_BP");
+	}
 
 	int attempt = 10;
 	uint64 res = hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
