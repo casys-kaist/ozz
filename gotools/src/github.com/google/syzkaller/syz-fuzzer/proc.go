@@ -463,8 +463,23 @@ func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.P
 			time.Sleep(time.Second)
 			continue
 		}
-		proc.logResult(p, info, hanged)
-		log.Logf(2, "result hanged=%v: %s", hanged, output)
+		retry := false
+		for _, ci := range p.Contender.Calls {
+			inf := info.Calls[ci]
+			if inf.Flags&ipc.CallRetry != 0 {
+				retry = true
+				break
+			}
+		}
+		proc.logResult(p, info, hanged, retry)
+		log.Logf(2, "result hanged=%v retry=%v: %s", hanged, retry, output)
+		if retry {
+			if try > 10 {
+				log.Logf(2, "QEMU/executor require too many retries. Ignore")
+				return info
+			}
+			continue
+		}
 		return info
 	}
 }
@@ -525,7 +540,7 @@ type ResultLogger struct {
 	column     int
 }
 
-func (proc *Proc) logResult(p *prog.Prog, info *ipc.ProgInfo, hanged bool) {
+func (proc *Proc) logResult(p *prog.Prog, info *ipc.ProgInfo, hanged, retry bool) {
 	if proc.fuzzer.outputType == OutputNone {
 		return
 	}
@@ -548,6 +563,8 @@ func (proc *Proc) logResult(p *prog.Prog, info *ipc.ProgInfo, hanged bool) {
 		logger.logEpochLocked(i)
 	}
 	logger.logNewCoverage()
+	log.Logf(2, "Retry: %v", retry)
+	logger.logFootprint()
 }
 
 func (logger *ResultLogger) initialize() {
@@ -604,4 +621,18 @@ func (logger ResultLogger) logRowLocked(row []string) {
 
 func (logger ResultLogger) logNewCoverage() {
 	// TODO
+}
+
+func (logger ResultLogger) logFootprint() {
+	log.Logf(2, "Footprint")
+	for i, inf := range logger.info.Calls {
+		if len(inf.SchedpointOutcome) == 0 {
+			continue
+		}
+		str := fmt.Sprintf("Call #%d: ", i)
+		for _, outcome := range inf.SchedpointOutcome {
+			str += fmt.Sprintf("(%d, %d) ", outcome.Order, outcome.Footprint)
+		}
+		log.Logf(2, "%s", str)
+	}
 }

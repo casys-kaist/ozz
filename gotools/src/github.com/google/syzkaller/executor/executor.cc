@@ -373,6 +373,7 @@ const uint32 call_flag_executed = 1 << 0;
 const uint32 call_flag_finished = 1 << 1;
 const uint32 call_flag_blocked = 1 << 2;
 const uint32 call_flag_fault_injected = 1 << 3;
+const uint32 call_flag_retry = 1 << 4;
 
 struct call_reply {
 	execute_reply header;
@@ -1367,6 +1368,7 @@ void write_call_output(thread_t* th, bool finished)
 		call_flags |= call_flag_finished |
 			      (th->fault_injected ? call_flag_fault_injected : 0);
 	}
+	call_flags |= (th->retry ? call_flag_retry : 0);
 #if SYZ_EXECUTOR_USES_SHMEM
 	write_output(th->call_index);
 	write_output(th->call_num);
@@ -1376,6 +1378,7 @@ void write_call_output(thread_t* th, bool finished)
 	uint32* cover_count_pos = write_output(0); // filled in later
 	uint32* comps_count_pos = write_output(0); // filled in later
 	uint32* rfcover_count_pos = write_output(0); // filled in later
+	write_output((uint32)th->num_sched);
 
 	if (flag_comparisons) {
 		// Collect only the comparisons
@@ -1405,6 +1408,10 @@ void write_call_output(thread_t* th, bool finished)
 			// XXX: We support only 64 bit kernel.
 			write_coverage_signal<uint32>(&th->cov, signal_count_pos, cover_count_pos);
 		}
+	}
+	for (int i = 0; i < (int)th->num_sched; i++) {
+		write_output((uint32)th->sched[i].order);
+		write_output((uint32)th->footprint[i]);
 	}
 	debug_verbose("out #%u: index=%u num=%u errno=%d finished=%d blocked=%d sig=%u cover=%u comps=%u\n",
 		      completed, th->call_index, th->call_num, reserrno, finished, blocked,

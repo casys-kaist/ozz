@@ -85,6 +85,7 @@ const (
 	CallFinished                            // finished executing (rather than blocked forever)
 	CallBlocked                             // finished but blocked during execution
 	CallFaultInjected                       // fault was injected into this call
+	CallRetry
 )
 
 type CallInfo struct {
@@ -95,6 +96,8 @@ type CallInfo struct {
 	Comps  prog.CompMap // per-call comparison operands
 	Access primitive.SerialAccess
 	Errno  int // call errno (0 if the call was successful)
+	// information about what happened for each schedpoint
+	SchedpointOutcome []SchedpointOutcome
 	ConcurrencyInfo
 }
 
@@ -389,7 +392,7 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 				i, reply.index, reply.num, reply.coverSize, len(out))
 		}
 		if inf.Access, ok = readReadFromCoverages(&out, reply.rfCoverSize, inf); !ok {
-			return nil, fmt.Errorf("call %v/%v%v: rfcover overflow: %v%v",
+			return nil, fmt.Errorf("call %v/%v%v: rfcover overflow: %v/%v",
 				i, reply.index, reply.num, reply.rfCoverSize, len(out))
 		}
 		if p.Threaded && !p.IsContender(int(reply.index)) {
@@ -402,6 +405,10 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 			return nil, err
 		}
 		inf.Comps = comps
+		if inf.SchedpointOutcome, ok = readFootprint(&out, reply.footprintSize); !ok {
+			return nil, fmt.Errorf("call %v/%v%v: footprint: %v/%v",
+				i, reply.index, reply.num, reply.footprintSize, len(out))
+		}
 	}
 	if len(extraParts) == 0 {
 		return info, nil
@@ -531,6 +538,31 @@ func readReadFromCoverages(outp *[]byte, size uint32, inf *CallInfo) (primitive.
 	return res, true
 }
 
+type SchedpointOutcome struct {
+	Order     uint32
+	Footprint Footprint
+}
+
+type Footprint uint32
+
+func readFootprint(outp *[]byte, size uint32) ([]SchedpointOutcome, bool) {
+	array, ok := readUint32Array(outp, size*2)
+	if !ok {
+		return nil, false
+	}
+	if len(array)%2 != 0 {
+		return nil, false
+	}
+	res := make([]SchedpointOutcome, 0, size)
+	for i := 0; i < len(array); i += 2 {
+		res = append(res, SchedpointOutcome{
+			Order:     array[i],
+			Footprint: Footprint(array[i+1]),
+		})
+	}
+	return res, true
+}
+
 type command struct {
 	pid      int
 	config   *Config
@@ -592,6 +624,8 @@ type callReply struct {
 	compsSize  uint32
 	// Read-from coverage
 	rfCoverSize uint32
+	// Footprint of each schedpoint
+	footprintSize uint32
 	// signal/cover/comps follow
 }
 
