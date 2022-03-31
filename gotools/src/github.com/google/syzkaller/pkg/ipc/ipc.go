@@ -109,17 +109,6 @@ type ConcurrencyInfo struct {
 type ProgInfo struct {
 	Calls []CallInfo
 	Extra CallInfo // stores Signal and Cover collected from background threads
-	// TODO: Belows will be removed
-	// RFInfo describe read-from coverage between instructions from
-	// two calls. For example, RFInfo[i1][i2] represents read-from
-	// coverage for instructions from calls, Calls[i1] and
-	// Calls[i2]. Note that it is not limited to two calls inside the
-	// same epoch, meaning two calls possibly reside in other epochs.
-	RFInfo [][]signal.ReadFrom
-	// Serial are accesses that are used to build ReadFrom and sorted
-	// according to Accesses' timestamps
-	Serial   [][]primitive.SerialAccess
-	threaded bool
 }
 
 type Env struct {
@@ -353,7 +342,7 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 	if !ok {
 		return nil, fmt.Errorf("failed to read number of calls")
 	}
-	info := &ProgInfo{Calls: make([]CallInfo, len(p.Calls)), threaded: p.Threaded}
+	info := &ProgInfo{Calls: make([]CallInfo, len(p.Calls))}
 	extraParts := make([]CallInfo, 0)
 	for i := uint32(0); i < ncmd; i++ {
 		if len(out) < int(unsafe.Sizeof(callReply{})) {
@@ -918,27 +907,4 @@ func (c *command) exec(opts *ExecOpts, progData []byte) (output []byte, hanged b
 		err0 = fmt.Errorf("executor %v: exit status %d\n%s", c.pid, exitStatus, output)
 	}
 	return
-}
-
-func (info *ProgInfo) ContenderReadFrom(contender prog.Contender) signal.ReadFrom {
-	c := contender.Calls
-	return info.RFInfo[c[0]][c[1]]
-}
-
-func (info *ProgInfo) ContenderSerialAccess(contender prog.Contender) primitive.SerialAccess {
-	c := contender.Calls
-	return info.Serial[c[0]][c[1]]
-}
-
-func (info *ProgInfo) SequentialTrace() []primitive.SerialAccess {
-	if !info.threaded {
-		return nil
-	}
-	res := []primitive.SerialAccess{}
-	for _, c := range info.Calls {
-		if len(c.Access) != 0 {
-			res = append(res, c.Access)
-		}
-	}
-	return res
 }

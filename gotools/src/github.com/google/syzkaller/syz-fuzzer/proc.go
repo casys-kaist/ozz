@@ -299,7 +299,8 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 	knotter := scheduler.Knotter{}
 	for i := 0; i < 2; i++ {
 		inf := proc.executeRaw(proc.execOpts, p, StatThreading)
-		if !knotter.AddSequentialTrace(inf.SequentialTrace()) {
+		seq := sequentialTrace(inf, p.Threaded)
+		if !knotter.AddSequentialTrace(seq) {
 			log.Logf(0, "[WARN] failed to add the sequence trace")
 			return
 		}
@@ -313,6 +314,19 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 
 	// Now we know newly found knots
 	proc.fuzzer.addThreadedInputToCorpus(p, newKnots)
+}
+
+func sequentialTrace(info *ipc.ProgInfo, threaded bool) []primitive.SerialAccess {
+	if !threaded {
+		return nil
+	}
+	res := []primitive.SerialAccess{}
+	for _, c := range info.Calls {
+		if len(c.Access) != 0 {
+			res = append(res, c.Access)
+		}
+	}
+	return res
 }
 
 func (proc *Proc) failCall(p *prog.Prog, call int) {
@@ -353,7 +367,6 @@ func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes,
 	}
 	defer func() {
 		// From this point, all those results will not be used
-		info.RFInfo, info.Serial = nil, nil
 		for _, c := range info.Calls {
 			c.Access = nil
 		}
