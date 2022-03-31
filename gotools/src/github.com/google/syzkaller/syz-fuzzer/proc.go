@@ -487,6 +487,8 @@ func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.P
 		proc.logResult(p, info, hanged, retry)
 		log.Logf(2, "result hanged=%v retry=%v: %s", hanged, retry, output)
 		if retry {
+			filter := buildScheduleFilter(p, info)
+			p.AttachScheduleFilter(filter)
 			if try > 10 {
 				log.Logf(2, "QEMU/executor require too many retries. Ignore")
 				return info
@@ -495,6 +497,28 @@ func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.P
 		}
 		return info
 	}
+}
+
+func buildScheduleFilter(p *prog.Prog, info *ipc.ProgInfo) []uint32 {
+	const FOOTPRINT_MISSED = 1
+	cnt := 0
+	filter := make([]uint32, p.Schedule.Len())
+	for _, ci := range info.Calls {
+		cnt += len(ci.SchedpointOutcome)
+		for _, outcome := range ci.SchedpointOutcome {
+			order := outcome.Order
+			if order >= uint32(len(filter)) {
+				return nil
+			}
+			if outcome.Footprint == FOOTPRINT_MISSED {
+				filter[order] = 1
+			}
+		}
+	}
+	if cnt != p.Schedule.Len() {
+		return nil
+	}
+	return filter
 }
 
 func (proc *Proc) logProgram(opts *ipc.ExecOpts, p *prog.Prog) {
