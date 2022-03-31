@@ -74,6 +74,7 @@ func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
 		args:   make(map[Arg]argInfo),
 		epoch:  0,
 	}
+	w.writeScheduleFilter(p)
 	for i, c := range p.Calls {
 		w.csumMap, w.csumUses = calcChecksumsCall(c)
 		w.serializeCall(c, p)
@@ -84,6 +85,14 @@ func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
 		return 0, ErrExecBufferTooSmall
 	}
 	return len(buffer) - len(w.buf), nil
+}
+
+func (w *execContext) writeScheduleFilter(p *Prog) {
+	filter := p.Filter()
+	w.write(uint64(len(filter)))
+	for _, f := range filter {
+		w.write(uint64(f))
+	}
 }
 
 func (w *execContext) writeSchedule(c *Call, sched Schedule) {

@@ -894,6 +894,17 @@ retry:
 	int call_index = 0;
 	uint64 prog_extra_timeout = 0;
 	uint64 prog_extra_cover_timeout = 0;
+	int filter_size;
+	// TODO: Fragile. Each thread has kMaxSchedule schedpoints at
+	// maximum, the size of filter should be enough to hold all of
+	// them (= kMaxSchedule * racing calls). Fow now the number of
+	// racing calls is 2.
+	int filter[kMaxSchedule * 2];
+
+	filter_size = (int)read_input(&input_pos);
+	for (int i = 0; i < filter_size; i++)
+		filter[i] = (int)read_input(&input_pos);
+
 	for (;;) {
 		uint64 call_num = read_input(&input_pos);
 		if (call_num == instr_eof)
