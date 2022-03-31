@@ -517,6 +517,10 @@ void qcsched_window_leave_footprint_at(CPUState *cpu,
     if (entry->cpu != cpu->cpu_index)
         return;
 
+    if (entry->schedpoint.addr == QCSCHED_DUMMY_BREAKPOINT)
+        // A dummy breakpoint is considered hit
+        footprint = footprint_hit;
+
     if (entry->schedpoint.footprint != footprint_preserved)
         DRPRINTF(cpu, "[WARN] footprint is already left\n");
 #ifdef _DEBUG_VERBOSE
