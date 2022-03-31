@@ -17,6 +17,9 @@ type Point struct {
 
 type Schedule struct {
 	points []Point
+	// filter[i] == 1: points[i] will not be treated
+	// filter[i] == 0: points[i] will be treated
+	filter []uint32
 }
 
 func (sched Schedule) Len() int {
@@ -135,6 +138,14 @@ func (p *Prog) MutateScheduleFromHint(rs rand.Source, hint []primitive.Segment) 
 func (p *Prog) applySchedule(schedule []primitive.Access) {
 	shapeScheduleFromAccesses(p, schedule)
 	p.appendDummyPoints()
+}
+
+func (sched *Schedule) AttachScheduleFilter(filter []uint32) {
+	sched.filter = append([]uint32{}, filter...)
+}
+
+func (sched Schedule) Filter() []uint32 {
+	return sched.filter
 }
 
 type randScheduler struct {
