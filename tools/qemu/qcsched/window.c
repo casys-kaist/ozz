@@ -155,6 +155,8 @@ qcsched_window_deactivate_entry_local(CPUState *cpu,
                                       struct qcsched_entry *entry)
 {
     int err;
+    ASSERT(cpu == current_cpu, "cpu != current_cpu, cpu=%d, current_cpu=%d",
+           cpu->cpu_index, current_cpu->cpu_index);
     // NOTE: qcsched_handle_breakpoint_iolocked() always remove the
     // hit breakpoint so in this function -ENOENT is fine here
     err = kvm_remove_breakpoint_cpu(cpu, entry->schedpoint.addr, 1,
@@ -200,24 +202,20 @@ qcsched_window_deactivate_entry(CPUState *cpu,
         qcsched_window_deactivate_entry_local(cpu, window, entry);
 }
 
-static void
-qcsched_window_shrink_entry(CPUState *cpu,
-                            struct qcsched_schedpoint_window *window,
-                            struct qcsched_entry *entry)
+static void __do_shrink_entry(CPUState *cpu,
+                              struct qcsched_schedpoint_window *window,
+                              struct qcsched_entry *entry)
 {
     struct qcsched_entry *next;
     CPUState *cpu0;
 
-    ASSERT(window->cpu == entry->cpu,
-           "window (%d) and entry (%d) have a different CPU index", window->cpu,
-           entry->cpu);
-    ASSERT(entry->schedpoint.order == window->from,
-           "%d %d entry (%d) is not the first activated entry of the window "
-           "(%d)",
-           cpu->cpu_index, entry->cpu, entry->schedpoint.order, window->from);
-
     if (entry != NULL && entry->breakpoint.installed)
         qcsched_window_deactivate_entry(cpu, window, entry);
+
+    if (entry->schedpoint.order < window->from) {
+        ASSERT(window->from < window->until, "!(window->from < window->until)");
+        return;
+    }
 
     cpu0 = qemu_get_cpu(window->cpu);
 
@@ -235,6 +233,44 @@ qcsched_window_shrink_entry(CPUState *cpu,
 
     DRPRINTF(cpu, "Window#%d after shrink: [%d, %d)\n", window->cpu,
              window->from, window->until);
+}
+
+static void
+qcsched_window_shrink_before_entry(CPUState *cpu,
+                                   struct qcsched_schedpoint_window *window,
+                                   struct qcsched_entry *until)
+{
+    struct qcsched_entry *entry;
+    for (int i = window->from; i < until->schedpoint.order; i++) {
+        entry = &sched.entries[i];
+        if (entry->cpu != window->cpu)
+            continue;
+        __do_shrink_entry(cpu, window, entry);
+    }
+    ASSERT(until->schedpoint.order == window->from,
+           "still entry (%d) is not the first activated entry of the window "
+           "#%d (%d)",
+           until->schedpoint.order, window->cpu, window->from);
+}
+
+static void
+qcsched_window_shrink_entry(CPUState *cpu,
+                            struct qcsched_schedpoint_window *window,
+                            struct qcsched_entry *entry)
+{
+    ASSERT(window->cpu == entry->cpu,
+           "window (%d) and entry (%d) have a different CPU index", window->cpu,
+           entry->cpu);
+
+    if (entry->schedpoint.order > window->from) {
+        DRPRINTF(cpu,
+                 "[WARN] entry (%d) is not the first activated entry of the "
+                 "window #%d (%d)\n",
+                 entry->schedpoint.order, window->cpu, window->from);
+        qcsched_window_shrink_before_entry(cpu, window, entry);
+    }
+
+    __do_shrink_entry(cpu, window, entry);
 }
 
 static void
