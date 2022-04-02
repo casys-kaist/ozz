@@ -106,19 +106,22 @@ static target_ulong qcsched_prepare(CPUState *cpu, unsigned int nr_bps,
     DRPRINTF(cpu, "%s\n", __func__);
     DRPRINTF(cpu, "nr_bps: %u\n", nr_bps);
 
+    unsigned int orig_nr_bps = nr_bps;
+
     if (sched.total != 0)
         return -EBUSY;
 
     if (!vmi_info.hook_addr)
         return -EINVAL;
 
-    if (nr_bps >= MAX_SCHEDPOINTS)
-        return -EINVAL;
-
     if (nr_cpus >= MAX_CPUS)
         return -EINVAL;
 
+    if (nr_bps > MAX_SCHEDPOINTS)
+        nr_bps = MAX_SCHEDPOINTS;
+
     sched.total = nr_bps;
+    sched.orig_nr_bps = orig_nr_bps;
     sched.nr_cpus = nr_cpus;
     sched.used = false;
 
@@ -137,16 +140,23 @@ qcsched_install_breakpoint(CPUState *cpu, target_ulong addr, int order,
     DRPRINTF(cpu, "addr: %lx, order: %d, footprint: %d\n", addr, order,
              footprint);
 #endif
+    ASSERT(sched.total <= sched.orig_nr_bps, "sched.total > sched.orig_nr_bps");
 
     if (!sched.total)
         return -EINVAL;
 
-    if (sched.total <= order)
+    if (sched.orig_nr_bps <= order)
         return -EINVAL;
 
     // Allowed: idle
     if (qcsched_check_cpu_state(cpu, qcsched_cpu_ready))
         return -EINVAL;
+
+    if (sched.total <= order)
+        // As we clamp the number of schedpoint in HCALL_PREPARE, if
+        // total <= order < orig_nr_bps is benign (we just drop the
+        // schedpoint).
+        return 0;
 
     entry = &sched.entries[order];
 

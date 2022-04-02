@@ -40,6 +40,7 @@ struct qcsched {
     struct qcsched_schedpoint_window schedpoint_window[MAX_CPUS];
     enum qcsched_cpu_state cpu_state[MAX_CPUS];
     int total, current;
+    int orig_nr_bps;
     int nr_cpus;
     bool activated;
     bool used;
