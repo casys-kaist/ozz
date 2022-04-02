@@ -59,7 +59,7 @@ func (p *Prog) appendDummyPoints() {
 			continue
 		}
 		p.Schedule.points = append(p.Schedule.points,
-			Point{call: c, addr: ^uint64(0), order: uint64(order + n)})
+			Point{call: c, addr: dummyAddr, order: uint64(order + n)})
 		order++
 	}
 }
@@ -74,7 +74,7 @@ func (p *Prog) removeDummyPoints() {
 	i := len(p.Schedule.points) - 1
 	for ; i >= 0; i-- {
 		pnt := p.Schedule.points[i]
-		if pnt.addr != ^uint64(0) {
+		if pnt.addr != dummyAddr {
 			break
 		}
 	}
@@ -315,3 +315,5 @@ func shapeScheduleFromAccesses(p *Prog, schedule []primitive.Access) {
 	}
 	p.Schedule = sched
 }
+
+const dummyAddr = ^uint64(0)

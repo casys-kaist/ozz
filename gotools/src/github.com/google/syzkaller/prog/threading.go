@@ -85,10 +85,11 @@ func (p *Prog) Reverse() {
 	if len(p.Schedule.points) != 2 {
 		return
 	}
-	if p.Schedule.points[0].addr != ^uint64(0) {
+	if p.Schedule.points[0].addr != dummyAddr || p.Schedule.points[1].addr != dummyAddr {
 		return
 	}
-	p.Schedule.points[0], p.Schedule.points[1] = p.Schedule.points[1], p.Schedule.points[0]
+	p.Schedule.points[0].call, p.Schedule.points[1].call =
+		p.Schedule.points[1].call, p.Schedule.points[0].call
 }
 
 func (p *Prog) Contenders() []*Call {
