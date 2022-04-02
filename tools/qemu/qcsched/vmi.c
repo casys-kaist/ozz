@@ -178,6 +178,35 @@ void qcsched_vmi_lock_info_reset(CPUState *cpu)
     lock_info->count = 0;
 }
 
+static unsigned int qcsched_vmi__preempt_count(CPUState *cpu)
+{
+    target_ulong __per_cpu_offset = vmi_info.__per_cpu_offset[cpu->cpu_index];
+    uint8_t buf[32];
+    target_ulong pcpu_ptr;
+    unsigned int __preempt_count;
+
+    if (__per_cpu_offset == 0)
+        return 0;
+
+    pcpu_ptr = __per_cpu_offset + vmi_info.__preempt_count;
+
+    ASSERT(!cpu_memory_rw_debug(cpu, pcpu_ptr, buf, sizeof(int), 0),
+           "Can't read pcpu section");
+
+    __preempt_count = *(int *)buf;
+
+    return __preempt_count;
+}
+
+bool qcsched_vmi_in_task(CPUState *cpu)
+{
+    target_ulong preempt_count = qcsched_vmi__preempt_count(cpu);
+    bool in_nmi = preempt_count & NMI_MASK;
+    bool in_hardirq = preempt_count & HARDIRQ_MASK;
+    bool in_serving_softirq = (preempt_count & SOFTIRQ_MASK) & SOFTIRQ_OFFSET;
+    return !(in_nmi | in_hardirq | in_serving_softirq);
+}
+
 static target_ulong current_task(CPUState *cpu)
 {
     // TODO: This only works for x86_64
