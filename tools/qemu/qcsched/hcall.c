@@ -173,6 +173,26 @@ qcsched_install_breakpoint(CPUState *cpu, target_ulong addr, int order,
     return 0;
 }
 
+static void sched_init_once(CPUState *cpu)
+{
+    struct qcsched_entry *entry;
+    if (sched.activated)
+        return;
+
+    sched.activated = true;
+
+    for (int i = 0; i < sched.total; i++) {
+        entry = &sched.entries[i];
+        if (entry->schedpoint.footprint == footprint_preserved) {
+            sched.current = i;
+            DRPRINTF(cpu, "Starting from %d\n", sched.current);
+            return;
+        }
+    }
+    // XXX: There is no preserved entry in the schedule.
+    sched.current = sched.total;
+}
+
 static void do_activate_breakpoint(CPUState *cpu)
 {
     struct qcsched_entry *entry;
@@ -183,6 +203,8 @@ static void do_activate_breakpoint(CPUState *cpu)
     // We don't install scheduling points on the master CPU
     if (cpu->cpu_index == 0)
         return;
+
+    sched_init_once(cpu);
 
     window = &sched.schedpoint_window[cpu->cpu_index];
 
@@ -230,11 +252,6 @@ static target_ulong qcsched_activate_breakpoint(CPUState *cpu)
     // At this point, we assume all CPUs are ready and all schedules
     // are sanitized.
     do_activate_breakpoint(cpu);
-
-    if (!sched.activated) {
-        sched.activated = true;
-        sched.current = 0;
-    }
 
     return 0;
 }
