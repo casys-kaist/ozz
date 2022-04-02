@@ -225,10 +225,13 @@ static void __handle_breakpoint_schedpoint(CPUState *cpu)
     // current focus (i.e., not moved forward yet). Below function
     // calls should be aware of this.
     if (qcsched_window_lock_contending(cpu) ||
-        qcsched_window_consecutive_schedpoint(cpu, current_order)) {
-        // If the next scheduling point is not reachable because of
-        // lock contention or installed on the same CPU, just keep
-        // this CPU going
+        qcsched_window_consecutive_schedpoint(cpu, current_order) ||
+        !qcsched_vmi_in_task(cpu)) {
+        // Keep this CPU going if 1) the next scheduling point is not
+        // reachable because of lock contention or installed on the
+        // same CPU, or 2) the breakpoint is hit in a context other
+        // than the task context. This effectively just skips the
+        // schedpoint so seems weird.
         qcsched_window_expand_window(cpu);
         qcsched_keep_this_cpu_going(cpu);
     } else {
