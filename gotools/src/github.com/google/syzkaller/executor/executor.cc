@@ -896,7 +896,9 @@ retry:
 	uint64 prog_extra_timeout = 0;
 	uint64 prog_extra_cover_timeout = 0;
 	int filter_size;
-	int filter[kMaxSchedule];
+	int filter[kMaxSchedule] = {
+	    0,
+	};
 
 	filter_size = (int)read_input(&input_pos);
 	for (int i = 0; i < filter_size; i++) {
