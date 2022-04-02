@@ -289,6 +289,14 @@ static int qcsched_handle_breakpoint_iolocked(CPUState *cpu)
         // will happen.
         kvm_update_guest_debug(cpu, 0);
 
+    if (!qcsched_vmi_in_task(cpu))
+        // XXX: Temporary workaround of schedpoint that can be hit by
+        // {,soft}IRQ contexts. By removing the breakpoint and then
+        // doing nothing, we can deal with such breakpoints as missing
+        // ones. This is obviously not a better way of dealing with
+        // them, so we may want to fix this.
+        return 0;
+
     watchdog_breakpoint(cpu);
 
     // We need to synchronize thw window before cleaning up left
