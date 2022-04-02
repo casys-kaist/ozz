@@ -44,13 +44,26 @@ static void qcsched_vmi_hint__ssb_do_emulate(CPUState *cpu, target_ulong addr)
     vmi_info.__ssb_do_emulate = addr;
 }
 
+static bool
+qcsched_vmi_lock_info_duplicated(struct qcsched_vmi_lock_info *lock_info,
+                                 struct qcsched_vmi_lock *vmi_lock)
+{
+    for (int i = 0; i < lock_info->count; i++) {
+        if (memcmp(&lock_info->acquired[i], vmi_lock,
+                   sizeof(struct qcsched_vmi_lock)) == 0)
+            return true;
+    }
+    return false;
+}
+
 static void qcsched_vmi_lock_acquire(CPUState *cpu, target_ulong lockdep_addr,
-                                     int trylock, int read)
+                                     int trylock, int read, target_ulong ip)
 {
     struct qcsched_vmi_lock_info *lock_info =
         &vmi_info.lock_info[cpu->cpu_index];
     struct qcsched_schedpoint_window *window;
     int cnt = lock_info->count;
+    struct qcsched_vmi_lock vmi_lock;
 
     // Allowed: activated
     if (!qcsched_check_cpu_state(cpu, qcsched_cpu_activated) ||
@@ -58,16 +71,23 @@ static void qcsched_vmi_lock_acquire(CPUState *cpu, target_ulong lockdep_addr,
         return;
 
 #ifdef _DEBUG_VERBOSE
-    DRPRINTF(cpu, "lock_acquire, addr=%lx, trylock=%d, read=%d\n", lockdep_addr,
-             trylock, read);
+    DRPRINTF(cpu, "lock_acquire, addr=%lx, trylock=%d, read=%d, ip=%lx\n",
+             lockdep_addr, trylock, read, ip);
 #endif
 
     // Can't hold more lock info
     if (cnt >= MAX_LOCKS)
         return;
 
-    lock_info->acquired[cnt] = (struct qcsched_vmi_lock){
-        .lockdep_addr = lockdep_addr, .trylock = trylock, .read = read};
+    vmi_lock = (struct qcsched_vmi_lock){.lockdep_addr = lockdep_addr,
+                                         .trylock = trylock,
+                                         .read = read,
+                                         .ip = ip};
+
+    if (qcsched_vmi_lock_info_duplicated(lock_info, &vmi_lock))
+        return;
+
+    lock_info->acquired[cnt] = vmi_lock;
     lock_info->count = cnt + 1;
 
     if (qcsched_window_lock_contending(cpu)) {
@@ -75,7 +95,6 @@ static void qcsched_vmi_lock_acquire(CPUState *cpu, target_ulong lockdep_addr,
         // already acquired it. Let's yield a turn
         DRPRINTF(cpu, "Contending on a lock. Yield a turn.\n");
         window = &sched.schedpoint_window[cpu->cpu_index];
-        qcsched_commit_state(cpu, HCALL_SUCCESS);
         qcsched_yield_turn_from(cpu, window->from);
     }
 }
@@ -105,7 +124,7 @@ static void qcsched_vmi_lock_release(CPUState *cpu, target_ulong lockdep_addr)
 }
 
 target_ulong qcsched_vmi_hint(CPUState *cpu, target_ulong type,
-                              target_ulong addr, target_ulong misc)
+                              target_ulong addr, target_ulong ip)
 {
     int trylock, read;
     int index;
@@ -128,9 +147,10 @@ target_ulong qcsched_vmi_hint(CPUState *cpu, target_ulong type,
         qcsched_vmi_hint__ssb_do_emulate(cpu, addr);
         break;
     case VMI_LOCK_ACQUIRE:
-        trylock = misc >> 2;
-        read = misc & 0x3;
-        qcsched_vmi_lock_acquire(cpu, addr, trylock, read);
+        trylock = (addr >> 2) & 1;
+        read = addr & 0x3;
+        addr &= ~0x7;
+        qcsched_vmi_lock_acquire(cpu, addr, trylock, read, ip);
         break;
     case VMI_LOCK_RELEASE:
         qcsched_vmi_lock_release(cpu, addr);

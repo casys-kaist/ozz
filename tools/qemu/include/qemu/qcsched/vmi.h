@@ -9,6 +9,7 @@
 
 struct qcsched_vmi_lock {
     target_ulong lockdep_addr;
+    target_ulong ip;
     int trylock;
     int read;
 };
