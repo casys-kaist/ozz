@@ -5,7 +5,7 @@ all:
 	$(CC) test.c -lpthread -o out/qcsched_test-simple -DSIMPLE_TEST
 	$(CC) test.c -lpthread -o out/qcsched_test-bypass -DBYPASS_TEST
 	$(CC) test.c -lpthread -o out/qcsched_test-spinlock -DSPINLOCK_TEST -DTEST_KMEMCOV
-	$(CC) test.c -lpthread -o out/qcsched_test-footprint -DFOOTPRINT_TEST
+	$(CC) test.c -lpthread -o out/qcsched_test-footprint -DFOOTPRINT_TEST -DVERBOSE
 	$(CC) test.c -lpthread -o out/qcsched_test-bypass-repeat -DBYPASS_TEST -DTEST_REPEAT
 
 clean:
