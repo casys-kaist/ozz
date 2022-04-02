@@ -44,6 +44,12 @@ static void qcsched_vmi_hint__ssb_do_emulate(CPUState *cpu, target_ulong addr)
     vmi_info.__ssb_do_emulate = addr;
 }
 
+static void qcsched_vmi_hint__preempt_count(CPUState *cpu, target_ulong addr)
+{
+    DRPRINTF(cpu, "__preempt_count: %lx\n", addr);
+    vmi_info.__preempt_count = addr;
+}
+
 static bool
 qcsched_vmi_lock_info_duplicated(struct qcsched_vmi_lock_info *lock_info,
                                  struct qcsched_vmi_lock *vmi_lock)
@@ -145,6 +151,9 @@ target_ulong qcsched_vmi_hint(CPUState *cpu, target_ulong type,
         break;
     case VMI__SSB_DO_EMULATE:
         qcsched_vmi_hint__ssb_do_emulate(cpu, addr);
+        break;
+    case VMI__PREEMPT_COUNT:
+        qcsched_vmi_hint__preempt_count(cpu, addr);
         break;
     case VMI_LOCK_ACQUIRE:
         trylock = (addr >> 2) & 1;

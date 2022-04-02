@@ -27,6 +27,7 @@ struct qcsched_vmi_info {
     target_ulong __per_cpu_offset[64];
     target_ulong current_task;
     target_ulong __ssb_do_emulate;
+    target_ulong __preempt_count;
     struct qcsched_vmi_lock_info lock_info[MAX_CPUS];
 };
 
