@@ -24,6 +24,7 @@ type Knotter struct {
 	ReassignThreadID bool
 
 	commHsh map[uint64]struct{}
+	knotHsh map[uint64]struct{}
 
 	// input
 	seqCount int
@@ -270,7 +271,7 @@ func (knotter *Knotter) formCommunicationAddr(accesses []primitive.Access) {
 			// Communications
 			candidates := []primitive.Communication{{acc1, acc2}, {acc2, acc1}}
 			for _, cand := range candidates {
-				if knotter.dupedComm(cand) {
+				if knotter.duppedComm(cand) {
 					continue
 				}
 				knotter.comms = append(knotter.comms, cand)
@@ -279,7 +280,7 @@ func (knotter *Knotter) formCommunicationAddr(accesses []primitive.Access) {
 	}
 }
 
-func (knotter *Knotter) dupedComm(comm primitive.Communication) bool {
+func (knotter *Knotter) duppedComm(comm primitive.Communication) bool {
 	// A communication is redundant if there is another that accesses
 	// have the same timestamp with corresponding accesses.
 	hsh := comm.Hash()
@@ -290,6 +291,7 @@ func (knotter *Knotter) dupedComm(comm primitive.Communication) bool {
 
 func (knotter *Knotter) formKnots() {
 	knotter.knots = []primitive.Segment{}
+	knotter.knotHsh = make(map[uint64]struct{})
 	for i := 0; i < len(knotter.comms); i++ {
 		for j := i + 1; j < len(knotter.comms); j++ {
 			comm1, comm2 := knotter.comms[i].(primitive.Communication), knotter.comms[j].(primitive.Communication)
@@ -300,9 +302,19 @@ func (knotter *Knotter) formKnots() {
 			if typ := knot.Type(); typ == primitive.KnotParallel || typ == primitive.KnotInvalid {
 				continue
 			}
+			if knotter.duppedKnot(knot) {
+				continue
+			}
 			knotter.knots = append(knotter.knots, knot)
 		}
 	}
+}
+
+func (knotter *Knotter) duppedKnot(knot primitive.Knot) bool {
+	hsh := knot.Hash()
+	_, ok := knotter.knotHsh[hsh]
+	knotter.knotHsh[hsh] = struct{}{}
+	return ok
 }
 
 func (knotter *Knotter) GetCommunications() []primitive.Segment {
