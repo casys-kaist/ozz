@@ -213,6 +213,9 @@ github.com/jstemmer/go-junit-report/parser
 # github.com/kisielk/gotool v1.0.0
 github.com/kisielk/gotool
 github.com/kisielk/gotool/internal/load
+# github.com/knightsc/gapstone v4.0.1+incompatible
+## explicit
+github.com/knightsc/gapstone
 # github.com/kulti/thelper v0.3.1
 github.com/kulti/thelper/pkg/analyzer
 # github.com/kunwardeep/paralleltest v1.0.2
@@ -246,11 +249,6 @@ github.com/mgechev/revive/lint
 github.com/mgechev/revive/rule
 # github.com/mitchellh/go-homedir v1.1.0
 github.com/mitchellh/go-homedir
-# github.com/mitchellh/hashstructure v1.1.0
-## explicit
-github.com/mitchellh/hashstructure
-# github.com/mitchellh/hashstructure/v2 v2.0.2
-## explicit
 # github.com/mitchellh/mapstructure v1.3.3
 ## explicit
 github.com/mitchellh/mapstructure
@@ -394,8 +392,6 @@ go.opencensus.io/trace
 go.opencensus.io/trace/internal
 go.opencensus.io/trace/propagation
 go.opencensus.io/trace/tracestate
-# golang.org/x/arch v0.0.0-20210923205945-b76863e36670
-## explicit
 # golang.org/x/lint v0.0.0-20200302205851-738671d3881b
 golang.org/x/lint
 golang.org/x/lint/golint
