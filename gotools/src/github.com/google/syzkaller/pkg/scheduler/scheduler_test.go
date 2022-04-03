@@ -219,6 +219,10 @@ func TestExcavateKnotsTwoSeqs(t *testing.T) {
 			[]string{"cve-2019-6974-seq1", "cve-2019-6974-seq2"},
 			CVE20196974_2,
 		},
+		{
+			[]string{"cve-2019-6974-2-seq1", "cve-2019-6974-2-seq2"},
+			CVE20196974_3,
+		},
 	}
 	for _, test := range tests {
 		knots := loadKnots(t, test.filenames)
@@ -299,6 +303,10 @@ var CVE20196974 = primitive.Knot{
 var CVE20196974_2 = primitive.Knot{
 	{{Inst: 0x8d57633a, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x8d592198, Size: 4, Typ: primitive.TypeLoad}},
 	{{Inst: 0x81f9e606, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x81f9ecf8, Size: 4, Typ: primitive.TypeLoad}}}
+
+var CVE20196974_3 = primitive.Knot{
+	{{Inst: 0x8d576637, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x8d592495, Size: 4, Typ: primitive.TypeLoad}},
+	{{Inst: 0x81f9ebf6, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x81f9f2e8, Size: 4, Typ: primitive.TypeLoad}}}
 
 func BenchmarkExcavateKnots(b *testing.B) {
 	benchmarkExcavateKnots(b)
