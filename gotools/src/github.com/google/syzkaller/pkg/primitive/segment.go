@@ -15,7 +15,7 @@ func (comm Communication) Hash() uint64 {
 	for i := 0; i < 2; i++ {
 		w.write(comm[i].Inst)
 		w.write(uint32(comm[i].Thread))
-		w.write(0)
+		w.write(comm[i].Timestamp)
 	}
 	return hash(b)
 }
