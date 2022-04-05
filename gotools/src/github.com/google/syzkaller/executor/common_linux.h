@@ -2594,7 +2594,7 @@ static void initialize_vhci()
 		fail("read failed");
 
 	if (vendor_pkt.type != HCI_VENDOR_PKT)
-		fail("wrong response packet");
+		failmsg("wrong response packet", "expected=%d, got=%d", HCI_VENDOR_PKT, vendor_pkt.type);
 
 	debug("hci dev id: %x\n", vendor_pkt.id);
 
