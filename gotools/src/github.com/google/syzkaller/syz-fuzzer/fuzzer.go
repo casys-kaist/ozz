@@ -51,7 +51,7 @@ type Fuzzer struct {
 	target            *prog.Target
 	triagedCandidates uint32
 	timeouts          targets.Timeouts
-	shifter           map[uint]uint
+	shifter           map[uint32]uint32
 
 	faultInjectionEnabled    bool
 	comparisonTracingEnabled bool
@@ -343,21 +343,18 @@ func main() {
 	fuzzer.pollLoop()
 }
 
-func readShifter(shifterPath string) map[uint]uint {
+func readShifter(shifterPath string) map[uint32]uint32 {
 	if shifter, err := __readShifter(shifterPath); err != nil {
 		log.Logf(0, "Failed to read shifter: %v", err)
 		return nil
 	} else {
-		for k, v := range shifter {
-			log.Logf(0, "%x %d", k, v)
-		}
 		return shifter
 	}
 }
 
 // XXX: copied from the binimage package. We cannot import binimage
 // since it requires libcapstone.
-func __readShifter(path string) (map[uint]uint, error) {
+func __readShifter(path string) (map[uint32]uint32, error) {
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -366,7 +363,7 @@ func __readShifter(path string) (map[uint]uint, error) {
 	buf := bytes.NewBuffer(data)
 	decoder := gob.NewDecoder(buf)
 
-	var shifter map[uint]uint
+	var shifter map[uint32]uint32
 	err = decoder.Decode(&shifter)
 	if err != nil {
 		return nil, err

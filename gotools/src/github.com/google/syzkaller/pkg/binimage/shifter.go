@@ -16,7 +16,7 @@ import (
 	"github.com/knightsc/gapstone"
 )
 
-func (bin *BinaryImage) BuildOrReadShifter() (map[uint]uint, string, []string, error) {
+func (bin *BinaryImage) BuildOrReadShifter() (map[uint32]uint32, string, []string, error) {
 	hsh, err := osutil.BinaryHash(bin.image)
 	if err != nil {
 		log.Fatalf("%v", err)
@@ -43,8 +43,8 @@ func (bin *BinaryImage) BuildOrReadShifter() (map[uint]uint, string, []string, e
 	}
 }
 
-func (bin *BinaryImage) buildShifter() (map[uint]uint, []string, error) {
-	bin.shifter = make(map[uint]uint)
+func (bin *BinaryImage) buildShifter() (map[uint32]uint32, []string, error) {
+	bin.shifter = make(map[uint32]uint32)
 
 	text := bin._elf.Section(".text")
 	data, err := text.Data()
@@ -82,7 +82,7 @@ func (bin *BinaryImage) buildShifterForFunction(data []byte, sym elf.Symbol) err
 	}
 
 	type kmemcovCall struct {
-		addr uint
+		addr uint32
 		load bool
 	}
 
@@ -110,7 +110,7 @@ func (bin *BinaryImage) buildShifterForFunction(data []byte, sym elf.Symbol) err
 				// We want the *return* address of the call
 				// instruction
 				kmemcovCallInst = kmemcovCall{
-					addr: insn.Address + insn.Size,
+					addr: uint32(insn.Address + insn.Size),
 					load: callee == bin.kmemcovLoad,
 				}
 			}
@@ -119,7 +119,7 @@ func (bin *BinaryImage) buildShifterForFunction(data []byte, sym elf.Symbol) err
 		} else if ok := memoryOperand(insn, kmemcovCallInst.load); ok {
 			// We will install a breakpoint on the *next* instruction
 			// of the memory accessing instruction
-			dst := insn.Address + insn.Size
+			dst := uint32(insn.Address + insn.Size)
 			bin.shifter[kmemcovCallInst.addr] = dst - kmemcovCallInst.addr
 			kmemcovCallInst.addr = 0
 		}
@@ -155,7 +155,7 @@ func memoryOperand(insn gapstone.Instruction, load bool) bool {
 	return false
 }
 
-func ReadShifter(path string) (map[uint]uint, error) {
+func ReadShifter(path string) (map[uint32]uint32, error) {
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -164,7 +164,7 @@ func ReadShifter(path string) (map[uint]uint, error) {
 	buf := bytes.NewBuffer(data)
 	decoder := gob.NewDecoder(buf)
 
-	var shifter map[uint]uint
+	var shifter map[uint32]uint32
 	err = decoder.Decode(&shifter)
 	if err != nil {
 		return nil, err
@@ -173,7 +173,7 @@ func ReadShifter(path string) (map[uint]uint, error) {
 	return shifter, nil
 }
 
-func WriteShifter(path string, shifter map[uint]uint) error {
+func WriteShifter(path string, shifter map[uint32]uint32) error {
 	buf := new(bytes.Buffer)
 	encoder := gob.NewEncoder(buf)
 

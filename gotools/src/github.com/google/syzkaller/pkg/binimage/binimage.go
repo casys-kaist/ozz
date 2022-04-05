@@ -35,7 +35,7 @@ type BinaryImage struct {
 	// address of sanitize_memcov_trace_store
 	kmemcovStore uint64
 
-	shifter map[uint]uint
+	shifter map[uint32]uint32
 }
 
 func BuildBinaryImage(workdir, image string) (*BinaryImage, error) {

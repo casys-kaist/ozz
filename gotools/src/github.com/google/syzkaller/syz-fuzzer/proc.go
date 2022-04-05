@@ -476,14 +476,10 @@ func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.P
 			time.Sleep(time.Second)
 			continue
 		}
-		retry := false
-		for _, ci := range p.Contender.Calls {
-			inf := info.Calls[ci]
-			if inf.Flags&ipc.CallRetry != 0 {
-				retry = true
-				break
-			}
-		}
+
+		proc.shiftAccesses(info)
+
+		retry := needRetry(p, info)
 		proc.logResult(p, info, hanged, retry)
 		log.Logf(2, "result hanged=%v retry=%v: %s", hanged, retry, output)
 		if retry {
@@ -497,6 +493,32 @@ func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.P
 		}
 		return info
 	}
+}
+
+func (proc *Proc) shiftAccesses(info *ipc.ProgInfo) {
+	if proc.fuzzer.shifter == nil {
+		return
+	}
+	for i := range info.Calls {
+		for j := range info.Calls[i].Access {
+			inst := info.Calls[i].Access[j].Inst
+			if shift, ok := proc.fuzzer.shifter[inst]; ok {
+				info.Calls[i].Access[j].Inst += shift
+			}
+		}
+	}
+}
+
+func needRetry(p *prog.Prog, info *ipc.ProgInfo) bool {
+	retry := false
+	for _, ci := range p.Contender.Calls {
+		inf := info.Calls[ci]
+		if inf.Flags&ipc.CallRetry != 0 {
+			retry = true
+			break
+		}
+	}
+	return retry
 }
 
 func buildScheduleFilter(p *prog.Prog, info *ipc.ProgInfo) []uint32 {
