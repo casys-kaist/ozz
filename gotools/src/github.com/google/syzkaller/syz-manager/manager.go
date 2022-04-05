@@ -170,7 +170,7 @@ func RunManager(cfg *mgrconfig.Config) {
 	}
 
 	vmlinux := filepath.Join(cfg.KernelObj, "vmlinux")
-	binImage, err := binimage.BuildBinaryImage(vmlinux)
+	binImage, err := binimage.BuildBinaryImage(cfg.Workdir, vmlinux)
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
@@ -201,6 +201,7 @@ func RunManager(cfg *mgrconfig.Config) {
 		binImage:         binImage,
 	}
 
+	mgr.buildShifter()
 	mgr.preloadCorpus()
 	mgr.initStats() // Initializes prometheus variables.
 	mgr.initHTTP()  // Creates HTTP server.
@@ -501,6 +502,19 @@ func (mgr *Manager) seedDir(typ string) (dir string) {
 		}
 	}
 	return dir
+}
+
+func (mgr *Manager) buildShifter() {
+	shifter, failed, err := mgr.binImage.BuildOrReadShifter()
+	if err != nil {
+		log.Logf(0, "During building shifter: %v", err)
+	}
+	for _, failed := range failed {
+		log.Logf(0, "Failed to build shfiter for %s", failed)
+	}
+	for k, v := range shifter {
+		log.Logf(4, "%x %d", k, v)
+	}
 }
 
 func (mgr *Manager) checkKernelVersion() {

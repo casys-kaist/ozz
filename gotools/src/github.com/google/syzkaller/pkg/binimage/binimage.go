@@ -8,29 +8,37 @@ import (
 	"os"
 	"sort"
 
+	"github.com/knightsc/gapstone"
+
 	"github.com/google/syzkaller/pkg/log"
 )
 
 type BinaryImage struct {
+	workdir string
+	image   string
+
+	_elf *elf.File
 	/* not used anyway */
-	_elf   *elf.File
 	_dwarf *dwarf.Data
 
 	// dwarf reader
 	reader *dwarf.Reader
 
+	engine gapstone.Engine
+
 	*elf.Section
-	symbols  []elf.Symbol
-	symToDir map[elf.Symbol]string
+	symbols []elf.Symbol
 	// address of __sanitizer_cov_trace_pc
 	kcov uint64
 	// address of sanitize_memcov_trace_load
 	kmemcovLoad uint64
 	// address of sanitize_memcov_trace_store
 	kmemcovStore uint64
+
+	shifter map[uint]uint
 }
 
-func BuildBinaryImage(image string) (*BinaryImage, error) {
+func BuildBinaryImage(workdir, image string) (*BinaryImage, error) {
 	f, err := os.Open(image)
 	if err != nil {
 		return nil, err
@@ -39,14 +47,14 @@ func BuildBinaryImage(image string) (*BinaryImage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return buildBinaryImage(_elf), nil
+	return buildBinaryImage(workdir, image, _elf)
 }
 
-func buildBinaryImage(_elf *elf.File) *BinaryImage {
+func buildBinaryImage(workdir, image string, _elf *elf.File) (*BinaryImage, error) {
 	if _elf.Class.String() != "ELFCLASS64" || _elf.Machine.String() != "EM_X86_64" {
 		log.Fatalf("only support x86_64")
 		/* not reachable */
-		return nil
+		return nil, nil
 	}
 
 	text := _elf.Section(".text")
@@ -79,19 +87,28 @@ func buildBinaryImage(_elf *elf.File) *BinaryImage {
 		}
 	}
 
-	symToDir := make(map[elf.Symbol]string)
+	engine, err := gapstone.New(
+		gapstone.CS_ARCH_X86,
+		gapstone.CS_MODE_64,
+	)
+	if err != nil {
+		return nil, err
+	}
+	engine.SetOption(gapstone.CS_OPT_DETAIL, gapstone.CS_OPT_ON)
 
 	return &BinaryImage{
+		workdir:      workdir,
+		image:        image,
 		_elf:         _elf,
 		_dwarf:       _dwarf,
 		reader:       reader,
 		Section:      text,
 		symbols:      symbols,
-		symToDir:     symToDir,
 		kcov:         kcov,
 		kmemcovLoad:  kmemcovLoad,
 		kmemcovStore: kmemcovStore,
-	}
+		engine:       engine,
+	}, nil
 }
 
 func (bin *BinaryImage) Function(addr uint64) elf.Symbol {
@@ -135,6 +152,6 @@ func fileFromAddr(reader *dwarf.Reader, addr uint64) string {
 
 const (
 	KCOV_FUNCNAME          = "__sanitizer_cov_trace_pc"
-	KMEMCOV_STORE_FUNCNAME = ""
-	KMEMCOV_LOAD_FUNCNAME  = ""
+	KMEMCOV_STORE_FUNCNAME = "sanitize_memcov_trace_store"
+	KMEMCOV_LOAD_FUNCNAME  = "sanitize_memcov_trace_load"
 )
