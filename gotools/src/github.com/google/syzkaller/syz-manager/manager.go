@@ -5,12 +5,10 @@ package main
 
 import (
 	"bytes"
-	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
 	golog "log"
 	"math/rand"
@@ -507,7 +505,7 @@ func (mgr *Manager) seedDir(typ string) (dir string) {
 
 func (mgr *Manager) checkKernelVersion() {
 	fn := filepath.Join(mgr.cfg.KernelObj, "vmlinux")
-	hsh, err := binaryHash(fn)
+	hsh, err := osutil.BinaryHash(fn)
 	if err != nil {
 		log.Fatalf("Failed to hash %v", fn)
 	}
@@ -1429,20 +1427,6 @@ func publicWebAddr(addr string) string {
 		}
 	}
 	return "http://" + addr
-}
-
-func binaryHash(filePath string) ([]byte, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	hash := md5.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return nil, err
-	}
-	return hash.Sum(nil), nil
 }
 
 const versionKey = "kernelversion"
