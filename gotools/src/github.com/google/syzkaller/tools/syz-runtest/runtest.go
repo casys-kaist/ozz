@@ -173,7 +173,7 @@ func (mgr *Manager) boot(name string, index int) (*report.Report, error) {
 			return nil, fmt.Errorf("failed to copy binary: %v", err)
 		}
 	}
-	cmd := instance.FuzzerCmd(fuzzerBin, executorBin, name,
+	cmd := instance.FuzzerCmd(fuzzerBin, executorBin, "", name,
 		mgr.cfg.TargetOS, mgr.cfg.TargetArch, fwdAddr, mgr.cfg.Sandbox, mgr.cfg.Procs, 0,
 		mgr.cfg.Cover, mgr.debug, false, true, true, mgr.cfg.Timeouts.Slowdown, true, false)
 	outc, errc, err := inst.Run(time.Hour, mgr.vmStop, cmd)

@@ -16,7 +16,7 @@ import (
 	"github.com/knightsc/gapstone"
 )
 
-func (bin *BinaryImage) BuildOrReadShifter() (map[uint]uint, []string, error) {
+func (bin *BinaryImage) BuildOrReadShifter() (map[uint]uint, string, []string, error) {
 	hsh, err := osutil.BinaryHash(bin.image)
 	if err != nil {
 		log.Fatalf("%v", err)
@@ -25,60 +25,22 @@ func (bin *BinaryImage) BuildOrReadShifter() (map[uint]uint, []string, error) {
 
 	absPath := filepath.Join(bin.workdir, "shifter-"+filename)
 	if osutil.IsExist(absPath) {
-		shifter, err := bin.readShifter(absPath)
+		shifter, err := ReadShifter(absPath)
 		if err != nil {
-			return nil, nil, err
+			return nil, "", nil, err
 		}
-		return shifter, nil, nil
+		return shifter, absPath, nil, nil
 	} else {
 		shifter, failed, err := bin.buildShifter()
 		if err != nil {
-			return shifter, failed, err
+			return nil, "", nil, err
 		}
-		err = bin.writeShifter(absPath, shifter)
+		err = WriteShifter(absPath, shifter)
 		if err != nil {
-			return nil, nil, err
+			return nil, "", nil, err
 		}
-		return shifter, failed, nil
+		return shifter, absPath, failed, nil
 	}
-}
-
-func (bin *BinaryImage) readShifter(path string) (map[uint]uint, error) {
-	data, err := ioutil.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	buf := bytes.NewBuffer(data)
-	decoder := gob.NewDecoder(buf)
-
-	var shifter map[uint]uint
-	err = decoder.Decode(&shifter)
-	if err != nil {
-		return nil, err
-	}
-
-	return shifter, nil
-}
-
-func (bin *BinaryImage) writeShifter(path string, shifter map[uint]uint) error {
-	buf := new(bytes.Buffer)
-	encoder := gob.NewEncoder(buf)
-
-	err := encoder.Encode(shifter)
-	if err != nil {
-		return err
-	}
-
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-
-	w := bufio.NewWriter(f)
-	buf.WriteTo(w)
-
-	return nil
 }
 
 func (bin *BinaryImage) buildShifter() (map[uint]uint, []string, error) {
@@ -191,4 +153,42 @@ func memoryOperand(insn gapstone.Instruction, load bool) bool {
 		}
 	}
 	return false
+}
+
+func ReadShifter(path string) (map[uint]uint, error) {
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	buf := bytes.NewBuffer(data)
+	decoder := gob.NewDecoder(buf)
+
+	var shifter map[uint]uint
+	err = decoder.Decode(&shifter)
+	if err != nil {
+		return nil, err
+	}
+
+	return shifter, nil
+}
+
+func WriteShifter(path string, shifter map[uint]uint) error {
+	buf := new(bytes.Buffer)
+	encoder := gob.NewEncoder(buf)
+
+	err := encoder.Encode(shifter)
+	if err != nil {
+		return err
+	}
+
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+
+	w := bufio.NewWriter(f)
+	buf.WriteTo(w)
+
+	return nil
 }

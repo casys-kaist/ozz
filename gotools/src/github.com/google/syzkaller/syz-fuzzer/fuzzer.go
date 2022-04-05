@@ -4,8 +4,11 @@
 package main
 
 import (
+	"bytes"
+	"encoding/gob"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	golog "log"
 	"math/rand"
 	"os"
@@ -48,6 +51,7 @@ type Fuzzer struct {
 	target            *prog.Target
 	triagedCandidates uint32
 	timeouts          targets.Timeouts
+	shifter           map[uint]uint
 
 	faultInjectionEnabled    bool
 	comparisonTracingEnabled bool
@@ -170,6 +174,7 @@ func main() {
 		flagTest    = flag.Bool("test", false, "enable image testing mode")      // used by syz-ci
 		flagRunTest = flag.Bool("runtest", false, "enable program testing mode") // used by pkg/runtest
 		flagGen     = flag.Bool("gen", true, "generate/mutate inputs")
+		flagShifter = flag.String("shifter", "./shifter", "path to the shifter")
 	)
 	defer tool.Init()()
 	outputType := parseOutputType(*flagOutput)
@@ -272,6 +277,8 @@ func main() {
 		return
 	}
 
+	shifter := readShifter(*flagShifter)
+
 	needPoll := make(chan struct{}, 1)
 	needPoll <- struct{}{}
 	fuzzer := &Fuzzer{
@@ -287,6 +294,7 @@ func main() {
 		faultInjectionEnabled:    false,
 		comparisonTracingEnabled: false,
 		corpusHashes:             make(map[hash.Sig]struct{}),
+		shifter:                  shifter,
 
 		// XXX
 		// I'm not sure we want to keep these two interleaving signals
@@ -333,6 +341,38 @@ func main() {
 	}
 
 	fuzzer.pollLoop()
+}
+
+func readShifter(shifterPath string) map[uint]uint {
+	if shifter, err := __readShifter(shifterPath); err != nil {
+		log.Logf(0, "Failed to read shifter: %v", err)
+		return nil
+	} else {
+		for k, v := range shifter {
+			log.Logf(0, "%x %d", k, v)
+		}
+		return shifter
+	}
+}
+
+// XXX: copied from the binimage package. We cannot import binimage
+// since it requires libcapstone.
+func __readShifter(path string) (map[uint]uint, error) {
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	buf := bytes.NewBuffer(data)
+	decoder := gob.NewDecoder(buf)
+
+	var shifter map[uint]uint
+	err = decoder.Decode(&shifter)
+	if err != nil {
+		return nil, err
+	}
+
+	return shifter, nil
 }
 
 func collectMachineInfos(target *prog.Target) ([]byte, []host.KernelModule) {

@@ -74,6 +74,7 @@ type Manager struct {
 	fresh          bool
 	numFuzzing     uint32
 	numReproducing uint32
+	shifterPath    string
 
 	seedType string
 
@@ -505,12 +506,15 @@ func (mgr *Manager) seedDir(typ string) (dir string) {
 }
 
 func (mgr *Manager) buildShifter() {
-	shifter, failed, err := mgr.binImage.BuildOrReadShifter()
+	shifter, path, failed, err := mgr.binImage.BuildOrReadShifter()
 	if err != nil {
-		log.Logf(0, "During building shifter: %v", err)
+		log.Logf(0, "Failed to build a shifter: %v", err)
+		mgr.shifterPath = ""
+		return
 	}
+	mgr.shifterPath = path
 	for _, failed := range failed {
-		log.Logf(0, "Failed to build shfiter for %s", failed)
+		log.Logf(2, "Failed to build shfiter for %s", failed)
 	}
 	for k, v := range shifter {
 		log.Logf(4, "%x %d", k, v)
@@ -729,6 +733,12 @@ func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Re
 		return nil, nil, fmt.Errorf("failed to setup port forwarding: %v", err)
 	}
 
+	shifterPath, err := inst.Copy(mgr.shifterPath)
+	if err != nil {
+		log.Logf(0, "failed to copy shifter: %v", err)
+		shifterPath = ""
+	}
+
 	fuzzerBin, err := inst.Copy(mgr.cfg.FuzzerBin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to copy binary: %v", err)
@@ -756,7 +766,7 @@ func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Re
 	atomic.AddUint32(&mgr.numFuzzing, 1)
 	defer atomic.AddUint32(&mgr.numFuzzing, ^uint32(0))
 
-	cmd := instance.FuzzerCmd(fuzzerBin, executorBin, instanceName,
+	cmd := instance.FuzzerCmd(fuzzerBin, executorBin, shifterPath, instanceName,
 		mgr.cfg.TargetOS, mgr.cfg.TargetArch, fwdAddr, mgr.cfg.Sandbox, procs, fuzzerV,
 		mgr.cfg.Cover, *flagDebug, false, false, true, mgr.cfg.Timeouts.Slowdown, *flagGen, true)
 	outc, errc, err := inst.Run(mgr.cfg.Timeouts.VMRunningTime, mgr.vmStop, cmd)

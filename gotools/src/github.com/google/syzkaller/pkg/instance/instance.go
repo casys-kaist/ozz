@@ -434,7 +434,7 @@ func (inst *inst) testProgram(command string, testTime time.Duration) error {
 	return &CrashError{Report: rep}
 }
 
-func FuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox string, procs, verbosity int,
+func FuzzerCmd(fuzzer, executor, shifter, name, OS, arch, fwdAddr, sandbox string, procs, verbosity int,
 	cover, debug, test, runtest, optionalFlags bool, slowdown int, generate, pinning bool) string {
 	osArg := ""
 	if targets.Get(OS, arch).HostFuzzer {
@@ -463,15 +463,15 @@ func FuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox string, procs,
 	}
 	// Monitor memory usage if debug mode
 	monitor := debug
-	return fmt.Sprintf("%v %v -executor=%v -name=%v -arch=%v%v -manager=%v -sandbox=%v"+
+	return fmt.Sprintf("%v %v -executor=%v -shifter=%v -name=%v -arch=%v%v -manager=%v -sandbox=%v"+
 		" -procs=%v -cover=%v -debug=%v -test=%v%v%v%v -gen=%v -monitor-memory-usage=%v",
-		taskset, fuzzer, executor, name, arch, osArg, fwdAddr, sandbox,
+		taskset, fuzzer, executor, shifter, name, arch, osArg, fwdAddr, sandbox,
 		procs, cover, debug, test, runtestArg, verbosityArg, optionalArg, generate, monitor)
 }
 
 func OldFuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox string, procs int,
 	cover, test, optionalFlags bool, slowdown int) string {
-	return FuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox, procs, 0, cover, false, test, false,
+	return FuzzerCmd(fuzzer, executor, "", name, OS, arch, fwdAddr, sandbox, procs, 0, cover, false, test, false,
 		optionalFlags, slowdown, true, false)
 }
 
