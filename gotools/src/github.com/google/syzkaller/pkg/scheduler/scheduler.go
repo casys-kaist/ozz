@@ -338,8 +338,22 @@ func (sched *Scheduler) GenerateSchedPoints() ([]primitive.Access, bool) {
 	if !ok {
 		return nil, false
 	}
+
+	// TODO: This is a current implementation's limitation. QEMU
+	// cannot handle schedpoints on the same instruction
+	type k struct {
+		inst   uint32
+		thread uint32
+	}
+	m := make(map[k]struct{})
+
 	for _, node := range nodes {
 		acc := node.(primitive.Access)
+		k0 := k{inst: acc.Inst, thread: uint32(acc.Thread)}
+		if _, ok := m[k0]; ok {
+			continue
+		}
+		m[k0] = struct{}{}
 		sched.schedPoints = append(sched.schedPoints, primitive.Access(acc))
 	}
 	return sched.schedPoints, true
