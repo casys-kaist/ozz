@@ -108,13 +108,6 @@ func (p *Prog) unthreading() {
 	p.fixupEpoch()
 }
 
-type ThreadedProg struct {
-	P         *Prog
-	Hint      []primitive.Segment
-	Scheduled int
-	Prio      int
-}
-
 func (p *Prog) sanitizeRazzer() error {
 	p.fixupEpoch()
 	epoch := make(map[uint64]uint64)
@@ -159,4 +152,16 @@ func (p *Prog) sanitizeRazzerSequential() error {
 		used[c.Epoch] = struct{}{}
 	}
 	return nil
+}
+
+type ScheduledProg struct {
+	P         *Prog
+	Knot      []primitive.Segment
+	Scheduled int
+	Prio      int
+}
+
+type Candidate struct {
+	P    *Prog
+	Hint []primitive.Segment
 }

@@ -127,7 +127,7 @@ func (proc *Proc) needScheduling() bool {
 	if !proc.fuzzer.generate {
 		thold = 1
 	}
-	if len(proc.fuzzer.threadedCorpus) < thold {
+	if len(proc.fuzzer.candidates) < thold {
 		return false
 	}
 	// prob = 1 / (1 + exp(-25 * (-x + 0.25))) where x = (scheduled/executed)
@@ -149,7 +149,7 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot, force bool) {
 		// we tried to mutate a schedule.
 		proc.scheduled++
 		tp := fuzzerSnapshot.chooseThreadedProgram(proc.rnd)
-		if tp == nil {
+		if tp == nil || len(tp.Hint) == 0 {
 			continue
 		}
 		p := tp.P.Clone()
@@ -299,7 +299,7 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 	knotter := scheduler.Knotter{}
 	for i := 0; i < 2; i++ {
 		inf := proc.executeRaw(proc.execOpts, p, StatThreading)
-		seq := sequentialTrace(inf, p.Threaded)
+		seq := sequentialTrace(inf)
 		if !knotter.AddSequentialTrace(seq) {
 			log.Logf(0, "[WARN] failed to add the sequence trace")
 			return
@@ -309,22 +309,25 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 	knotter.ExcavateKnots()
 	knots := knotter.GetKnots()
 
+	// Newly found knots := {newly found knots during threading work}
+	// \cup {speculated knots when picking up threading work}
 	newKnots := proc.fuzzer.newKnot(knots)
 	newKnots = append(newKnots, primitive.Intersect(knots, item.knots)...)
 
 	// Now we know newly found knots
-	proc.fuzzer.addThreadedInputToCorpus(p, newKnots)
+	proc.fuzzer.bookScheduleGuide(p, newKnots)
 }
 
-func sequentialTrace(info *ipc.ProgInfo, threaded bool) []primitive.SerialAccess {
-	if !threaded {
-		return nil
-	}
+func sequentialTrace(info *ipc.ProgInfo) []primitive.SerialAccess {
 	res := []primitive.SerialAccess{}
 	for _, c := range info.Calls {
 		if len(c.Access) != 0 {
 			res = append(res, c.Access)
 		}
+	}
+	// TODO: This is a current implementation's requirement
+	if !(len(res) == 0 || len(res) == 2) {
+		log.Fatalf("wrong")
 	}
 	return res
 }
@@ -404,10 +407,9 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 				continue
 			}
 			knotter.ExcavateKnots()
-			comms := knotter.GetCommunications()
 			knots := knotter.GetKnots()
 
-			if newComms, newKnots := proc.fuzzer.newCommunication(comms), proc.fuzzer.newKnot(knots); len(newComms) != 0 || len(newKnots) != 0 {
+			if newKnots := proc.fuzzer.newKnot(knots); len(newKnots) != 0 {
 				proc.enqueueThreading(p, cont, newKnots)
 			}
 		}
@@ -415,7 +417,13 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 }
 
 func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.ProgInfo {
-	// TODO:
+	// NOTE: The only case that reaches here is scheduling work
+	seq := sequentialTrace(info)
+	knotter := scheduler.Knotter{}
+	knotter.AddSequentialTrace(seq)
+	knotter.ExcavateKnots()
+	knots := knotter.GetKnots()
+	proc.fuzzer.addThreadedInputToCorpus(p, knots)
 	return info
 }
 

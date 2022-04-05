@@ -56,29 +56,26 @@ type Fuzzer struct {
 	faultInjectionEnabled    bool
 	comparisonTracingEnabled bool
 
-	corpusMu       sync.RWMutex
-	corpus         []*prog.Prog
-	corpusHashes   map[hash.Sig]struct{}
-	corpusPrios    []int64
-	sumPrios       int64
-	threadedCorpus []*prog.ThreadedProg
+	corpusMu        sync.RWMutex
+	corpus          []*prog.Prog
+	corpusHashes    map[hash.Sig]struct{}
+	corpusPrios     []int64
+	sumPrios        int64
+	candidates      []*prog.Candidate
+	scheduledCorpus []*prog.ScheduledProg
 
 	signalMu     sync.RWMutex
 	corpusSignal signal.Signal // signal of inputs in corpus
 	maxSignal    signal.Signal // max signal ever observed including flakes
 	newSignal    signal.Signal // diff of maxSignal since last sync with master
 
-	// We maintain two information: communications and knots.
-	maxComms signal.Interleaving
-	// corpusComms signal.Interleaving
-	newComms signal.Interleaving
+	// We maintain knots as interleaving signals
+	maxKnots    signal.Interleaving
+	corpusKnots signal.Interleaving
+	newKnots    signal.Interleaving
 
-	maxKnots signal.Interleaving
-	// corpusKnots signal.Interleaving
-	newKnots signal.Interleaving
-
-	// Mostly for debugging scheduling mutation. If generate is true,
-	// procs do not generate/mutate inputs but schedule
+	// Mostly for debugging scheduling mutation. If generate is false,
+	// procs do not generate/mutate inputs but schedule.
 	generate bool
 
 	checkResult *rpctype.CheckArgs
@@ -86,10 +83,10 @@ type Fuzzer struct {
 }
 
 type FuzzerSnapshot struct {
-	corpus         []*prog.Prog
-	threadedCorpus []*prog.ThreadedProg
-	corpusPrios    []int64
-	sumPrios       int64
+	corpus      []*prog.Prog
+	candidates  []*prog.Candidate
+	corpusPrios []int64
+	sumPrios    int64
 }
 
 type Stat int
@@ -296,14 +293,10 @@ func main() {
 		corpusHashes:             make(map[hash.Sig]struct{}),
 		shifter:                  shifter,
 
-		// XXX
-		// I'm not sure we want to keep these two interleaving signals
-		// corpusComms: make(signal.Interleaving),
-		// corpusKnots: make(signal.Interleaving),
-		maxComms: make(signal.Interleaving),
-		newComms: make(signal.Interleaving),
-		maxKnots: make(signal.Interleaving),
-		newKnots: make(signal.Interleaving),
+		// XXX: I'm not sure we want to keep these two interleaving
+		corpusKnots: make(signal.Interleaving),
+		maxKnots:    make(signal.Interleaving),
+		newKnots:    make(signal.Interleaving),
 
 		checkResult: r.CheckResult,
 		generate:    *flagGen,
@@ -609,14 +602,20 @@ func (fuzzer *FuzzerSnapshot) chooseProgram(r *rand.Rand) *prog.Prog {
 	return fuzzer.corpus[idx]
 }
 
-func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.ThreadedProg {
-	if len(fuzzer.threadedCorpus) == 0 {
-		return nil
-	}
+func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.Candidate {
 	// TODO: Prioritize inputs according to the number of
 	// hints.
-	idx := r.Intn(len(fuzzer.threadedCorpus))
-	return fuzzer.threadedCorpus[idx]
+	for len(fuzzer.candidates) != 0 {
+		ln := len(fuzzer.candidates)
+		idx := r.Intn(ln)
+		tp := fuzzer.candidates[idx]
+		if len(tp.Hint) == 0 {
+			fuzzer.candidates[idx] = fuzzer.candidates[ln-1]
+			continue
+		}
+		return tp
+	}
+	return nil
 }
 
 func (fuzzer *Fuzzer) __addInputToCorpus(p *prog.Prog, sig hash.Sig, prio int64) {
@@ -645,43 +644,45 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 	}
 }
 
-// XXX: Below two functions' name are so confusing. Rename or merge
-// them
-func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, hint []primitive.Segment) {
+func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hint []primitive.Segment) {
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()
-	fuzzer.threadedCorpus = append(fuzzer.threadedCorpus, &prog.ThreadedProg{
+	fuzzer.candidates = append(fuzzer.candidates, &prog.Candidate{
 		P:    p,
 		Hint: hint,
 	})
 }
 
-func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, hint []primitive.Segment) {
+// XXX: Below two functions' name are so confusing. Rename or merge
+// them
+func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, knot []primitive.Segment) {
+	fuzzer.corpusMu.Lock()
+	defer fuzzer.corpusMu.Unlock()
+	fuzzer.scheduledCorpus = append(fuzzer.scheduledCorpus, &prog.ScheduledProg{
+		P:    p,
+		Knot: knot,
+	})
+}
+
+func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, knots []primitive.Segment) {
 	// NOTE: We do not further mutate threaded prog so we do not add
 	// it to corpus. This can be possibly limiting the fuzzer, but we
 	// don't have any evidence of it.
+	fuzzer.addInputToThreadedCorpus(p, knots)
 
-	atomic.AddUint64(&fuzzer.stats[StatScheduleHint], uint64(len(hint)))
-	fuzzer.addInputToThreadedCorpus(p, hint)
+	sign := signal.FromPrimitive(knots)
 
-	// TODO: How and when to manage the interleaving signals?
-
-	// sign := signal.FromPrimitive(knots)
-
-	// fuzzer.signalMu.Lock()
-	// defer fuzzer.signalMu.Unlock()
-	// fuzzer.corpusComms.Merge()
-	// fuzzer.maxComms.Merge(sign)
-	// fuzzer.corpusKnots.Merge()
-
-	// fuzzer.maxKnots.Merge(sign)
-	// fuzzer.newKnots.Merge(sign)
+	fuzzer.signalMu.Lock()
+	defer fuzzer.signalMu.Unlock()
+	fuzzer.maxKnots.Merge(sign)
+	fuzzer.newKnots.Merge(sign)
+	fuzzer.corpusKnots.Merge(sign)
 }
 
 func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
 	fuzzer.corpusMu.RLock()
 	defer fuzzer.corpusMu.RUnlock()
-	return FuzzerSnapshot{fuzzer.corpus, fuzzer.threadedCorpus, fuzzer.corpusPrios, fuzzer.sumPrios}
+	return FuzzerSnapshot{fuzzer.corpus, fuzzer.candidates, fuzzer.corpusPrios, fuzzer.sumPrios}
 }
 
 func (fuzzer *Fuzzer) addMaxSignal(sign signal.Signal) {
@@ -753,10 +754,6 @@ func (fuzzer *Fuzzer) newSegment(base *signal.Interleaving, segs []primitive.Seg
 		return nil
 	}
 	return diff
-}
-
-func (fuzzer *Fuzzer) newCommunication(comms []primitive.Segment) []primitive.Segment {
-	return fuzzer.newSegment(&fuzzer.maxComms, comms)
 }
 
 func (fuzzer *Fuzzer) newKnot(knots []primitive.Segment) []primitive.Segment {
