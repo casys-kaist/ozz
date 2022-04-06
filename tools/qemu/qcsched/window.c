@@ -213,7 +213,9 @@ static void __do_shrink_entry(CPUState *cpu,
         qcsched_window_deactivate_entry(cpu, window, entry);
 
     if (entry->schedpoint.order < window->from) {
-        ASSERT(window->from < window->until, "!(window->from < window->until)");
+        ASSERT(window->from < window->until,
+               "!(window->from (%d) < window->until (%d))", window->from,
+               window->until);
         return;
     }
 

@@ -152,22 +152,18 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot, force bool) {
 		if tp == nil || len(tp.Hint) == 0 {
 			continue
 		}
-		p := tp.P.Clone()
-
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
+
 		ok, remaining := p.MutateScheduleFromHint(proc.rnd, tp.Hint)
 		// We exclude used knots from tp.Hint even if
 		// p.MutateScheduleFromHint() fails because it will fail later
 		// anyway.
 		tp.Hint = remaining
 		if !ok {
-			log.Logf(0, "[WARN] failed to mutate a schedule")
 			continue
 		}
 		proc.execute(proc.execOpts, p, ProgNormal, StatSchedule)
 	}
-}
-
 }
 
 func (proc *Proc) triageInput(item *WorkTriage) {
@@ -629,7 +625,6 @@ func (proc *Proc) logResult(p *prog.Prog, info *ipc.ProgInfo, hanged, retry bool
 	for i := uint64(0); i < epochs; i++ {
 		logger.logEpochLocked(i)
 	}
-	logger.logNewCoverage()
 	log.Logf(2, "Retry: %v", retry)
 	logger.logFootprint()
 }
@@ -684,10 +679,6 @@ func (logger ResultLogger) logRowLocked(row []string) {
 		// TODO: We support standard output only, but don't want to
 		// quit with others
 	}
-}
-
-func (logger ResultLogger) logNewCoverage() {
-	// TODO
 }
 
 func (logger ResultLogger) logFootprint() {
