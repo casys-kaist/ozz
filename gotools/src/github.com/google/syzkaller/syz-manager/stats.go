@@ -33,7 +33,9 @@ type Stats struct {
 	corpusCoverFiltered Stat
 	corpusSignal        Stat
 	corpusInterleaving  Stat
+	corpusKnots         Stat
 	maxSignal           Stat
+	maxInterleaving     Stat
 
 	mu         sync.Mutex
 	namedStats map[string]uint64
@@ -76,7 +78,9 @@ func (stats *Stats) all() map[string]uint64 {
 		"filtered coverage":    stats.corpusCoverFiltered.get(),
 		"signal":               stats.corpusSignal.get(),
 		"interleaving signal":  stats.corpusInterleaving.get(),
+		"interleaving cover":   stats.corpusKnots.get(),
 		"max signal":           stats.maxSignal.get(),
+		"max interleaving":     stats.maxInterleaving.get(),
 	}
 	if stats.haveHub {
 		m["hub: send prog add"] = stats.hubSendProgAdd.get()

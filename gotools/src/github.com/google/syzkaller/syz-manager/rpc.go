@@ -45,13 +45,13 @@ type RPCServer struct {
 }
 
 type Fuzzer struct {
-	name           string
-	rotated        bool
-	inputs         []rpctype.RPCInput
-	newMaxSignal   signal.Signal
-	newMaxReadFrom signal.ReadFrom
-	rotatedSignal  signal.Signal
-	machineInfo    []byte
+	name               string
+	rotated            bool
+	inputs             []rpctype.RPCInput
+	newMaxSignal       signal.Signal
+	newMaxInterleaving interleaving.Signal
+	rotatedSignal      signal.Signal
+	machineInfo        []byte
 }
 
 type BugFrames struct {
@@ -107,9 +107,8 @@ func (serv *RPCServer) Connect(a *rpctype.ConnectArgs, r *rpctype.ConnectRes) er
 	defer serv.mu.Unlock()
 
 	f := &Fuzzer{
-		name:           a.Name,
-		machineInfo:    a.MachineInfo,
-		newMaxReadFrom: signal.NewReadFrom(),
+		name:        a.Name,
+		machineInfo: a.MachineInfo,
 	}
 	serv.fuzzers[a.Name] = f
 	r.MemoryLeakFrames = bugFrames.memoryLeaks
@@ -339,6 +338,8 @@ func (serv *RPCServer) NewScheduledInput(a *rpctype.NewScheduledInputArgs, r *in
 	if !serv.mgr.newScheduledInput(a.RPCScheduledInput, inputSignal) {
 		return nil
 	}
+	serv.corpusKnots.Merge(a.Cover)
+	serv.stats.corpusKnots.set(len(serv.corpusKnots))
 	serv.corpusInterleaving.Merge(diff)
 	serv.stats.corpusInterleaving.set(serv.corpusInterleaving.Len())
 	serv.stats.newScheduledInputs.inc()
@@ -371,11 +372,23 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 			f1.newMaxSignal.Merge(newMaxSignal)
 		}
 	}
+	newMaxInterleaving := serv.maxInterleaving.Diff(a.MaxInterleaving.Deserialize())
+	if !newMaxInterleaving.Empty() {
+		serv.maxInterleaving.Merge(newMaxInterleaving)
+		serv.stats.maxInterleaving.set(len(serv.maxInterleaving))
+		for _, f1 := range serv.fuzzers {
+			if f1 == f || f1.rotated {
+				continue
+			}
+			f1.newMaxInterleaving.Merge(newMaxInterleaving)
+		}
+	}
 	if f.rotated {
 		// Let rotated VMs run in isolation, don't send them anything.
 		return nil
 	}
 	r.MaxSignal = f.newMaxSignal.Split(2000).Serialize()
+	r.MaxInterleaving = f.newMaxInterleaving.Split(2000).Serialize()
 	if a.NeedCandidates {
 		r.Candidates = serv.mgr.candidateBatch(serv.batchSize)
 	}
@@ -399,8 +412,8 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 			f.inputs = nil
 		}
 	}
-	log.Logf(4, "poll from %v: candidates=%v inputs=%v maxsignal=%v",
-		a.Name, len(r.Candidates), len(r.NewInputs), len(r.MaxSignal.Elems))
+	log.Logf(4, "poll from %v: candidates=%v inputs=%v maxsignal=%v maxinterleaving=%v",
+		a.Name, len(r.Candidates), len(r.NewInputs), len(r.MaxSignal.Elems), len(r.MaxInterleaving))
 	return nil
 }
 

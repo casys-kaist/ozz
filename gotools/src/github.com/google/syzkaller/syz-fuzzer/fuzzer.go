@@ -471,19 +471,22 @@ func (fuzzer *Fuzzer) pollLoop() {
 
 func (fuzzer *Fuzzer) poll(needCandidates bool, stats map[string]uint64) bool {
 	a := &rpctype.PollArgs{
-		Name:           fuzzer.name,
-		NeedCandidates: needCandidates,
-		MaxSignal:      fuzzer.grabNewSignal().Serialize(),
-		Stats:          stats,
+		Name:            fuzzer.name,
+		NeedCandidates:  needCandidates,
+		MaxSignal:       fuzzer.grabNewSignal().Serialize(),
+		MaxInterleaving: fuzzer.grabNewInterleaving().Serialize(),
+		Stats:           stats,
 	}
 	r := &rpctype.PollRes{}
 	if err := fuzzer.manager.Call("Manager.Poll", a, r); err != nil {
 		log.Fatalf("Manager.Poll call failed: %v", err)
 	}
 	maxSignal := r.MaxSignal.Deserialize()
-	log.Logf(1, "poll: candidates=%v inputs=%v signal=%v",
-		len(r.Candidates), len(r.NewInputs), maxSignal.Len())
+	maxInterleaving := r.MaxInterleaving.Deserialize()
+	log.Logf(1, "poll: candidates=%v inputs=%v signal=%v interleaving=%v",
+		len(r.Candidates), len(r.NewInputs), maxSignal.Len(), maxInterleaving.Len())
 	fuzzer.addMaxSignal(maxSignal)
+	fuzzer.addMaxInterleaving(maxInterleaving)
 	for _, inp := range r.NewInputs {
 		fuzzer.addInputFromAnotherFuzzer(inp)
 	}
@@ -670,6 +673,15 @@ func (fuzzer *Fuzzer) addMaxSignal(sign signal.Signal) {
 	fuzzer.maxSignal.Merge(sign)
 }
 
+func (fuzzer *Fuzzer) addMaxInterleaving(sign interleaving.Signal) {
+	if sign.Len() == 0 {
+		return
+	}
+	fuzzer.signalMu.Lock()
+	defer fuzzer.signalMu.Unlock()
+	fuzzer.maxInterleaving.Merge(sign)
+}
+
 func (fuzzer *Fuzzer) grabNewSignal() signal.Signal {
 	fuzzer.signalMu.Lock()
 	defer fuzzer.signalMu.Unlock()
@@ -678,6 +690,17 @@ func (fuzzer *Fuzzer) grabNewSignal() signal.Signal {
 		return nil
 	}
 	fuzzer.newSignal = nil
+	return sign
+}
+
+func (fuzzer *Fuzzer) grabNewInterleaving() interleaving.Signal {
+	fuzzer.signalMu.Lock()
+	defer fuzzer.signalMu.Unlock()
+	sign := fuzzer.newInterleaving
+	if sign.Empty() {
+		return nil
+	}
+	fuzzer.newInterleaving = nil
 	return sign
 }
 

@@ -79,16 +79,18 @@ type NewScheduledInputArgs struct {
 }
 
 type PollArgs struct {
-	Name           string
-	NeedCandidates bool
-	MaxSignal      signal.Serial
-	Stats          map[string]uint64
+	Name            string
+	NeedCandidates  bool
+	MaxSignal       signal.Serial
+	MaxInterleaving interleaving.SerialSignal
+	Stats           map[string]uint64
 }
 
 type PollRes struct {
-	Candidates []RPCCandidate
-	NewInputs  []RPCInput
-	MaxSignal  signal.Serial
+	Candidates      []RPCCandidate
+	NewInputs       []RPCInput
+	MaxSignal       signal.Serial
+	MaxInterleaving interleaving.SerialSignal
 }
 
 type RunnerConnectArgs struct {
