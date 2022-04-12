@@ -1,64 +1,64 @@
-package primitive_test
+package interleaving_test
 
 import (
 	"testing"
 
-	"github.com/google/syzkaller/pkg/primitive"
+	"github.com/google/syzkaller/pkg/interleaving"
 )
 
 func TestKnotType(t *testing.T) {
 	tests := []struct {
-		knot primitive.Knot
-		ans  primitive.KnotType
+		knot interleaving.Knot
+		ans  interleaving.KnotType
 	}{
 		{
-			[2]primitive.Communication{
+			[2]interleaving.Communication{
 				{{Timestamp: 0, Thread: 0}, {Timestamp: 2, Thread: 1}},
 				{{Timestamp: 1, Thread: 0}, {Timestamp: 3, Thread: 1}},
 			},
-			primitive.KnotParallel,
+			interleaving.KnotParallel,
 		},
 		{
-			[2]primitive.Communication{
+			[2]interleaving.Communication{
 				{{Timestamp: 2, Thread: 1}, {Timestamp: 0, Thread: 0}},
 				{{Timestamp: 3, Thread: 1}, {Timestamp: 1, Thread: 0}},
 			},
-			primitive.KnotParallel,
+			interleaving.KnotParallel,
 		},
 		{
-			[2]primitive.Communication{
+			[2]interleaving.Communication{
 				{{Timestamp: 0, Thread: 0}, {Timestamp: 3, Thread: 1}},
 				{{Timestamp: 1, Thread: 1}, {Timestamp: 2, Thread: 0}},
 			},
-			primitive.KnotOverlapped,
+			interleaving.KnotOverlapped,
 		},
 		{
-			[2]primitive.Communication{
+			[2]interleaving.Communication{
 				{{Timestamp: 3, Thread: 1}, {Timestamp: 0, Thread: 0}},
 				{{Timestamp: 2, Thread: 0}, {Timestamp: 1, Thread: 1}},
 			},
-			primitive.KnotInvalid,
+			interleaving.KnotInvalid,
 		},
 		{
-			[2]primitive.Communication{
+			[2]interleaving.Communication{
 				{{Timestamp: 0, Thread: 1}, {Timestamp: 2, Thread: 0}},
 				{{Timestamp: 1, Thread: 0}, {Timestamp: 3, Thread: 1}},
 			},
-			primitive.KnotOverlapped,
+			interleaving.KnotOverlapped,
 		},
 		{
-			[2]primitive.Communication{
+			[2]interleaving.Communication{
 				{{Timestamp: 0, Thread: 1}, {Timestamp: 1, Thread: 0}},
 				{{Timestamp: 2, Thread: 0}, {Timestamp: 3, Thread: 1}},
 			},
-			primitive.KnotSeparated,
+			interleaving.KnotSeparated,
 		},
 		{
-			[2]primitive.Communication{
+			[2]interleaving.Communication{
 				{{Timestamp: 2, Thread: 0}, {Timestamp: 3, Thread: 1}},
 				{{Timestamp: 0, Thread: 1}, {Timestamp: 1, Thread: 0}},
 			},
-			primitive.KnotSeparated,
+			interleaving.KnotSeparated,
 		},
 	}
 	for _, test := range tests {

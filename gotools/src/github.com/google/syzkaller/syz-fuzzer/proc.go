@@ -18,9 +18,9 @@ import (
 	"github.com/google/syzkaller/pkg/affinity"
 	"github.com/google/syzkaller/pkg/cover"
 	"github.com/google/syzkaller/pkg/hash"
+	"github.com/google/syzkaller/pkg/interleaving"
 	"github.com/google/syzkaller/pkg/ipc"
 	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/pkg/primitive"
 	"github.com/google/syzkaller/pkg/rpctype"
 	"github.com/google/syzkaller/pkg/scheduler"
 	"github.com/google/syzkaller/pkg/signal"
@@ -158,12 +158,17 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot, force bool) {
 		// We exclude used knots from tp.Hint even if
 		// p.MutateScheduleFromHint() fails because it will fail later
 		// anyway.
-		tp.Hint = remaining
+		setHint(tp, remainint)
 		if !ok {
 			continue
 		}
 		proc.execute(proc.execOpts, p, ProgNormal, StatSchedule)
 	}
+}
+
+func setHint(tp *prog.Candidate, remaining []interleaving.Segment) {
+	debugHint(tp, remaining)
+	tp.Hint = remaining
 }
 
 func (proc *Proc) triageInput(item *WorkTriage) {
@@ -308,14 +313,14 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 	// Newly found knots := {newly found knots during threading work}
 	// \cup {speculated knots when picking up threading work}
 	newKnots := proc.fuzzer.newKnot(knots)
-	newKnots = append(newKnots, primitive.Intersect(knots, item.knots)...)
+	newKnots = append(newKnots, interleaving.Intersect(knots, item.knots)...)
 
 	// Now we know newly found knots
 	proc.fuzzer.bookScheduleGuide(p, newKnots)
 }
 
-func sequentialTrace(info *ipc.ProgInfo) []primitive.SerialAccess {
-	res := []primitive.SerialAccess{}
+func sequentialTrace(info *ipc.ProgInfo) []interleaving.SerialAccess {
+	res := []interleaving.SerialAccess{}
 	for _, c := range info.Calls {
 		if len(c.Access) != 0 {
 			res = append(res, c.Access)
@@ -398,7 +403,7 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 			cont := prog.Contender{Calls: []int{c1, c2}}
 
 			knotter := scheduler.Knotter{ReassignThreadID: true}
-			if !knotter.AddSequentialTrace([]primitive.SerialAccess{info.Calls[c1].Access, info.Calls[c2].Access}) {
+			if !knotter.AddSequentialTrace([]interleaving.SerialAccess{info.Calls[c1].Access, info.Calls[c2].Access}) {
 				log.Logf(0, "[WARN] failed to add the sequence trace")
 				continue
 			}
@@ -437,7 +442,7 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 	})
 }
 
-func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, knots []primitive.Segment) {
+func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, knots []interleaving.Segment) {
 	if proc.fuzzer.shutOffThreading(p, calls) {
 		return
 	}

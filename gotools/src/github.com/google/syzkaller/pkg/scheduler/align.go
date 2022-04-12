@@ -3,7 +3,7 @@ package scheduler
 import (
 	"fmt"
 
-	"github.com/google/syzkaller/pkg/primitive"
+	"github.com/google/syzkaller/pkg/interleaving"
 )
 
 // NOTE: We infer the program order with at most two serial
@@ -11,7 +11,7 @@ import (
 // alignment. Extend it to handle multiple sequences if we want to
 // handle more complex cases (i.e., with more than two serials).
 
-func pairwiseSequenceAlign(s1, s2 *primitive.SerialAccess) {
+func pairwiseSequenceAlign(s1, s2 *interleaving.SerialAccess) {
 	// Heuristic to align two serial accesses based on instruction
 	// addresses. Time and space complexity is O(n).
 
@@ -27,7 +27,7 @@ type aligner struct {
 	i2         int
 	footprint2 map[uint32]int
 	// inputs
-	s1, s2 *primitive.SerialAccess
+	s1, s2 *interleaving.SerialAccess
 }
 
 func (a aligner) pairwiseSequenceAlign() {
@@ -59,7 +59,7 @@ func (a *aligner) collectFootprint() {
 func (a *aligner) adjustAccessesPO(cnt1, cnt2 int, common bool) {
 	loop := func(loopCnt int, s1, s2 bool) {
 		for offset := 0; offset < loopCnt; offset++ {
-			var acc1, acc2 *primitive.Access
+			var acc1, acc2 *interleaving.Access
 			if s1 {
 				acc1 = &(*a.s1)[a.i1+offset]
 			}
@@ -98,7 +98,7 @@ func (a aligner) countDivergedAccessess() (int, int) {
 	}
 }
 
-func countDivergedAccessesPivot(pivot, counterpart *primitive.SerialAccess, footprint map[uint32]int, from1, from2, windowSize int) (diverged1, diverged2, total int) {
+func countDivergedAccessesPivot(pivot, counterpart *interleaving.SerialAccess, footprint map[uint32]int, from1, from2, windowSize int) (diverged1, diverged2, total int) {
 	defer func() {
 		total = diverged1
 		if total < diverged2 {
@@ -118,10 +118,10 @@ func countDivergedAccessesPivot(pivot, counterpart *primitive.SerialAccess, foot
 	return
 }
 
-func (a *aligner) adjustPO(acc1, acc2 *primitive.Access, common bool) {
+func (a *aligner) adjustPO(acc1, acc2 *interleaving.Access, common bool) {
 	var ctx1, ctx2 uint32
 	if common {
-		ctx1, ctx2 = primitive.CommonPath, primitive.CommonPath
+		ctx1, ctx2 = interleaving.CommonPath, interleaving.CommonPath
 	} else {
 		ctx1, ctx2 = 0, 1
 	}
@@ -136,7 +136,7 @@ func (a *aligner) adjustPO(acc1, acc2 *primitive.Access, common bool) {
 	a.po++
 }
 
-func collectFootprint(s *primitive.SerialAccess, windowSize int) map[uint32]int {
+func collectFootprint(s *interleaving.SerialAccess, windowSize int) map[uint32]int {
 	fp := make(map[uint32]int)
 	for i := 0; i < len(*s); i++ {
 		hsh := hashWindow(s, i, windowSize)
@@ -145,7 +145,7 @@ func collectFootprint(s *primitive.SerialAccess, windowSize int) map[uint32]int 
 	return fp
 }
 
-func hashWindow(s *primitive.SerialAccess, i, windowSize int) uint32 {
+func hashWindow(s *interleaving.SerialAccess, i, windowSize int) uint32 {
 	end := i + windowSize
 	if end > len(*s) {
 		end = len(*s)

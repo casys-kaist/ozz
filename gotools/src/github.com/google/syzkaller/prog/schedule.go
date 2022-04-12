@@ -4,7 +4,7 @@ import (
 	"math"
 	"math/rand"
 
-	"github.com/google/syzkaller/pkg/primitive"
+	"github.com/google/syzkaller/pkg/interleaving"
 	"github.com/google/syzkaller/pkg/scheduler"
 	"github.com/google/syzkaller/pkg/signal"
 )
@@ -81,7 +81,7 @@ func (p *Prog) removeDummyPoints() {
 	p.Schedule.points = p.Schedule.points[:i+1]
 }
 
-func (p *Prog) MutateScheduleFromHint(rs rand.Source, hint []primitive.Segment) (bool, []primitive.Segment) {
+func (p *Prog) MutateScheduleFromHint(rs rand.Source, hint []interleaving.Segment) (bool, []interleaving.Segment) {
 	if len(p.Contenders()) != 2 {
 		return false, hint
 	}
@@ -135,7 +135,7 @@ func (p *Prog) MutateScheduleFromHint(rs rand.Source, hint []primitive.Segment) 
 	// return ctx.mutated
 }
 
-func (p *Prog) applySchedule(schedule []primitive.Access) {
+func (p *Prog) applySchedule(schedule []interleaving.Access) {
 	shapeScheduleFromAccesses(p, schedule)
 	p.appendDummyPoints()
 }
@@ -154,12 +154,12 @@ type randScheduler struct {
 	maxPoints  int
 	minPoints  int
 	readfrom   signal.ReadFrom
-	serial     primitive.SerialAccess
+	serial     interleaving.SerialAccess
 	staleCount map[uint32]int
 	candidate  []uint32
 	selected   map[uint32]struct{}
 	// schedule
-	schedule primitive.SerialAccess
+	schedule interleaving.SerialAccess
 	mutated  bool
 }
 
@@ -177,7 +177,7 @@ func (ctx *randScheduler) initialize() {
 	ctx.p.removeDummyPoints()
 }
 
-func (ctx *randScheduler) findAccess(point Point) (found primitive.Access, ok bool) {
+func (ctx *randScheduler) findAccess(point Point) (found interleaving.Access, ok bool) {
 	// TODO: inefficient. need refactoring
 	for _, acc := range ctx.serial {
 		if acc.Inst == uint32(point.addr) && acc.Thread == point.call.Thread {
@@ -291,7 +291,7 @@ func (ctx *randScheduler) finalize() {
 	ctx.p.appendDummyPoints()
 }
 
-func shapeScheduleFromAccesses(p *Prog, schedule []primitive.Access) {
+func shapeScheduleFromAccesses(p *Prog, schedule []interleaving.Access) {
 	order := uint64(0)
 	sched := Schedule{}
 	calls := p.Contenders()

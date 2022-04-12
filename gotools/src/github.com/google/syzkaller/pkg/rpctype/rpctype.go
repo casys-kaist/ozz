@@ -7,8 +7,8 @@ package rpctype
 
 import (
 	"github.com/google/syzkaller/pkg/host"
+	"github.com/google/syzkaller/pkg/interleaving"
 	"github.com/google/syzkaller/pkg/ipc"
-	"github.com/google/syzkaller/pkg/primitive"
 	"github.com/google/syzkaller/pkg/signal"
 )
 
@@ -22,7 +22,7 @@ type RPCInput struct {
 type RPCThreadedInput struct {
 	Prog     []byte
 	ReadFrom signal.SerialReadFrom
-	Serial   primitive.SerialAccess
+	Serial   interleaving.SerialAccess
 }
 
 type RPCCandidate struct {

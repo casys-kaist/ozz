@@ -5,44 +5,44 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/google/syzkaller/pkg/primitive"
+	"github.com/google/syzkaller/pkg/interleaving"
 )
 
 func TestPairwiseSequenceAlign(t *testing.T) {
 	tests := []struct {
-		serials    []primitive.SerialAccess
+		serials    []interleaving.SerialAccess
 		windowSize int
-		ans        []primitive.SerialAccess
+		ans        []interleaving.SerialAccess
 	}{
 		{
-			[]primitive.SerialAccess{
+			[]interleaving.SerialAccess{
 				{{Inst: 0}, {Inst: 3}, {Inst: 7}, {Inst: 10}},
 				{{Inst: 2}, {Inst: 3}, {Inst: 10}},
 			},
 			1,
-			[]primitive.SerialAccess{
-				{{Inst: 0}, {Inst: 3, Timestamp: 2, Context: primitive.CommonPath}, {Inst: 7, Timestamp: 3}, {Inst: 10, Timestamp: 4, Context: primitive.CommonPath}},
-				{{Inst: 2, Timestamp: 1, Context: 1}, {Inst: 3, Timestamp: 2, Context: primitive.CommonPath}, {Inst: 10, Timestamp: 4, Context: primitive.CommonPath}},
+			[]interleaving.SerialAccess{
+				{{Inst: 0}, {Inst: 3, Timestamp: 2, Context: interleaving.CommonPath}, {Inst: 7, Timestamp: 3}, {Inst: 10, Timestamp: 4, Context: interleaving.CommonPath}},
+				{{Inst: 2, Timestamp: 1, Context: 1}, {Inst: 3, Timestamp: 2, Context: interleaving.CommonPath}, {Inst: 10, Timestamp: 4, Context: interleaving.CommonPath}},
 			},
 		},
 		{
-			[]primitive.SerialAccess{
+			[]interleaving.SerialAccess{
 				{{Inst: 1}, {Inst: 3}, {Inst: 7}, {Inst: 10}},
 				{{Inst: 2}, {Inst: 3}, {Inst: 10}},
 			},
 			5,
-			[]primitive.SerialAccess{
-				{{Inst: 1}, {Inst: 3, Timestamp: 1}, {Inst: 7, Timestamp: 2}, {Inst: 10, Timestamp: 5, Context: primitive.CommonPath}},
-				{{Inst: 2, Timestamp: 3, Context: 1}, {Inst: 3, Timestamp: 4, Context: 1}, {Inst: 10, Timestamp: 5, Context: primitive.CommonPath}},
+			[]interleaving.SerialAccess{
+				{{Inst: 1}, {Inst: 3, Timestamp: 1}, {Inst: 7, Timestamp: 2}, {Inst: 10, Timestamp: 5, Context: interleaving.CommonPath}},
+				{{Inst: 2, Timestamp: 3, Context: 1}, {Inst: 3, Timestamp: 4, Context: 1}, {Inst: 10, Timestamp: 5, Context: interleaving.CommonPath}},
 			},
 		},
 		{
-			[]primitive.SerialAccess{
+			[]interleaving.SerialAccess{
 				{{Inst: 0}, {Inst: 1}},
 				{{Inst: 2}, {Inst: 3}},
 			},
 			1,
-			[]primitive.SerialAccess{
+			[]interleaving.SerialAccess{
 				{{Inst: 0}, {Inst: 1, Timestamp: 1}},
 				{{Inst: 2, Context: 1, Timestamp: 2}, {Inst: 3, Context: 1, Timestamp: 3}},
 			},
@@ -65,11 +65,11 @@ func TestAlignFromRealdata(t *testing.T) {
 
 	s0, s1 := seq[0], seq[1]
 	for i0, i1 := 0, 0; i0 < len(s0) || i1 < len(s1); {
-		if s0[i0].Context != primitive.CommonPath || s1[i1].Context != primitive.CommonPath {
-			if s0[i0].Context != primitive.CommonPath {
+		if s0[i0].Context != interleaving.CommonPath || s1[i1].Context != interleaving.CommonPath {
+			if s0[i0].Context != interleaving.CommonPath {
 				i0++
 			}
-			if s1[i1].Context != primitive.CommonPath {
+			if s1[i1].Context != interleaving.CommonPath {
 				i1++
 			}
 			continue
@@ -79,12 +79,12 @@ func TestAlignFromRealdata(t *testing.T) {
 		}
 		i0, i1 = i0+1, i1+1
 	}
-	check := func(s primitive.SerialAccess, id int) {
+	check := func(s interleaving.SerialAccess, id int) {
 		for i, acc := range s {
 			if i > 0 && acc.Timestamp <= s[i-1].Timestamp {
 				t.Errorf("%d: PO is not monotonically increasing\n%v\n%v", id, acc, s[i-1])
 			}
-			if acc.Context != uint32(id) && acc.Context != primitive.CommonPath {
+			if acc.Context != uint32(id) && acc.Context != interleaving.CommonPath {
 				t.Errorf("%d: wrong context\n%v", id, acc)
 			}
 		}
@@ -93,7 +93,7 @@ func TestAlignFromRealdata(t *testing.T) {
 	check(s1, 1)
 }
 
-func _toString(serials []primitive.SerialAccess) (str string) {
+func _toString(serials []interleaving.SerialAccess) (str string) {
 	for i, serial := range serials {
 		str += fmt.Sprintf("Serial #%d\n", i)
 		for _, acc := range serial {

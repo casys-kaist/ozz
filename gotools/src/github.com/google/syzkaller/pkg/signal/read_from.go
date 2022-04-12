@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/google/syzkaller/pkg/primitive"
+	"github.com/google/syzkaller/pkg/interleaving"
 )
 
 // TODO: IMPORTANT: The struct key does not store which thread
@@ -162,7 +162,7 @@ func FromEpoch(i1, i2 uint64) Order {
 // and acc2
 // TODO: signal uses prio describing priority of each element. I
 // have no idea that we need it too.
-func FromAccesses(acc1, acc2 []primitive.Access, order Order) (ReadFrom, primitive.SerialAccess) {
+func FromAccesses(acc1, acc2 []interleaving.Access, order Order) (ReadFrom, interleaving.SerialAccess) {
 	if order == After {
 		// if acc1 happened after acc2, nothing from acc2 could be
 		// affected by acc1.
@@ -178,11 +178,11 @@ func FromAccesses(acc1, acc2 []primitive.Access, order Order) (ReadFrom, primiti
 	sort.Slice(acc2, func(i, j int) bool { return acc2[i].Timestamp < acc2[j].Timestamp })
 
 	rf := NewReadFrom()
-	used := []primitive.Access{}
-	m := make(map[uint32]*primitive.Access)
-	t := make(map[*primitive.Access]int)
+	used := []interleaving.Access{}
+	m := make(map[uint32]*interleaving.Access)
+	t := make(map[*interleaving.Access]int)
 
-	samecall := func(acc0, acc1 *primitive.Access) bool {
+	samecall := func(acc0, acc1 *interleaving.Access) bool {
 		if acc0.Thread != acc1.Thread {
 			return true
 		}
@@ -192,7 +192,7 @@ func FromAccesses(acc1, acc2 []primitive.Access, order Order) (ReadFrom, primiti
 		return false
 	}
 
-	visitAcc := func(acc *primitive.Access) {
+	visitAcc := func(acc *interleaving.Access) {
 		if acc0, ok := m[acc.Addr>>3]; ok && samecall(acc0, acc) {
 			rf.Add(acc0.Inst, acc.Inst)
 			used = append(used, *acc0, *acc)
@@ -204,7 +204,7 @@ func FromAccesses(acc1, acc2 []primitive.Access, order Order) (ReadFrom, primiti
 
 	var i1, i2 int
 	for i1, i2 = 0, 0; i1 < len(acc1) && i2 < len(acc2); {
-		var acc *primitive.Access
+		var acc *interleaving.Access
 		if acc1[i1].Timestamp < acc2[i2].Timestamp {
 			acc = &acc1[i1]
 			t[acc] = 1
@@ -225,6 +225,6 @@ func FromAccesses(acc1, acc2 []primitive.Access, order Order) (ReadFrom, primiti
 		t[&acc2[i2]] = 2
 		visitAcc(&acc2[i2])
 	}
-	serial := primitive.SerializeAccess(used)
+	serial := interleaving.SerializeAccess(used)
 	return rf, serial
 }

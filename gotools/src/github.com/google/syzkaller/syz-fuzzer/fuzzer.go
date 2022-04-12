@@ -23,11 +23,11 @@ import (
 	"github.com/google/syzkaller/pkg/csource"
 	"github.com/google/syzkaller/pkg/hash"
 	"github.com/google/syzkaller/pkg/host"
+	"github.com/google/syzkaller/pkg/interleaving"
 	"github.com/google/syzkaller/pkg/ipc"
 	"github.com/google/syzkaller/pkg/ipc/ipcconfig"
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/primitive"
 	"github.com/google/syzkaller/pkg/rpctype"
 	"github.com/google/syzkaller/pkg/signal"
 	"github.com/google/syzkaller/pkg/tool"
@@ -70,9 +70,9 @@ type Fuzzer struct {
 	newSignal    signal.Signal // diff of maxSignal since last sync with master
 
 	// We maintain knots as interleaving signals
-	maxKnots    primitive.Signal
-	corpusKnots primitive.Signal
-	newKnots    primitive.Signal
+	maxKnots    interleaving.Signal
+	corpusKnots interleaving.Signal
+	newKnots    interleaving.Signal
 
 	// Mostly for debugging scheduling mutation. If generate is false,
 	// procs do not generate/mutate inputs but schedule.
@@ -294,9 +294,9 @@ func main() {
 		shifter:                  shifter,
 
 		// XXX: I'm not sure we want to keep these two interleaving
-		corpusKnots: make(primitive.Signal),
-		maxKnots:    make(primitive.Signal),
-		newKnots:    make(primitive.Signal),
+		corpusKnots: make(interleaving.Signal),
+		maxKnots:    make(interleaving.Signal),
+		newKnots:    make(interleaving.Signal),
 
 		checkResult: r.CheckResult,
 		generate:    *flagGen,
@@ -644,7 +644,7 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 	}
 }
 
-func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hint []primitive.Segment) {
+func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hint []interleaving.Segment) {
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()
 	fuzzer.candidates = append(fuzzer.candidates, &prog.Candidate{
@@ -655,7 +655,7 @@ func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hint []primitive.Segment) 
 
 // XXX: Below two functions' name are so confusing. Rename or merge
 // them
-func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, knot []primitive.Segment) {
+func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, knot []interleaving.Segment) {
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()
 	fuzzer.scheduledCorpus = append(fuzzer.scheduledCorpus, &prog.ScheduledProg{
@@ -664,13 +664,13 @@ func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, knot []primitive.Se
 	})
 }
 
-func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, knots []primitive.Segment) {
+func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, knots []interleaving.Segment) {
 	// NOTE: We do not further mutate threaded prog so we do not add
 	// it to corpus. This can be possibly limiting the fuzzer, but we
 	// don't have any evidence of it.
 	fuzzer.addInputToThreadedCorpus(p, knots)
 
-	sign := primitive.FromPrimitive(knots)
+	sign := interleaving.FromPrimitive(knots)
 
 	fuzzer.signalMu.Lock()
 	defer fuzzer.signalMu.Unlock()
@@ -748,7 +748,7 @@ func (fuzzer *Fuzzer) checkNewCallSignal(p *prog.Prog, info *ipc.CallInfo, call 
 	return true
 }
 
-func (fuzzer *Fuzzer) newSegment(base *primitive.Signal, segs []primitive.Segment) []primitive.Segment {
+func (fuzzer *Fuzzer) newSegment(base *interleaving.Signal, segs []interleaving.Segment) []interleaving.Segment {
 	diff := base.DiffMergePrimitive(segs)
 	if len(diff) == 0 {
 		return nil
@@ -756,7 +756,7 @@ func (fuzzer *Fuzzer) newSegment(base *primitive.Signal, segs []primitive.Segmen
 	return diff
 }
 
-func (fuzzer *Fuzzer) newKnot(knots []primitive.Segment) []primitive.Segment {
+func (fuzzer *Fuzzer) newKnot(knots []interleaving.Segment) []interleaving.Segment {
 	return fuzzer.newSegment(&fuzzer.maxKnots, knots)
 }
 

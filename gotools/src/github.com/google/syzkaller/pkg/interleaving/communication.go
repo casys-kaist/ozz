@@ -1,4 +1,4 @@
-package primitive
+package interleaving
 
 // NOTE: Communicadtion[0] must/will happen before Communication[1]
 // NOTE: Assumption: Accesses's timestamps in SerialAccess have

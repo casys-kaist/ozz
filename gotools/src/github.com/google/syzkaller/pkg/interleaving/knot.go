@@ -1,4 +1,4 @@
-package primitive
+package interleaving
 
 type Knot [2]Communication
 

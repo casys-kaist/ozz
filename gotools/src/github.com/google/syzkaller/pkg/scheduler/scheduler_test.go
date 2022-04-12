@@ -4,32 +4,32 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/google/syzkaller/pkg/primitive"
+	"github.com/google/syzkaller/pkg/interleaving"
 )
 
 func TestSanitizeSequentialTrace(t *testing.T) {
 	tests := []struct {
-		seqs [][]primitive.SerialAccess
+		seqs [][]interleaving.SerialAccess
 		ok   bool
 	}{
-		{[][]primitive.SerialAccess{
+		{[][]interleaving.SerialAccess{
 			{{{Thread: 0}, {Thread: 0}}, {{Thread: 1}, {Thread: 1}}},
 		}, true}, // one sequential execution, two threads
-		{[][]primitive.SerialAccess{
+		{[][]interleaving.SerialAccess{
 			{{{Thread: 0}, {Thread: 0}}, {{Thread: 1}, {Thread: 1}}},
 			{{{Thread: 0}, {Thread: 0}, {Thread: 0}}, {{Thread: 1}}},
 		}, true}, // two sequential execution, two threads
-		{[][]primitive.SerialAccess{
+		{[][]interleaving.SerialAccess{
 			{{{Thread: 0}, {Thread: 0}}, {{Thread: 1}, {Thread: 1}}},
 			{{{Thread: 0}, {Thread: 0}, {Thread: 0}}, {{Thread: 1}}, {{Thread: 2}}},
 		}, false}, // two sequential execution, one has two threads, the other has three threads
-		{[][]primitive.SerialAccess{
+		{[][]interleaving.SerialAccess{
 			{{{Thread: 0}, {Thread: 1}, {Thread: 0}}, {{Thread: 1}, {Thread: 1}}},
 		}, false}, // one serial is not a single thread
-		{[][]primitive.SerialAccess{
+		{[][]interleaving.SerialAccess{
 			{{{Thread: 0}}, {}},
 		}, false}, // one serial is empty
-		{[][]primitive.SerialAccess{
+		{[][]interleaving.SerialAccess{
 			{},
 		}, false}, // empty seq
 	}
@@ -50,27 +50,27 @@ func TestSanitizeSequentialTrace(t *testing.T) {
 
 func TestCollectCommChans(t *testing.T) {
 	test := struct {
-		seqs  [][]primitive.SerialAccess
-		after [][]primitive.SerialAccess
+		seqs  [][]interleaving.SerialAccess
+		after [][]interleaving.SerialAccess
 	}{
-		[][]primitive.SerialAccess{
+		[][]interleaving.SerialAccess{
 			{ // seq 0
-				{{Addr: 1, Timestamp: 1, Typ: primitive.TypeStore}, {Inst: 1, Addr: 13, Timestamp: 2, Typ: primitive.TypeLoad}},
-				{{Inst: 3, Addr: 1, Timestamp: 3, Typ: primitive.TypeLoad, Thread: 1}, {Inst: 4, Addr: 102, Timestamp: 4, Typ: primitive.TypeStore, Thread: 1}},
+				{{Addr: 1, Timestamp: 1, Typ: interleaving.TypeStore}, {Inst: 1, Addr: 13, Timestamp: 2, Typ: interleaving.TypeLoad}},
+				{{Inst: 3, Addr: 1, Timestamp: 3, Typ: interleaving.TypeLoad, Thread: 1}, {Inst: 4, Addr: 102, Timestamp: 4, Typ: interleaving.TypeStore, Thread: 1}},
 			},
 			{ // seq 1
-				{{Addr: 204, Timestamp: 101, Typ: primitive.TypeLoad, Thread: 1}, {Inst: 1, Addr: 305, Timestamp: 102, Typ: primitive.TypeLoad, Thread: 1}},
-				{{Inst: 3, Addr: 102, Timestamp: 103, Typ: primitive.TypeLoad}, {Inst: 4, Addr: 305, Timestamp: 104, Typ: primitive.TypeStore}},
+				{{Addr: 204, Timestamp: 101, Typ: interleaving.TypeLoad, Thread: 1}, {Inst: 1, Addr: 305, Timestamp: 102, Typ: interleaving.TypeLoad, Thread: 1}},
+				{{Inst: 3, Addr: 102, Timestamp: 103, Typ: interleaving.TypeLoad}, {Inst: 4, Addr: 305, Timestamp: 104, Typ: interleaving.TypeStore}},
 			},
 		},
-		[][]primitive.SerialAccess{
+		[][]interleaving.SerialAccess{
 			{ // seq 0
-				{{Addr: 1, Timestamp: 1, Typ: primitive.TypeStore}},
-				{{Inst: 3, Addr: 1, Timestamp: 3, Typ: primitive.TypeLoad, Thread: 1}, {Inst: 4, Addr: 102, Timestamp: 4, Typ: primitive.TypeStore, Thread: 1}},
+				{{Addr: 1, Timestamp: 1, Typ: interleaving.TypeStore}},
+				{{Inst: 3, Addr: 1, Timestamp: 3, Typ: interleaving.TypeLoad, Thread: 1}, {Inst: 4, Addr: 102, Timestamp: 4, Typ: interleaving.TypeStore, Thread: 1}},
 			},
 			{ // seq 1
-				{{Inst: 1, Addr: 305, Timestamp: 102, Typ: primitive.TypeLoad, Thread: 1}},
-				{{Inst: 3, Addr: 102, Timestamp: 103, Typ: primitive.TypeLoad}, {Inst: 4, Addr: 305, Timestamp: 104, Typ: primitive.TypeStore}},
+				{{Inst: 1, Addr: 305, Timestamp: 102, Typ: interleaving.TypeLoad, Thread: 1}},
+				{{Inst: 3, Addr: 102, Timestamp: 103, Typ: interleaving.TypeLoad}, {Inst: 4, Addr: 305, Timestamp: 104, Typ: interleaving.TypeStore}},
 			},
 		},
 	}
@@ -88,7 +88,7 @@ func TestCollectCommChans(t *testing.T) {
 
 var testsSingleSeq = []struct {
 	filename string
-	answer   primitive.Knot
+	answer   interleaving.Knot
 	total    int
 }{
 	{"data1", CVE20168655, -1},
@@ -105,7 +105,7 @@ func TestExcavateKnots(t *testing.T) {
 	}
 }
 
-func testExcavateKnots(t *testing.T, filename string, answer primitive.Knot) []primitive.Knot {
+func testExcavateKnots(t *testing.T, filename string, answer interleaving.Knot) []interleaving.Knot {
 	knots := loadKnots(t, []string{filename})
 	if !checkAnswer(t, knots, answer) {
 		t.Errorf("can't find the required knot")
@@ -115,7 +115,7 @@ func testExcavateKnots(t *testing.T, filename string, answer primitive.Knot) []p
 
 func TestGenerateSchedPoint(t *testing.T) {
 	knots := loadKnots(t, []string{"data1_simple"})
-	segs := []primitive.Segment{}
+	segs := []interleaving.Segment{}
 	for _, knot := range knots {
 		segs = append(segs, knot)
 	}
@@ -127,7 +127,7 @@ func TestGenerateSchedPoint(t *testing.T) {
 			t.Logf("  %x (%v) --> %x (%v)", knot[0][0].Inst, knot[0][0].Timestamp, knot[0][1].Inst, knot[0][1].Timestamp)
 			t.Logf("  %x (%v) --> %x (%v)", knot[1][0].Inst, knot[1][0].Timestamp, knot[1][1].Inst, knot[1][1].Timestamp)
 		}
-		totalAcc := make(map[primitive.Access]struct{})
+		totalAcc := make(map[interleaving.Access]struct{})
 		for _, knot := range selected {
 			for _, comm := range knot {
 				totalAcc[comm.Former()] = struct{}{}
@@ -138,7 +138,7 @@ func TestGenerateSchedPoint(t *testing.T) {
 		sps, ok := sched.GenerateSchedPoints()
 		t.Logf("total %d sched points\n", len(sps))
 		for _, sp := range sps {
-			t.Logf("%v", primitive.Access(sp))
+			t.Logf("%v", interleaving.Access(sp))
 		}
 		if !ok {
 			t.Errorf("missing schedpoint (before squeeze), expected %v, got %v", len(totalAcc), len(sps))
@@ -147,7 +147,7 @@ func TestGenerateSchedPoint(t *testing.T) {
 			for _, comm := range knot {
 				former, latter := false, false
 				for _, sp := range sps {
-					if primitive.Access(sp) == comm.Latter() {
+					if interleaving.Access(sp) == comm.Latter() {
 						if !former {
 							// we haven't seen the former one, so the
 							// scheduling points are wrong
@@ -156,7 +156,7 @@ func TestGenerateSchedPoint(t *testing.T) {
 						}
 						latter = true
 					}
-					if primitive.Access(sp) == comm.Former() {
+					if interleaving.Access(sp) == comm.Former() {
 						// Former checking does not need another condition checking
 						former = true
 					}
@@ -172,7 +172,7 @@ func TestGenerateSchedPoint(t *testing.T) {
 
 func TestSqueezeSchedPoints(t *testing.T) {
 	knots := loadKnots(t, []string{"data1_simple"})
-	segs := []primitive.Segment{}
+	segs := []interleaving.Segment{}
 	for _, knot := range knots {
 		segs = append(segs, knot)
 	}
@@ -186,12 +186,12 @@ func TestSqueezeSchedPoints(t *testing.T) {
 		}
 		t.Logf("total %d full sched points\n", len(full))
 		for _, sp := range full {
-			t.Logf("%v", primitive.Access(sp))
+			t.Logf("%v", interleaving.Access(sp))
 		}
 		squeezed := sched.SqueezeSchedPoints()
 		t.Logf("total %d squeezed sched points\n", len(squeezed))
 		for _, sp := range squeezed {
-			t.Logf("%v", primitive.Access(sp))
+			t.Logf("%v", interleaving.Access(sp))
 		}
 		j := 0
 		for i := 0; i < len(full); i++ {
@@ -209,7 +209,7 @@ func TestSqueezeSchedPoints(t *testing.T) {
 func TestExcavateKnotsTwoSeqs(t *testing.T) {
 	tests := []struct {
 		filenames []string
-		answer    primitive.Knot
+		answer    interleaving.Knot
 	}{
 		{
 			[]string{"data1_seq1", "data1_seq2"},
@@ -245,9 +245,9 @@ func TestExcavateKnotsSingleThread(t *testing.T) {
 		knotter.AddSequentialTrace(thrs[:])
 		knotter.ExcavateKnots()
 		knots0 := knotter.GetKnots()
-		knots := []primitive.Knot{}
+		knots := []interleaving.Knot{}
 		for _, knot0 := range knots0 {
-			knots = append(knots, knot0.(primitive.Knot))
+			knots = append(knots, knot0.(interleaving.Knot))
 		}
 		if !checkAnswer(t, knots, test.answer) {
 			t.Errorf("can't find the required knot")
@@ -292,21 +292,21 @@ func TestDupCheck(t *testing.T) {
 // CVE20196974 and CVE20196974_2), so it should reside in the data
 // file.
 
-var CVE20168655 = primitive.Knot{
-	{{Inst: 0x8bbb79d6, Size: 4, Typ: primitive.TypeLoad}, {Inst: 0x8bbca80b, Size: 4, Typ: primitive.TypeStore}},
-	{{Inst: 0x8bbc9093, Size: 4, Typ: primitive.TypeLoad}, {Inst: 0x8bbb75a0, Size: 4, Typ: primitive.TypeStore}}}
+var CVE20168655 = interleaving.Knot{
+	{{Inst: 0x8bbb79d6, Size: 4, Typ: interleaving.TypeLoad}, {Inst: 0x8bbca80b, Size: 4, Typ: interleaving.TypeStore}},
+	{{Inst: 0x8bbc9093, Size: 4, Typ: interleaving.TypeLoad}, {Inst: 0x8bbb75a0, Size: 4, Typ: interleaving.TypeStore}}}
 
-var CVE20196974 = primitive.Knot{
-	{{Inst: 0x81f2b4e1, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x81f2bbd3, Size: 4, Typ: primitive.TypeLoad}},
-	{{Inst: 0x8d34b095, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x8d3662f0, Size: 4, Typ: primitive.TypeLoad}}}
+var CVE20196974 = interleaving.Knot{
+	{{Inst: 0x81f2b4e1, Size: 4, Typ: interleaving.TypeStore}, {Inst: 0x81f2bbd3, Size: 4, Typ: interleaving.TypeLoad}},
+	{{Inst: 0x8d34b095, Size: 4, Typ: interleaving.TypeStore}, {Inst: 0x8d3662f0, Size: 4, Typ: interleaving.TypeLoad}}}
 
-var CVE20196974_2 = primitive.Knot{
-	{{Inst: 0x8d57633a, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x8d592198, Size: 4, Typ: primitive.TypeLoad}},
-	{{Inst: 0x81f9e606, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x81f9ecf8, Size: 4, Typ: primitive.TypeLoad}}}
+var CVE20196974_2 = interleaving.Knot{
+	{{Inst: 0x8d57633a, Size: 4, Typ: interleaving.TypeStore}, {Inst: 0x8d592198, Size: 4, Typ: interleaving.TypeLoad}},
+	{{Inst: 0x81f9e606, Size: 4, Typ: interleaving.TypeStore}, {Inst: 0x81f9ecf8, Size: 4, Typ: interleaving.TypeLoad}}}
 
-var CVE20196974_3 = primitive.Knot{
-	{{Inst: 0x8d576637, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x8d592495, Size: 4, Typ: primitive.TypeLoad}},
-	{{Inst: 0x81f9ebf6, Size: 4, Typ: primitive.TypeStore}, {Inst: 0x81f9f2e8, Size: 4, Typ: primitive.TypeLoad}}}
+var CVE20196974_3 = interleaving.Knot{
+	{{Inst: 0x8d576637, Size: 4, Typ: interleaving.TypeStore}, {Inst: 0x8d592495, Size: 4, Typ: interleaving.TypeLoad}},
+	{{Inst: 0x81f9ebf6, Size: 4, Typ: interleaving.TypeStore}, {Inst: 0x81f9f2e8, Size: 4, Typ: interleaving.TypeLoad}}}
 
 func BenchmarkExcavateKnots(b *testing.B) {
 	benchmarkExcavateKnots(b)

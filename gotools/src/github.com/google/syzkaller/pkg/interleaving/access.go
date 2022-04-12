@@ -1,4 +1,4 @@
-package primitive
+package interleaving
 
 import (
 	"fmt"

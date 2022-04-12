@@ -1,12 +1,12 @@
-package primitive_test
+package interleaving_test
 
 import (
 	"testing"
 
-	"github.com/google/syzkaller/pkg/primitive"
+	"github.com/google/syzkaller/pkg/interleaving"
 )
 
-var testAcc = []primitive.Access{
+var testAcc = []interleaving.Access{
 	{Timestamp: 0, Inst: 1},
 	{Timestamp: 3, Inst: 2},
 	{Timestamp: 2, Inst: 3, Thread: 1},
@@ -14,7 +14,7 @@ var testAcc = []primitive.Access{
 	{Timestamp: 1, Inst: 5},
 }
 
-var serializedAcc = []primitive.Access{
+var serializedAcc = []interleaving.Access{
 	{Timestamp: 0, Inst: 1},
 	{Timestamp: 1, Inst: 5},
 	{Timestamp: 2, Inst: 3, Thread: 1},
@@ -23,7 +23,7 @@ var serializedAcc = []primitive.Access{
 }
 
 func TestSerialAccessAdd(t *testing.T) {
-	serial := primitive.SerialAccess{}
+	serial := interleaving.SerialAccess{}
 	for _, acc := range testAcc {
 		serial.Add(acc)
 	}
@@ -38,7 +38,7 @@ func TestSerialAccessAdd(t *testing.T) {
 }
 
 func TestSerializeAccess(t *testing.T) {
-	serial := primitive.SerializeAccess(testAcc)
+	serial := interleaving.SerializeAccess(testAcc)
 	if len(serial) != len(serializedAcc) {
 		t.Errorf("wrong length, expected %v, got %v", len(serializedAcc), len(serial))
 	}
@@ -51,20 +51,20 @@ func TestSerializeAccess(t *testing.T) {
 
 func TestSingleThread(t *testing.T) {
 	tests := []struct {
-		serial primitive.SerialAccess
+		serial interleaving.SerialAccess
 		st     bool
 	}{
-		{[]primitive.Access{
+		{[]interleaving.Access{
 			{Thread: 0},
 			{Thread: 0},
 			{Thread: 0},
 		}, true},
-		{[]primitive.Access{
+		{[]interleaving.Access{
 			{Thread: 0},
 			{Thread: 1},
 			{Thread: 0},
 		}, false},
-		{[]primitive.Access{
+		{[]interleaving.Access{
 			{Thread: 0},
 		}, true},
 	}
@@ -76,7 +76,7 @@ func TestSingleThread(t *testing.T) {
 }
 
 func TestFindIndex(t *testing.T) {
-	serial := primitive.SerialAccess{}
+	serial := interleaving.SerialAccess{}
 	for _, acc := range testAcc {
 		serial.Add(acc)
 	}
@@ -88,7 +88,7 @@ func TestFindIndex(t *testing.T) {
 }
 
 func TestCombine(t *testing.T) {
-	s1, s2 := primitive.SerialAccess{}, primitive.SerialAccess{}
+	s1, s2 := interleaving.SerialAccess{}, interleaving.SerialAccess{}
 	for i, acc := range serializedAcc {
 		if i%2 == 0 {
 			s1.Add(acc)
@@ -97,7 +97,7 @@ func TestCombine(t *testing.T) {
 		}
 	}
 
-	s := primitive.Combine(s1, s2)
+	s := interleaving.Combine(s1, s2)
 	for i, acc := range s {
 		if acc != testAcc[i] {
 			t.Errorf("wrong, expected %v, got %v", testAcc[i], acc)
@@ -106,29 +106,29 @@ func TestCombine(t *testing.T) {
 }
 
 func TestOverlapped(t *testing.T) {
-	acc := primitive.Access{Addr: 100, Size: 8}
-	if !acc.Overlapped(primitive.Access{Addr: 100, Size: 1}) {
+	acc := interleaving.Access{Addr: 100, Size: 8}
+	if !acc.Overlapped(interleaving.Access{Addr: 100, Size: 1}) {
 		t.Errorf("wrong")
 	}
-	if !acc.Overlapped(primitive.Access{Addr: 100, Size: 8}) {
+	if !acc.Overlapped(interleaving.Access{Addr: 100, Size: 8}) {
 		t.Errorf("wrong")
 	}
-	if !acc.Overlapped(primitive.Access{Addr: 104, Size: 2}) {
+	if !acc.Overlapped(interleaving.Access{Addr: 104, Size: 2}) {
 		t.Errorf("wrong")
 	}
-	if !acc.Overlapped(primitive.Access{Addr: 98, Size: 4}) {
+	if !acc.Overlapped(interleaving.Access{Addr: 98, Size: 4}) {
 		t.Errorf("wrong")
 	}
-	if acc.Overlapped(primitive.Access{Addr: 92, Size: 8}) {
+	if acc.Overlapped(interleaving.Access{Addr: 92, Size: 8}) {
 		t.Errorf("wrong")
 	}
-	if acc.Overlapped(primitive.Access{Addr: 108, Size: 1}) {
+	if acc.Overlapped(interleaving.Access{Addr: 108, Size: 1}) {
 		t.Errorf("wrong")
 	}
 }
 
 func TestSerialAccessFindForeachThread(t *testing.T) {
-	serial := primitive.SerializeAccess(testAcc)
+	serial := interleaving.SerializeAccess(testAcc)
 	found := serial.FindForeachThread(3, 1)
 	if len(found) != 2 {
 		t.Errorf("wrong length, expected 2, got %v", len(found))

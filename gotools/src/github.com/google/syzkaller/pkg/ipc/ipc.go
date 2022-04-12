@@ -17,8 +17,8 @@ import (
 	"unsafe"
 
 	"github.com/google/syzkaller/pkg/cover"
+	"github.com/google/syzkaller/pkg/interleaving"
 	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/pkg/primitive"
 	"github.com/google/syzkaller/pkg/signal"
 	"github.com/google/syzkaller/prog"
 	"github.com/google/syzkaller/sys/targets"
@@ -94,7 +94,7 @@ type CallInfo struct {
 	Cover  []uint32 // per-call coverage, filled if FlagSignal is set and cover == true,
 	// if dedup == false, then cov effectively contains a trace, otherwise duplicates are removed
 	Comps  prog.CompMap // per-call comparison operands
-	Access primitive.SerialAccess
+	Access interleaving.SerialAccess
 	Errno  int // call errno (0 if the call was successful)
 	// information about what happened for each schedpoint
 	SchedpointOutcome []SchedpointOutcome
@@ -504,7 +504,7 @@ func readUint32Array(outp *[]byte, size uint32) ([]uint32, bool) {
 	return res, true
 }
 
-func readReadFromCoverages(outp *[]byte, size uint32, inf *CallInfo) (primitive.SerialAccess, bool) {
+func readReadFromCoverages(outp *[]byte, size uint32, inf *CallInfo) (interleaving.SerialAccess, bool) {
 	array, ok := readUint32Array(outp, size*5)
 	if !ok {
 		return nil, false
@@ -512,9 +512,9 @@ func readReadFromCoverages(outp *[]byte, size uint32, inf *CallInfo) (primitive.
 	if len(array)%5 != 0 {
 		return nil, false
 	}
-	var res primitive.SerialAccess
+	var res interleaving.SerialAccess
 	for i := 0; i < len(array); i += 5 {
-		res = append(res, primitive.Access{
+		res = append(res, interleaving.Access{
 			Inst:      array[i],
 			Addr:      array[i+1],
 			Size:      array[i+2],

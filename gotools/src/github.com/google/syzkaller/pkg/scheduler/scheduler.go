@@ -3,7 +3,7 @@ package scheduler
 import (
 	"sort"
 
-	"github.com/google/syzkaller/pkg/primitive"
+	"github.com/google/syzkaller/pkg/interleaving"
 )
 
 // TODO: Assumptions and models that this implementation relies on
@@ -13,7 +13,7 @@ import (
 type Knotter struct {
 	loopAllowed []int
 	commChan    map[uint32]struct{}
-	accessMap   map[uint32][]primitive.Access
+	accessMap   map[uint32][]interleaving.Access
 	numThr      int
 
 	// Used only for thread works. Our implmenetation requires to
@@ -28,14 +28,14 @@ type Knotter struct {
 
 	// input
 	seqCount int
-	seqs0    [][]primitive.SerialAccess // Unmodified input
-	seqs     [][]primitive.SerialAccess // Used internally
+	seqs0    [][]interleaving.SerialAccess // Unmodified input
+	seqs     [][]interleaving.SerialAccess // Used internally
 	// output
-	knots []primitive.Segment
-	comms []primitive.Segment
+	knots []interleaving.Segment
+	comms []interleaving.Segment
 }
 
-func (knotter *Knotter) AddSequentialTrace(seq []primitive.SerialAccess) bool {
+func (knotter *Knotter) AddSequentialTrace(seq []interleaving.SerialAccess) bool {
 	if knotter.seqCount == 2 {
 		// NOTE: In this project, we build knots using at most two
 		// sequential executions. Adding more sequential execution is
@@ -50,7 +50,7 @@ func (knotter *Knotter) AddSequentialTrace(seq []primitive.SerialAccess) bool {
 	return true
 }
 
-func (knotter *Knotter) sanitizeSequentialTrace(seq []primitive.SerialAccess) bool {
+func (knotter *Knotter) sanitizeSequentialTrace(seq []interleaving.SerialAccess) bool {
 	if len(seq) <= 1 {
 		// 1) Reject a case that a thread does not touch memory at all. In
 		// theory, there can be a case that a thread or all threads do not
@@ -112,15 +112,15 @@ func (knotter *Knotter) fastenKnots() {
 }
 
 func (knotter *Knotter) collectCommChans() {
-	knotter.seqs = make([][]primitive.SerialAccess, len(knotter.seqs0))
+	knotter.seqs = make([][]interleaving.SerialAccess, len(knotter.seqs0))
 	for i, seq := range knotter.seqs0 {
-		knotter.seqs[i] = make([]primitive.SerialAccess, len(seq))
+		knotter.seqs[i] = make([]interleaving.SerialAccess, len(seq))
 	}
 
 	// Only memory objects on which store operations take place can be
 	// a communication channel
 	knotter.commChan = make(map[uint32]struct{})
-	doSerial := func(f func(*primitive.SerialAccess, *primitive.SerialAccess)) {
+	doSerial := func(f func(*interleaving.SerialAccess, *interleaving.SerialAccess)) {
 		for i := 0; i < len(knotter.seqs0); i++ {
 			for j := 0; j < len(knotter.seqs0[i]); j++ {
 				src := &knotter.seqs0[i][j]
@@ -135,16 +135,16 @@ func (knotter *Knotter) collectCommChans() {
 	doSerial(knotter.distillSerial)
 }
 
-func (knotter *Knotter) collectCommChansSerial(serial, unused *primitive.SerialAccess) {
+func (knotter *Knotter) collectCommChansSerial(serial, unused *interleaving.SerialAccess) {
 	for _, acc := range *serial {
-		if acc.Typ == primitive.TypeStore {
+		if acc.Typ == interleaving.TypeStore {
 			addr := wordify(acc.Addr)
 			knotter.commChan[addr] = struct{}{}
 		}
 	}
 }
 
-func (knotter *Knotter) distillSerial(serial *primitive.SerialAccess, distiled *primitive.SerialAccess) {
+func (knotter *Knotter) distillSerial(serial *interleaving.SerialAccess, distiled *interleaving.SerialAccess) {
 	loopCnt := make(map[uint32]int)
 	for _, acc := range *serial {
 		addr := wordify(acc.Addr)
@@ -181,8 +181,8 @@ func (knotter *Knotter) inferProgramOrder() {
 	}
 }
 
-func (knotter *Knotter) pickThread(id uint64) []primitive.SerialAccess {
-	thr := []primitive.SerialAccess{}
+func (knotter *Knotter) pickThread(id uint64) []interleaving.SerialAccess {
+	thr := []interleaving.SerialAccess{}
 	for i := range knotter.seqs {
 		for j := range knotter.seqs[i] {
 			serial := knotter.seqs[i][j]
@@ -198,7 +198,7 @@ func (knotter *Knotter) pickThread(id uint64) []primitive.SerialAccess {
 	return thr
 }
 
-func (knotter *Knotter) alignThread(thr []primitive.SerialAccess) {
+func (knotter *Knotter) alignThread(thr []interleaving.SerialAccess) {
 	if len(thr) < 2 {
 		return
 	}
@@ -206,7 +206,7 @@ func (knotter *Knotter) alignThread(thr []primitive.SerialAccess) {
 }
 
 func (knotter *Knotter) buildAccessMap() {
-	knotter.accessMap = make(map[uint32][]primitive.Access)
+	knotter.accessMap = make(map[uint32][]interleaving.Access)
 
 	for _, seq := range knotter.seqs {
 		for _id, serial := range seq {
@@ -225,7 +225,7 @@ func (knotter *Knotter) buildAccessMap() {
 	knotter.commChan = nil
 }
 
-func (knotter *Knotter) buildAccessMapSerial(serial primitive.SerialAccess, id uint64) {
+func (knotter *Knotter) buildAccessMapSerial(serial interleaving.SerialAccess, id uint64) {
 	for _, acc := range serial {
 		addr := wordify(acc.Addr)
 		acc.Thread = id
@@ -234,7 +234,7 @@ func (knotter *Knotter) buildAccessMapSerial(serial primitive.SerialAccess, id u
 }
 
 func (knotter *Knotter) formCommunications() {
-	knotter.comms = []primitive.Segment{}
+	knotter.comms = []interleaving.Segment{}
 	knotter.commHsh = make(map[uint64]struct{})
 	for _, accs := range knotter.accessMap {
 		knotter.formCommunicationAddr(accs)
@@ -244,7 +244,7 @@ func (knotter *Knotter) formCommunications() {
 	knotter.commHsh = nil
 }
 
-func (knotter *Knotter) formCommunicationAddr(accesses []primitive.Access) {
+func (knotter *Knotter) formCommunicationAddr(accesses []interleaving.Access) {
 	for i := 0; i < len(accesses); i++ {
 		for j := i + 1; j < len(accesses); j++ {
 			acc1, acc2 := accesses[i], accesses[j]
@@ -259,7 +259,7 @@ func (knotter *Knotter) formCommunicationAddr(accesses []primitive.Access) {
 			// in fact reads a value from another atomic. To handle
 			// the cases, we discasd cases only when both accesses
 			// have the load type.
-			if acc1.Typ == primitive.TypeLoad && acc2.Typ == primitive.TypeLoad {
+			if acc1.Typ == interleaving.TypeLoad && acc2.Typ == interleaving.TypeLoad {
 				continue
 			}
 
@@ -269,7 +269,7 @@ func (knotter *Knotter) formCommunicationAddr(accesses []primitive.Access) {
 
 			// We are generating all possible knots so append both
 			// Communications
-			candidates := []primitive.Communication{{acc1, acc2}, {acc2, acc1}}
+			candidates := []interleaving.Communication{{acc1, acc2}, {acc2, acc1}}
 			for _, cand := range candidates {
 				if knotter.duppedComm(cand) {
 					continue
@@ -280,7 +280,7 @@ func (knotter *Knotter) formCommunicationAddr(accesses []primitive.Access) {
 	}
 }
 
-func (knotter *Knotter) duppedComm(comm primitive.Communication) bool {
+func (knotter *Knotter) duppedComm(comm interleaving.Communication) bool {
 	// A communication is redundant if there is another that accesses
 	// have the same timestamp with corresponding accesses.
 	hsh := comm.Hash()
@@ -290,16 +290,16 @@ func (knotter *Knotter) duppedComm(comm primitive.Communication) bool {
 }
 
 func (knotter *Knotter) formKnots() {
-	knotter.knots = []primitive.Segment{}
+	knotter.knots = []interleaving.Segment{}
 	knotter.knotHsh = make(map[uint64]struct{})
 	for i := 0; i < len(knotter.comms); i++ {
 		for j := i + 1; j < len(knotter.comms); j++ {
-			comm1, comm2 := knotter.comms[i].(primitive.Communication), knotter.comms[j].(primitive.Communication)
+			comm1, comm2 := knotter.comms[i].(interleaving.Communication), knotter.comms[j].(interleaving.Communication)
 			if comm1[0].Timestamp > comm2[0].Timestamp {
 				comm1, comm2 = comm2, comm1
 			}
-			knot := primitive.Knot{comm1, comm2}
-			if typ := knot.Type(); typ == primitive.KnotParallel || typ == primitive.KnotInvalid {
+			knot := interleaving.Knot{comm1, comm2}
+			if typ := knot.Type(); typ == interleaving.KnotParallel || typ == interleaving.KnotInvalid {
 				continue
 			}
 			if knotter.duppedKnot(knot) {
@@ -310,29 +310,29 @@ func (knotter *Knotter) formKnots() {
 	}
 }
 
-func (knotter *Knotter) duppedKnot(knot primitive.Knot) bool {
+func (knotter *Knotter) duppedKnot(knot interleaving.Knot) bool {
 	hsh := knot.Hash()
 	_, ok := knotter.knotHsh[hsh]
 	knotter.knotHsh[hsh] = struct{}{}
 	return ok
 }
 
-func (knotter *Knotter) GetCommunications() []primitive.Segment {
+func (knotter *Knotter) GetCommunications() []interleaving.Segment {
 	return knotter.comms
 }
 
-func (knotter *Knotter) GetKnots() []primitive.Segment {
+func (knotter *Knotter) GetKnots() []interleaving.Segment {
 	return knotter.knots
 }
 
 type Scheduler struct {
 	// input
-	Knots []primitive.Knot
+	Knots []interleaving.Knot
 	// output
-	schedPoints []primitive.Access
+	schedPoints []interleaving.Access
 }
 
-func (sched *Scheduler) GenerateSchedPoints() ([]primitive.Access, bool) {
+func (sched *Scheduler) GenerateSchedPoints() ([]interleaving.Access, bool) {
 	dag := sched.buildDAG()
 	nodes, ok := dag.topologicalSort()
 	if !ok {
@@ -348,19 +348,19 @@ func (sched *Scheduler) GenerateSchedPoints() ([]primitive.Access, bool) {
 	m := make(map[k]struct{})
 
 	for _, node := range nodes {
-		acc := node.(primitive.Access)
+		acc := node.(interleaving.Access)
 		k0 := k{inst: acc.Inst, thread: uint32(acc.Thread)}
 		if _, ok := m[k0]; ok {
 			continue
 		}
 		m[k0] = struct{}{}
-		sched.schedPoints = append(sched.schedPoints, primitive.Access(acc))
+		sched.schedPoints = append(sched.schedPoints, interleaving.Access(acc))
 	}
 	return sched.schedPoints, true
 }
 
-func (sched *Scheduler) SqueezeSchedPoints() []primitive.Access {
-	new := []primitive.Access{}
+func (sched *Scheduler) SqueezeSchedPoints() []interleaving.Access {
+	new := []interleaving.Access{}
 	preempted := make(map[uint64]bool)
 	for i := range sched.schedPoints {
 		if preempted[sched.schedPoints[i].Thread] {
@@ -380,7 +380,7 @@ func (sched *Scheduler) SqueezeSchedPoints() []primitive.Access {
 
 func (sched *Scheduler) buildDAG() dag {
 	d := newDAG()
-	threads := make(map[uint64][]primitive.Access)
+	threads := make(map[uint64][]interleaving.Access)
 	for i /*, knot */ := range sched.Knots {
 		for j /*, comm */ := range sched.Knots[i] {
 			former := sched.Knots[i][j].Former()

@@ -1,4 +1,4 @@
-package primitive
+package interleaving
 
 type Signal map[uint64]struct{}
 

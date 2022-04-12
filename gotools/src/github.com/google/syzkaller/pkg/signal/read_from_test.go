@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/syzkaller/pkg/primitive"
+	"github.com/google/syzkaller/pkg/interleaving"
 )
 
 func initReadFrom(rf ReadFrom, data [][2]uint32) {
@@ -155,7 +155,7 @@ func testFromAccesses(t *testing.T) {
 
 	type x struct {
 		name   string
-		access []primitive.Access
+		access []interleaving.Access
 	}
 
 	// build accesses from accesses.dat
@@ -180,7 +180,7 @@ func testFromAccesses(t *testing.T) {
 				u = append(u, uint32(n))
 			}
 		}
-		acc[idx].access = append(acc[idx].access, primitive.Access{u[0], u[1], u[2], u[3], u[4], 0 /*, uint64(idx)*/})
+		acc[idx].access = append(acc[idx].access, interleaving.Access{u[0], u[1], u[2], u[3], u[4], 0 /*, uint64(idx)*/})
 	}
 
 	// let's compare the built accesses and test data

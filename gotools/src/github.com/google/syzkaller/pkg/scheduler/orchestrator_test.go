@@ -3,7 +3,7 @@ package scheduler
 import (
 	"testing"
 
-	"github.com/google/syzkaller/pkg/primitive"
+	"github.com/google/syzkaller/pkg/interleaving"
 )
 
 func TestSelectHarmoniousKnotsIterSimple(t *testing.T) {
@@ -12,10 +12,10 @@ func TestSelectHarmoniousKnotsIterSimple(t *testing.T) {
 	}
 }
 
-func testSelectHarmoniousKnotsIter(t *testing.T, path string, answer primitive.Knot) {
+func testSelectHarmoniousKnotsIter(t *testing.T, path string, answer interleaving.Knot) {
 	knots := loadKnots(t, []string{path})
 
-	segs := []primitive.Segment{}
+	segs := []interleaving.Segment{}
 	for _, knot := range knots {
 		segs = append(segs, knot)
 	}

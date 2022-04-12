@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/google/syzkaller/pkg/primitive"
+	"github.com/google/syzkaller/pkg/interleaving"
 )
 
 func benchmarkExcavateKnots(b *testing.B) {
@@ -27,7 +27,7 @@ func benchmarkExcavateKnots(b *testing.B) {
 
 func benchmarkTotal(b *testing.B) {
 	thrs := loadTestdata(b, []string{"data1"}, nil)
-	thrs0 := make([][2]primitive.SerialAccess, len(thrs))
+	thrs0 := make([][2]interleaving.SerialAccess, len(thrs))
 	copy(thrs0, thrs)
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -94,7 +94,7 @@ func doSubBenchmarks(b *testing.B, knotter *Knotter, prerequisites []func(), do 
 	}
 }
 
-func reset(b *testing.B, knotter *Knotter, seqs [][2]primitive.SerialAccess, prerequisites []func()) {
+func reset(b *testing.B, knotter *Knotter, seqs [][2]interleaving.SerialAccess, prerequisites []func()) {
 	b.StopTimer()
 	knotter.commChan = nil
 	knotter.accessMap = nil

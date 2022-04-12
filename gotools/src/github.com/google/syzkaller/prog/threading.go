@@ -3,8 +3,8 @@ package prog
 import (
 	"fmt"
 
+	"github.com/google/syzkaller/pkg/interleaving"
 	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/pkg/primitive"
 )
 
 type Contender struct {
@@ -156,12 +156,12 @@ func (p *Prog) sanitizeRazzerSequential() error {
 
 type ScheduledProg struct {
 	P         *Prog
-	Knot      []primitive.Segment
+	Knot      []interleaving.Segment
 	Scheduled int
 	Prio      int
 }
 
 type Candidate struct {
 	P    *Prog
-	Hint []primitive.Segment
+	Hint []interleaving.Segment
 }

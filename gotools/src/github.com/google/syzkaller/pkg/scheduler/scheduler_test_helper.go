@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/google/syzkaller/pkg/primitive"
+	"github.com/google/syzkaller/pkg/interleaving"
 )
 
-func _loadTestdata(raw []byte) (threads [2]primitive.SerialAccess, e error) {
+func _loadTestdata(raw []byte) (threads [2]interleaving.SerialAccess, e error) {
 	timestamp, thread, serialID := uint32(0), -1, -1
 	for {
 		idx := bytes.IndexByte(raw, byte('\n'))
@@ -31,9 +31,9 @@ func _loadTestdata(raw []byte) (threads [2]primitive.SerialAccess, e error) {
 
 		var typ uint32
 		if bytes.Equal(toks[2], []byte("R")) {
-			typ = primitive.TypeLoad
+			typ = interleaving.TypeLoad
 		} else {
-			typ = primitive.TypeStore
+			typ = interleaving.TypeStore
 		}
 
 		inst, err := strconv.ParseUint(string(toks[0]), 16, 64)
@@ -57,7 +57,7 @@ func _loadTestdata(raw []byte) (threads [2]primitive.SerialAccess, e error) {
 			size = size0
 		}
 
-		acc := primitive.Access{
+		acc := interleaving.Access{
 			Inst:      uint32(inst),
 			Addr:      uint32(addr),
 			Typ:       typ,
@@ -71,8 +71,8 @@ func _loadTestdata(raw []byte) (threads [2]primitive.SerialAccess, e error) {
 	return
 }
 
-func loadTestdata(tb testing.TB, paths []string, knotter *Knotter) [][2]primitive.SerialAccess {
-	res := [][2]primitive.SerialAccess{}
+func loadTestdata(tb testing.TB, paths []string, knotter *Knotter) [][2]interleaving.SerialAccess {
+	res := [][2]interleaving.SerialAccess{}
 	for _, _path := range paths {
 		path := filepath.Join("testdata", _path)
 		data, err := ioutil.ReadFile(path)
@@ -91,20 +91,20 @@ func loadTestdata(tb testing.TB, paths []string, knotter *Knotter) [][2]primitiv
 	return res
 }
 
-func loadKnots(t *testing.T, paths []string) []primitive.Knot {
+func loadKnots(t *testing.T, paths []string) []interleaving.Knot {
 	knotter := Knotter{}
 	loadTestdata(t, paths, &knotter)
 	knotter.ExcavateKnots()
 	knots0 := knotter.GetKnots()
-	knots := []primitive.Knot{}
+	knots := []interleaving.Knot{}
 	for _, knot0 := range knots0 {
-		knots = append(knots, knot0.(primitive.Knot))
+		knots = append(knots, knot0.(interleaving.Knot))
 	}
 	t.Logf("# of knots: %d", len(knots))
 	return knots
 }
 
-func checkAnswer(t *testing.T, knots []primitive.Knot, required primitive.Knot) bool {
+func checkAnswer(t *testing.T, knots []interleaving.Knot, required interleaving.Knot) bool {
 	found := false
 	for i, knot := range knots {
 		t.Logf("Knot %d, type: %v", i, knot.Type())

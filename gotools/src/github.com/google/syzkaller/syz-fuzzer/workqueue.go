@@ -7,9 +7,9 @@ import (
 	"math/rand"
 	"sync"
 
+	"github.com/google/syzkaller/pkg/interleaving"
 	"github.com/google/syzkaller/pkg/ipc"
 	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/pkg/primitive"
 	"github.com/google/syzkaller/prog"
 )
 
@@ -70,7 +70,7 @@ type WorkSmash struct {
 type WorkThreading struct {
 	p     *prog.Prog
 	calls prog.Contender
-	knots []primitive.Segment
+	knots []interleaving.Segment
 }
 
 const maxWorkThreading = 10000
