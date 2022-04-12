@@ -1,6 +1,23 @@
 package interleaving
 
 type Signal map[uint64]struct{}
+type SerialSignal []uint64
+
+func (i Signal) Serialize() SerialSignal {
+	ret := make(SerialSignal, 0, len(i))
+	for s := range i {
+		ret = append(ret, s)
+	}
+	return ret
+}
+
+func (serial SerialSignal) Deserialize() Signal {
+	ret := make(Signal)
+	for _, s := range serial {
+		ret[s] = struct{}{}
+	}
+	return ret
+}
 
 func (i Signal) Empty() bool {
 	return len(i) == 0
@@ -17,14 +34,13 @@ func (i Signal) Diff(i0 Signal) Signal {
 	return diff
 }
 
-func (i *Signal) DiffMergePrimitive(prims []Segment) []Segment {
+func (i *Signal) DiffRaw(prims []Segment) []Segment {
 	diff := []Segment{}
 	for _, prim := range prims {
 		hsh := prim.Hash()
 		if _, ok := (*i)[hsh]; ok {
 			continue
 		}
-		(*i)[hsh] = struct{}{}
 		diff = append(diff, prim)
 	}
 	return diff

@@ -22,7 +22,7 @@ type RPCInput struct {
 type RPCScheduledInput struct {
 	Prog   []byte
 	Cover  []uint32
-	Signal interleaving.Signal
+	Signal interleaving.SerialSignal
 }
 
 type RPCCandidate struct {

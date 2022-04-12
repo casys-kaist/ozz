@@ -1265,7 +1265,7 @@ func (mgr *Manager) newInput(inp rpctype.RPCInput, sign signal.Signal) bool {
 	return true
 }
 
-func (mgr *Manager) newScheduledInput(inp rpctype.RPCScheduledInput, interleaving interleaving.Signal) bool {
+func (mgr *Manager) newScheduledInput(inp rpctype.RPCScheduledInput, sign interleaving.Signal) bool {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	// XXX: we maintain the threaded corpus independent to the corpus
@@ -1275,7 +1275,13 @@ func (mgr *Manager) newScheduledInput(inp rpctype.RPCScheduledInput, interleavin
 	// handled in a same way.
 	sig := hash.String(inp.Prog)
 	if old, ok := mgr.scheduledCorpus[sig]; ok {
-		old.Signal.Merge(interleaving)
+		sign.Merge(old.Signal.Deserialize())
+		old.Signal = sign.Serialize()
+		var cov interleaving.Cover
+		cov.Merge(old.Cover)
+		cov.Merge(inp.Cover)
+		old.Cover = cov.Serialize()
+		mgr.scheduledCorpus[sig] = old
 	} else {
 		mgr.scheduledCorpus[sig] = inp
 		mgr.corpusDB.Save(sig, inp.Prog, 0)

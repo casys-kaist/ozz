@@ -327,7 +327,7 @@ func (serv *RPCServer) NewScheduledInput(a *rpctype.NewScheduledInputArgs, r *in
 		return nil
 	}
 
-	inputSignal := a.Signal
+	inputSignal := a.Signal.Deserialize()
 
 	serv.mu.Lock()
 	defer serv.mu.Unlock()

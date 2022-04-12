@@ -1,11 +1,17 @@
 package interleaving
 
 type Cover []Segment
+type SerialCover []uint32
 
-func (c Cover) Serialize() []uint32 {
+func (cov *Cover) Merge(raw SerialCover) {
+	c0 := raw.Deserialize()
+	*cov = append(*cov, c0...)
+}
+
+func (c Cover) Serialize() SerialCover {
 	// A single Knot has 2 Communications, which means has 4
 	// Accesses, which means has 28 uint32.
-	ret := make([]uint32, 0, len(c)*sizePerKnot)
+	ret := make(SerialCover, 0, len(c)*sizePerKnot)
 	for _, segment := range c {
 		// XXX: This is ugly, as we accept []Segment as an input but
 		// assume it is actually []Knot. This is likely an indication
@@ -30,10 +36,10 @@ func (c Cover) Serialize() []uint32 {
 	return ret
 }
 
-func Deserialize(raw []uint32) Cover {
-	c := make(Cover, 0, len(raw)/sizePerKnot)
-	for i := 0; i < len(raw); i += sizePerKnot {
-		c = append(c, deserializeKnot(raw[i:i+sizePerKnot]))
+func (serial SerialCover) Deserialize() Cover {
+	c := make(Cover, 0, len(serial)/sizePerKnot)
+	for i := 0; i < len(serial); i += sizePerKnot {
+		c = append(c, deserializeKnot(serial[i:i+sizePerKnot]))
 	}
 	return c
 }

@@ -21,7 +21,7 @@ func TestCoverSerializeSingle(t *testing.T) {
 		},
 	}
 	serialized := cover.Serialize()
-	deserialized := interleaving.Deserialize(serialized)
+	deserialized := serialized.Deserialize()
 	if !coverSame(cover, deserialized) {
 		t.Errorf("wrong\nOriginal:\n%v\nDeserialized:\n%v", cover, deserialized)
 	}

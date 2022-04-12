@@ -158,7 +158,7 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot, force bool) {
 		// We exclude used knots from tp.Hint even if
 		// p.MutateScheduleFromHint() fails because it will fail later
 		// anyway.
-		setHint(tp, remainint)
+		setHint(tp, remaining)
 		if !ok {
 			continue
 		}
@@ -437,7 +437,7 @@ func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.Pro
 	proc.fuzzer.sendScheduledInputToManager(rpctype.RPCScheduledInput{
 		Prog:   p.Serialize(),
 		Cover:  cover.Serialize(),
-		Signal: signal,
+		Signal: signal.Serialize(),
 	})
 	proc.fuzzer.addThreadedInputToCorpus(p, signal)
 	return info

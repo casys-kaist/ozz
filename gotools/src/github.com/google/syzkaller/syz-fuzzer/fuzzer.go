@@ -69,7 +69,8 @@ type Fuzzer struct {
 	maxSignal    signal.Signal // max signal ever observed including flakes
 	newSignal    signal.Signal // diff of maxSignal since last sync with master
 
-	// We manage additional interleaving signals
+	// We manage additional interleaving signals. All semantics are
+	// same as the ones for the code coverage.
 	corpusInterleaving interleaving.Signal
 	maxInterleaving    interleaving.Signal
 	newInterleaving    interleaving.Signal
@@ -293,7 +294,6 @@ func main() {
 		corpusHashes:             make(map[hash.Sig]struct{}),
 		shifter:                  shifter,
 
-		// XXX: I'm not sure we want to keep these two interleaving
 		corpusInterleaving: make(interleaving.Signal),
 		maxInterleaving:    make(interleaving.Signal),
 		newInterleaving:    make(interleaving.Signal),
@@ -638,28 +638,21 @@ func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hint []interleaving.Segmen
 	})
 }
 
-// XXX: Below two functions' name are so confusing. Rename or merge
-// them
-func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, sign interleaving.Signal) {
-	fuzzer.corpusMu.Lock()
-	defer fuzzer.corpusMu.Unlock()
-	fuzzer.scheduledCorpus = append(fuzzer.scheduledCorpus, &prog.ScheduledProg{
-		P:      p,
-		Signal: sign,
-	})
-}
-
 func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, sign interleaving.Signal) {
 	// NOTE: We do not further mutate threaded prog so we do not add
 	// it to corpus. This can be possibly limiting the fuzzer, but we
 	// don't have any evidence of it.
-	fuzzer.addInputToThreadedCorpus(p, sign)
+	fuzzer.corpusMu.Lock()
+	fuzzer.scheduledCorpus = append(fuzzer.scheduledCorpus, &prog.ScheduledProg{
+		P:      p,
+		Signal: sign,
+	})
+	fuzzer.corpusMu.Unlock()
 
 	fuzzer.signalMu.Lock()
-	defer fuzzer.signalMu.Unlock()
 	fuzzer.maxInterleaving.Merge(sign)
-	fuzzer.newInterleaving.Merge(sign)
 	fuzzer.corpusInterleaving.Merge(sign)
+	fuzzer.signalMu.Unlock()
 }
 
 func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
@@ -721,15 +714,22 @@ func (fuzzer *Fuzzer) checkNewCallSignal(p *prog.Prog, info *ipc.CallInfo, call 
 }
 
 func (fuzzer *Fuzzer) newSegment(base *interleaving.Signal, segs []interleaving.Segment) []interleaving.Segment {
-	diff := base.DiffMergePrimitive(segs)
-	if len(diff) == 0 {
-		return nil
-	}
-	return diff
+	fuzzer.signalMu.RLock()
+	defer fuzzer.signalMu.RUnlock()
+	return base.DiffRaw(segs)
 }
 
 func (fuzzer *Fuzzer) newKnot(knots []interleaving.Segment) []interleaving.Segment {
-	return fuzzer.newSegment(&fuzzer.maxInterleaving, knots)
+	diff := fuzzer.newSegment(&fuzzer.maxInterleaving, knots)
+	if len(diff) == 0 {
+		return nil
+	}
+	sign := interleaving.FromCoverToSignal(diff)
+	fuzzer.signalMu.Lock()
+	fuzzer.newInterleaving.Merge(sign)
+	fuzzer.maxInterleaving.Merge(sign)
+	fuzzer.signalMu.Unlock()
+	return diff
 }
 
 func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog, calls prog.Contender) bool {
