@@ -30,6 +30,7 @@ import (
 	"github.com/google/syzkaller/pkg/hash"
 	"github.com/google/syzkaller/pkg/host"
 	"github.com/google/syzkaller/pkg/instance"
+	"github.com/google/syzkaller/pkg/interleaving"
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/pkg/mgrconfig"
 	"github.com/google/syzkaller/pkg/osutil"
@@ -89,7 +90,7 @@ type Manager struct {
 	candidates       []rpctype.RPCCandidate // untriaged inputs from corpus and hub
 	disabledHashes   map[string]struct{}
 	corpus           map[string]rpctype.RPCInput
-	threadedCorpus   map[string]rpctype.RPCThreadedInput
+	scheduledCorpus  map[string]rpctype.RPCScheduledInput
 	seeds            [][]byte
 	newRepros        [][]byte
 	lastMinCorpus    int
@@ -187,7 +188,7 @@ func RunManager(cfg *mgrconfig.Config) {
 		stats:            &Stats{haveHub: cfg.HubClient != ""},
 		crashTypes:       make(map[string]bool),
 		corpus:           make(map[string]rpctype.RPCInput),
-		threadedCorpus:   make(map[string]rpctype.RPCThreadedInput),
+		scheduledCorpus:  make(map[string]rpctype.RPCScheduledInput),
 		disabledHashes:   make(map[string]struct{}),
 		memoryLeakFrames: make(map[string]bool),
 		dataRaceFrames:   make(map[string]bool),
@@ -237,15 +238,14 @@ func RunManager(cfg *mgrconfig.Config) {
 			crashes := mgr.stats.crashes.get()
 			corpusCover := mgr.stats.corpusCover.get()
 			corpusSignal := mgr.stats.corpusSignal.get()
-			corpusReadFrom := mgr.stats.corpusReadFrom.get()
+			corpusInterleaving := mgr.stats.corpusInterleaving.get()
 			maxSignal := mgr.stats.maxSignal.get()
-			maxReadFrom := mgr.stats.maxReadFrom.get()
 			mgr.mu.Unlock()
 			numReproducing := atomic.LoadUint32(&mgr.numReproducing)
 			numFuzzing := atomic.LoadUint32(&mgr.numFuzzing)
 
-			log.Logf(0, "VMs %v, executed %v, cover %v, signal %v/%v, readfrom %v/%v crashes %v, repro %v",
-				numFuzzing, executed, corpusCover, corpusSignal, maxSignal, corpusReadFrom, maxReadFrom, crashes, numReproducing)
+			log.Logf(0, "VMs %v, executed %v, cover %v, signal %v/%v, interleaving %v crashes %v, repro %v",
+				numFuzzing, executed, corpusCover, corpusSignal, maxSignal, corpusInterleaving, crashes, numReproducing)
 		}
 	}()
 
@@ -1265,7 +1265,7 @@ func (mgr *Manager) newInput(inp rpctype.RPCInput, sign signal.Signal) bool {
 	return true
 }
 
-func (mgr *Manager) newThreadedInput(inp rpctype.RPCThreadedInput, readfrom signal.ReadFrom) bool {
+func (mgr *Manager) newScheduledInput(inp rpctype.RPCScheduledInput, interleaving interleaving.Signal) bool {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	// XXX: we maintain the threaded corpus independent to the corpus
@@ -1274,13 +1274,10 @@ func (mgr *Manager) newThreadedInput(inp rpctype.RPCThreadedInput, readfrom sign
 	// two corpus once I'm sure that the two corpuses can actually be
 	// handled in a same way.
 	sig := hash.String(inp.Prog)
-	if old, ok := mgr.threadedCorpus[sig]; ok {
-		rf := old.ReadFrom.Deserialize()
-		rf.Merge(readfrom)
-		old.ReadFrom = rf.Serialize()
-		mgr.threadedCorpus[sig] = old
+	if old, ok := mgr.scheduledCorpus[sig]; ok {
+		old.Signal.Merge(interleaving)
 	} else {
-		mgr.threadedCorpus[sig] = inp
+		mgr.scheduledCorpus[sig] = inp
 		mgr.corpusDB.Save(sig, inp.Prog, 0)
 		if err := mgr.corpusDB.Flush(); err != nil {
 			log.Logf(0, "failed to save corpus database: %v", err)
@@ -1409,7 +1406,7 @@ func (mgr *Manager) dashboardReporter() {
 func (mgr *Manager) dumpCoverage() {
 	mgr.serv.mu.Lock()
 	code := mgr.serv.corpusCover.Serialize()
-	readfrom := mgr.serv.corpusReadFrom.Serialize()
+	knots := mgr.serv.corpusKnots
 	mgr.serv.mu.Unlock()
 
 	now := time.Now().Format("2006-01-02-15:04:05")
@@ -1427,15 +1424,15 @@ func (mgr *Manager) dumpCoverage() {
 		log.Fatalf("failed to write code coverage: %v", err)
 	}
 
-	readfromf, err := os.OpenFile(filepath.Join(dir, fmt.Sprintf("%s.readfrom", now)), os.O_WRONLY|os.O_CREATE|os.O_EXCL, osutil.DefaultFilePerm)
+	knotf, err := os.OpenFile(filepath.Join(dir, fmt.Sprintf("%s.knot", now)), os.O_WRONLY|os.O_CREATE|os.O_EXCL, osutil.DefaultFilePerm)
 	if err != nil {
 		log.Fatalf("failed to open read-from coverage file: %v", err)
 	}
-	var readfromcov bytes.Buffer
-	for i := 0; i < readfrom.Len(); i++ {
-		readfromcov.WriteString(fmt.Sprintf("%x %x\n", readfrom.From[i], readfrom.To[i]))
+	var knotcov bytes.Buffer
+	for i := 0; i < len(knots); i++ {
+		knotcov.WriteString(fmt.Sprintf("%v\n", knots[i]))
 	}
-	if _, err := readfromf.Write(readfromcov.Bytes()); err != nil {
+	if _, err := knotf.Write(knotcov.Bytes()); err != nil {
 		log.Fatalf("failed to write read-from coverage: %v", err)
 	}
 }
