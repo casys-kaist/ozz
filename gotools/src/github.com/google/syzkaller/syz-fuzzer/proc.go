@@ -326,7 +326,7 @@ func sequentialTrace(info *ipc.ProgInfo) []interleaving.SerialAccess {
 			res = append(res, c.Access)
 		}
 	}
-	// TODO: This is a current implementation's requirement
+	// XXX: This is a current implementation's requirement
 	if !(len(res) == 0 || len(res) == 2) {
 		log.Fatalf("wrong")
 	}
@@ -424,7 +424,22 @@ func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.Pro
 	knotter.AddSequentialTrace(seq)
 	knotter.ExcavateKnots()
 	knots := knotter.GetKnots()
-	proc.fuzzer.addThreadedInputToCorpus(p, knots)
+
+	if new := proc.fuzzer.newSegment(&proc.fuzzer.corpusInterleaving, knots); len(new) == 0 {
+		return info
+	}
+
+	cover := interleaving.Cover(knots)
+	signal := interleaving.FromCoverToSignal(cover)
+
+	data := p.Serialize()
+	log.Logf(2, "added new scheduled input to corpus:\n%s", data)
+	proc.fuzzer.sendScheduledInputToManager(rpctype.RPCScheduledInput{
+		Prog:   p.Serialize(),
+		Cover:  cover.Serialize(),
+		Signal: signal,
+	})
+	proc.fuzzer.addThreadedInputToCorpus(p, signal)
 	return info
 }
 
@@ -446,7 +461,6 @@ func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, knots []i
 	if proc.fuzzer.shutOffThreading(p, calls) {
 		return
 	}
-	// proc.fuzzer.mergeMaxReadFrom(p, calls, info)
 	proc.fuzzer.workQueue.enqueue(&WorkThreading{
 		p:     p.Clone(),
 		calls: calls,
@@ -681,7 +695,7 @@ func (logger ResultLogger) logRowLocked(row []string) {
 		}
 		log.Logf(2, "%s", s)
 	default:
-		// TODO: We support standard output only, but don't want to
+		// XXX: We support standard output only, but don't want to
 		// quit with others
 	}
 }

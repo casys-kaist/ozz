@@ -156,7 +156,7 @@ func (p *Prog) sanitizeRazzerSequential() error {
 
 type ScheduledProg struct {
 	P         *Prog
-	Knot      []interleaving.Segment
+	Signal    interleaving.Signal
 	Scheduled int
 	Prio      int
 }

@@ -19,10 +19,10 @@ type RPCInput struct {
 	Cover  []uint32
 }
 
-type RPCThreadedInput struct {
-	Prog     []byte
-	ReadFrom signal.SerialReadFrom
-	Serial   interleaving.SerialAccess
+type RPCScheduledInput struct {
+	Prog   []byte
+	Cover  []uint32
+	Signal interleaving.Signal
 }
 
 type RPCCandidate struct {
@@ -73,25 +73,22 @@ type NewInputArgs struct {
 	RPCInput
 }
 
-type NewThreadedInputArgs struct {
+type NewScheduledInputArgs struct {
 	Name string
-	RPCThreadedInput
+	RPCScheduledInput
 }
 
 type PollArgs struct {
 	Name           string
 	NeedCandidates bool
 	MaxSignal      signal.Serial
-	MaxReadFrom    signal.SerialReadFrom
 	Stats          map[string]uint64
 }
 
 type PollRes struct {
-	Candidates        []RPCCandidate
-	NewInputs         []RPCInput
-	NewThreadedInputs []RPCThreadedInput
-	MaxSignal         signal.Serial
-	MaxReadFrom       signal.SerialReadFrom
+	Candidates []RPCCandidate
+	NewInputs  []RPCInput
+	MaxSignal  signal.Serial
 }
 
 type RunnerConnectArgs struct {

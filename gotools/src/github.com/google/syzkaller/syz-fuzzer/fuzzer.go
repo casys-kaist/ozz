@@ -69,10 +69,10 @@ type Fuzzer struct {
 	maxSignal    signal.Signal // max signal ever observed including flakes
 	newSignal    signal.Signal // diff of maxSignal since last sync with master
 
-	// We maintain knots as interleaving signals
-	maxKnots    interleaving.Signal
-	corpusKnots interleaving.Signal
-	newKnots    interleaving.Signal
+	// We manage additional interleaving signals
+	corpusInterleaving interleaving.Signal
+	maxInterleaving    interleaving.Signal
+	newInterleaving    interleaving.Signal
 
 	// Mostly for debugging scheduling mutation. If generate is false,
 	// procs do not generate/mutate inputs but schedule.
@@ -294,9 +294,9 @@ func main() {
 		shifter:                  shifter,
 
 		// XXX: I'm not sure we want to keep these two interleaving
-		corpusKnots: make(interleaving.Signal),
-		maxKnots:    make(interleaving.Signal),
-		newKnots:    make(interleaving.Signal),
+		corpusInterleaving: make(interleaving.Signal),
+		maxInterleaving:    make(interleaving.Signal),
+		newInterleaving:    make(interleaving.Signal),
 
 		checkResult: r.CheckResult,
 		generate:    *flagGen,
@@ -474,25 +474,19 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats map[string]uint64) bool {
 		Name:           fuzzer.name,
 		NeedCandidates: needCandidates,
 		MaxSignal:      fuzzer.grabNewSignal().Serialize(),
-		// MaxReadFrom:    fuzzer.grabNewReadFrom().Serialize(),
-		Stats: stats,
+		Stats:          stats,
 	}
 	r := &rpctype.PollRes{}
 	if err := fuzzer.manager.Call("Manager.Poll", a, r); err != nil {
 		log.Fatalf("Manager.Poll call failed: %v", err)
 	}
 	maxSignal := r.MaxSignal.Deserialize()
-	maxReadFrom := r.MaxReadFrom.Deserialize()
-	log.Logf(1, "poll: candidates=%v inputs=%v signal=%v readfrom=%v",
-		len(r.Candidates), len(r.NewInputs), maxSignal.Len(), maxReadFrom.Len())
+	log.Logf(1, "poll: candidates=%v inputs=%v signal=%v",
+		len(r.Candidates), len(r.NewInputs), maxSignal.Len())
 	fuzzer.addMaxSignal(maxSignal)
-	// fuzzer.addMaxReadFrom(maxReadFrom)
 	for _, inp := range r.NewInputs {
 		fuzzer.addInputFromAnotherFuzzer(inp)
 	}
-	// for _, inp := range r.NewThreadedInputs {
-	// 	fuzzer.addThreadedInputFromAnotherFuzzer(inp)
-	// }
 	for _, candidate := range r.Candidates {
 		fuzzer.addCandidateInput(candidate)
 	}
@@ -512,13 +506,13 @@ func (fuzzer *Fuzzer) sendInputToManager(inp rpctype.RPCInput) {
 	}
 }
 
-func (fuzzer *Fuzzer) sendThreadedInputToManager(inp rpctype.RPCThreadedInput) {
-	a := &rpctype.NewThreadedInputArgs{
-		Name:             fuzzer.name,
-		RPCThreadedInput: inp,
+func (fuzzer *Fuzzer) sendScheduledInputToManager(inp rpctype.RPCScheduledInput) {
+	a := &rpctype.NewScheduledInputArgs{
+		Name:              fuzzer.name,
+		RPCScheduledInput: inp,
 	}
-	if err := fuzzer.manager.Call("Manager.NewThreadedInput", a, nil); err != nil {
-		log.Fatalf("Manager.NewThreadedInput call failed: %v", err)
+	if err := fuzzer.manager.Call("Manager.NewScheduledInput", a, nil); err != nil {
+		log.Fatalf("Manager.NewScheduledInput call failed: %v", err)
 	}
 }
 
@@ -531,15 +525,6 @@ func (fuzzer *Fuzzer) addInputFromAnotherFuzzer(inp rpctype.RPCInput) {
 	sign := inp.Signal.Deserialize()
 	fuzzer.addInputToCorpus(p, sign, sig)
 }
-
-// func (fuzzer *Fuzzer) addThreadedInputFromAnotherFuzzer(inp rpctype.RPCThreadedInput) {
-// 	p := fuzzer.deserializeInput(inp.Prog)
-// 	if p == nil {
-// 		return
-// 	}
-// 	readfrom := inp.ReadFrom.Deserialize()
-// 	fuzzer.addInputToThreadedCorpus(p, readfrom, inp.Serial)
-// }
 
 func (fuzzer *Fuzzer) addCandidateInput(candidate rpctype.RPCCandidate) {
 	p := fuzzer.deserializeInput(candidate.Prog)
@@ -655,28 +640,26 @@ func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hint []interleaving.Segmen
 
 // XXX: Below two functions' name are so confusing. Rename or merge
 // them
-func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, knot []interleaving.Segment) {
+func (fuzzer *Fuzzer) addInputToThreadedCorpus(p *prog.Prog, sign interleaving.Signal) {
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()
 	fuzzer.scheduledCorpus = append(fuzzer.scheduledCorpus, &prog.ScheduledProg{
-		P:    p,
-		Knot: knot,
+		P:      p,
+		Signal: sign,
 	})
 }
 
-func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, knots []interleaving.Segment) {
+func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, sign interleaving.Signal) {
 	// NOTE: We do not further mutate threaded prog so we do not add
 	// it to corpus. This can be possibly limiting the fuzzer, but we
 	// don't have any evidence of it.
-	fuzzer.addInputToThreadedCorpus(p, knots)
-
-	sign := interleaving.FromPrimitive(knots)
+	fuzzer.addInputToThreadedCorpus(p, sign)
 
 	fuzzer.signalMu.Lock()
 	defer fuzzer.signalMu.Unlock()
-	fuzzer.maxKnots.Merge(sign)
-	fuzzer.newKnots.Merge(sign)
-	fuzzer.corpusKnots.Merge(sign)
+	fuzzer.maxInterleaving.Merge(sign)
+	fuzzer.newInterleaving.Merge(sign)
+	fuzzer.corpusInterleaving.Merge(sign)
 }
 
 func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
@@ -704,17 +687,6 @@ func (fuzzer *Fuzzer) grabNewSignal() signal.Signal {
 	fuzzer.newSignal = nil
 	return sign
 }
-
-// func (fuzzer *Fuzzer) grabNewReadFrom() signal.ReadFrom {
-// 	fuzzer.signalMu.Lock()
-// 	defer fuzzer.signalMu.Unlock()
-// 	rf := fuzzer.newReadFrom
-// 	if rf.Empty() {
-// 		return nil
-// 	}
-// 	fuzzer.newReadFrom = signal.NewReadFrom()
-// 	return rf
-// }
 
 func (fuzzer *Fuzzer) corpusSignalDiff(sign signal.Signal) signal.Signal {
 	fuzzer.signalMu.RLock()
@@ -757,7 +729,7 @@ func (fuzzer *Fuzzer) newSegment(base *interleaving.Signal, segs []interleaving.
 }
 
 func (fuzzer *Fuzzer) newKnot(knots []interleaving.Segment) []interleaving.Segment {
-	return fuzzer.newSegment(&fuzzer.maxKnots, knots)
+	return fuzzer.newSegment(&fuzzer.maxInterleaving, knots)
 }
 
 func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog, calls prog.Contender) bool {

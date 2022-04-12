@@ -43,10 +43,10 @@ func (i Signal) Len() int {
 	return len(i)
 }
 
-func FromPrimitive(prims []Segment) Signal {
+func FromCoverToSignal(c Cover) Signal {
 	interleaving := make(Signal)
-	for _, prim := range prims {
-		hsh := prim.Hash()
+	for _, c := range c {
+		hsh := c.Hash()
 		interleaving[hsh] = struct{}{}
 	}
 	return interleaving
