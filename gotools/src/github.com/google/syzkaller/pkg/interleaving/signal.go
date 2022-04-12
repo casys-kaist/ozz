@@ -74,11 +74,13 @@ func (i *Signal) DiffRaw(prims []Segment) []Segment {
 	return diff
 }
 
-func (i *Signal) Merge(i0 Signal) {
-	if i == nil {
-		*i = make(Signal)
+func (i *Signal) Merge(i1 Signal) {
+	i0 := *i
+	if i0 == nil {
+		i0 = make(Signal, len(i1))
+		*i = i0
 	}
-	for hsh := range i0 {
+	for hsh := range i1 {
 		(*i)[hsh] = struct{}{}
 	}
 }

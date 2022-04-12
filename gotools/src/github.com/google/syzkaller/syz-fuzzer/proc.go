@@ -154,10 +154,10 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot, force bool) {
 		}
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
 
-		ok, remaining := p.MutateScheduleFromHint(proc.rnd, tp.Hint)
-		// We exclude used knots from tp.Hint even if
-		// p.MutateScheduleFromHint() fails because it will fail later
-		// anyway.
+		p, hint := tp.P.Clone(), tp.Hint
+		ok, remaining := p.MutateScheduleFromHint(proc.rnd, hint)
+		// We exclude used knots from tp.Hint even if the schedule
+		// mutation fails.
 		setHint(tp, remaining)
 		if !ok {
 			continue
