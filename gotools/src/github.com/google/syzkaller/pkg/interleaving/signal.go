@@ -1,6 +1,26 @@
 package interleaving
 
 type Signal map[uint64]struct{}
+
+func (i *Signal) Split(n int) Signal {
+	if i.Empty() {
+		return nil
+	}
+	c := make(Signal, n)
+	for e := range *i {
+		delete(*i, e)
+		c[e] = struct{}{}
+		n--
+		if n == 0 {
+			break
+		}
+	}
+	if len(*i) == 0 {
+		*i = nil
+	}
+	return c
+}
+
 type SerialSignal []uint64
 
 func (i Signal) Serialize() SerialSignal {
