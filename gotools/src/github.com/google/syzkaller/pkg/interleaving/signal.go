@@ -2,6 +2,14 @@ package interleaving
 
 type Signal map[uint64]struct{}
 
+func (i Signal) Copy() Signal {
+	c := make(Signal, len(i))
+	for e := range i {
+		c[e] = struct{}{}
+	}
+	return c
+}
+
 func (i *Signal) Split(n int) Signal {
 	if i.Empty() {
 		return nil
