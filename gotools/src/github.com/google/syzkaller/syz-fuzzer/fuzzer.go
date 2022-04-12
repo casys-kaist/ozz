@@ -70,9 +70,9 @@ type Fuzzer struct {
 	newSignal    signal.Signal // diff of maxSignal since last sync with master
 
 	// We maintain knots as interleaving signals
-	maxKnots    signal.Interleaving
-	corpusKnots signal.Interleaving
-	newKnots    signal.Interleaving
+	maxKnots    primitive.Signal
+	corpusKnots primitive.Signal
+	newKnots    primitive.Signal
 
 	// Mostly for debugging scheduling mutation. If generate is false,
 	// procs do not generate/mutate inputs but schedule.
@@ -294,9 +294,9 @@ func main() {
 		shifter:                  shifter,
 
 		// XXX: I'm not sure we want to keep these two interleaving
-		corpusKnots: make(signal.Interleaving),
-		maxKnots:    make(signal.Interleaving),
-		newKnots:    make(signal.Interleaving),
+		corpusKnots: make(primitive.Signal),
+		maxKnots:    make(primitive.Signal),
+		newKnots:    make(primitive.Signal),
 
 		checkResult: r.CheckResult,
 		generate:    *flagGen,
@@ -670,7 +670,7 @@ func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, knots []primitive.S
 	// don't have any evidence of it.
 	fuzzer.addInputToThreadedCorpus(p, knots)
 
-	sign := signal.FromPrimitive(knots)
+	sign := primitive.FromPrimitive(knots)
 
 	fuzzer.signalMu.Lock()
 	defer fuzzer.signalMu.Unlock()
@@ -748,7 +748,7 @@ func (fuzzer *Fuzzer) checkNewCallSignal(p *prog.Prog, info *ipc.CallInfo, call 
 	return true
 }
 
-func (fuzzer *Fuzzer) newSegment(base *signal.Interleaving, segs []primitive.Segment) []primitive.Segment {
+func (fuzzer *Fuzzer) newSegment(base *primitive.Signal, segs []primitive.Segment) []primitive.Segment {
 	diff := base.DiffMergePrimitive(segs)
 	if len(diff) == 0 {
 		return nil
