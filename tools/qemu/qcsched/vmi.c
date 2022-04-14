@@ -50,6 +50,17 @@ static void qcsched_vmi_hint__preempt_count(CPUState *cpu, target_ulong addr)
     vmi_info.__preempt_count = addr;
 }
 
+static bool __vmi_scheduling_subject(struct qcsched_vmi_task *t)
+{
+    // We don't have that many entries. Just iterating is fast enough.
+    int i;
+    for (i = 0; i < sched.total; i++) {
+        if (vmi_same_task(t, &sched.entries[i].t))
+            return true;
+    }
+    return false;
+}
+
 static bool
 qcsched_vmi_lock_info_duplicated(struct qcsched_vmi_lock_info *lock_info,
                                  struct qcsched_vmi_lock *vmi_lock)
@@ -62,6 +73,13 @@ qcsched_vmi_lock_info_duplicated(struct qcsched_vmi_lock_info *lock_info,
     return false;
 }
 
+static bool qcsched_vmi_running_context_being_scheduled(CPUState *cpu)
+{
+    struct qcsched_vmi_task running;
+    qcsched_vmi_task(cpu, &running);
+    return __vmi_scheduling_subject(&running) && qcsched_vmi_in_task(cpu);
+}
+
 static void qcsched_vmi_lock_acquire(CPUState *cpu, target_ulong lockdep_addr,
                                      int trylock, int read, target_ulong ip)
 {
@@ -70,6 +88,9 @@ static void qcsched_vmi_lock_acquire(CPUState *cpu, target_ulong lockdep_addr,
     struct qcsched_schedpoint_window *window;
     int cnt = lock_info->count;
     struct qcsched_vmi_lock vmi_lock;
+
+    if (!qcsched_vmi_running_context_being_scheduled(cpu))
+        return;
 
     // Allowed: activated
     if (!qcsched_check_cpu_state(cpu, qcsched_cpu_activated) ||
@@ -110,6 +131,9 @@ static void qcsched_vmi_lock_release(CPUState *cpu, target_ulong lockdep_addr)
     struct qcsched_vmi_lock_info *lock_info =
         &vmi_info.lock_info[cpu->cpu_index];
     int cnt = lock_info->count;
+
+    if (!qcsched_vmi_running_context_being_scheduled(cpu))
+        return;
 
     // Allowed: activated
     if (!qcsched_check_cpu_state(cpu, qcsched_cpu_activated) ||
@@ -239,22 +263,17 @@ bool vmi_same_task(struct qcsched_vmi_task *t0, struct qcsched_vmi_task *t1)
     return t0->task_struct == t1->task_struct;
 }
 
-static bool __vmi_scheduling_subject(struct qcsched_vmi_task *t)
-{
-    // We don't have that many entries. Just iterating is fast enough.
-    int i;
-    for (i = 0; i < sched.total; i++) {
-        if (vmi_same_task(t, &sched.entries[i].t))
-            return true;
-    }
-    return false;
-}
-
 bool qcsched_vmi_can_progress(CPUState *cpu)
 {
     struct qcsched_entry *entry = &sched.entries[sched.current];
     struct qcsched_vmi_task running;
     qcsched_vmi_task(cpu, &running);
+    // A running context can make a progress if
+    //  1) it is a irrelevant context or
+    //  2) the context is supposed to hit the next schedpoint or
+    //  3) all schedpoint are handled or
+    //  4) QCSCHED force the context to execute or
+    //  5) the schedule is done
     return !__vmi_scheduling_subject(&running) ||
            vmi_same_task(&running, &entry->t) || sched.total == sched.current ||
            cpu->qcsched_force_wakeup || !sched.activated;
