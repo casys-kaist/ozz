@@ -299,7 +299,7 @@ static int qcsched_handle_breakpoint_iolocked(CPUState *cpu)
 
     watchdog_breakpoint(cpu);
 
-    // We need to synchronize thw window before cleaning up left
+    // We need to synchronize the window before cleaning up left
     // schedpoint
     qcsched_window_sync(cpu);
     qcsched_window_cleanup_left_schedpoint(cpu);

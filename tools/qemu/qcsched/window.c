@@ -320,13 +320,19 @@ void qcsched_window_close_window(CPUState *cpu)
 
         if (entry->breakpoint.installed) {
             qcsched_window_leave_footprint_at(cpu, footprint_missed, order);
-            qcsched_window_shrink_entry(cpu, window, entry);
+            // We are closing the window so we don't care window
+            // manipulation operations (and in fact, without
+            // qcsched_window_{sync, cleanup_leaft_schedpoint} the
+            // manipulation operations does not work here). Just
+            // deactivate entries.
+            qcsched_window_deactivate_entry(cpu, window, entry);
         } else {
             qcsched_window_leave_footprint_at(cpu, footprint_not_addressed,
                                               order);
         }
     }
-    window->from = window->until = END_OF_SCHEDPOINT_WINDOW;
+    window->from = window->until = window->left_behind =
+        END_OF_SCHEDPOINT_WINDOW;
     window->total = 0;
     ASSERT(window->activated == 0,
            "window still contains activated entries after closing");
