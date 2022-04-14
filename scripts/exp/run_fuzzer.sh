@@ -65,7 +65,7 @@ echo "    workdir   : $WORKDIR"
 sleep 2
 
 if [ -n "$_TEE" ]; then
-	exec $SYZKALLER $OPTS 2>&1 | tee $_TEE
+	exec $SYZKALLER $OPTS 2>&1 | ts "[%Y-%m-%d %H:%M:%.S]" | tee $_TEE
 else
 	exec $SYZKALLER $OPTS
 fi
