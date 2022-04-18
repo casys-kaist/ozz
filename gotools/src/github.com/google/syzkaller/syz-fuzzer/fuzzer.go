@@ -106,6 +106,7 @@ const (
 	StatSchedule
 	// Stats of collected data
 	StatScheduleHint
+	StatWaitingThreading
 	StatCount
 )
 
@@ -635,6 +636,7 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hint []interleaving.Segment) {
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()
+	fuzzer.stats[StatScheduleHint] += uint64(len(hint))
 	fuzzer.candidates = append(fuzzer.candidates, &prog.Candidate{
 		P:    p,
 		Hint: hint,

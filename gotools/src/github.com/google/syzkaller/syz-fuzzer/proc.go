@@ -158,7 +158,7 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot, force bool) {
 		ok, remaining := p.MutateScheduleFromHint(proc.rnd, hint)
 		// We exclude used knots from tp.Hint even if the schedule
 		// mutation fails.
-		setHint(tp, remaining)
+		proc.setHint(tp, remaining)
 		if !ok {
 			continue
 		}
@@ -166,8 +166,12 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot, force bool) {
 	}
 }
 
-func setHint(tp *prog.Candidate, remaining []interleaving.Segment) {
+func (proc *Proc) setHint(tp *prog.Candidate, remaining []interleaving.Segment) {
+	proc.fuzzer.corpusMu.Lock()
+	defer proc.fuzzer.corpusMu.Unlock()
 	debugHint(tp, remaining)
+	used := len(tp.Hint) - len(remaining)
+	proc.fuzzer.stats[StatScheduleHint] -= uint64(used)
 	tp.Hint = remaining
 }
 
@@ -315,6 +319,10 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 	newKnots := proc.fuzzer.newKnot(knots)
 	newKnots = append(newKnots, interleaving.Intersect(knots, item.knots)...)
 
+	proc.fuzzer.corpusMu.Lock()
+	proc.fuzzer.stats[StatWaitingThreading] -= uint64(len(item.knots))
+	proc.fuzzer.corpusMu.Unlock()
+
 	// Now we know newly found knots
 	proc.fuzzer.bookScheduleGuide(p, newKnots)
 }
@@ -461,6 +469,11 @@ func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, knots []i
 	if proc.fuzzer.shutOffThreading(p, calls) {
 		return
 	}
+
+	proc.fuzzer.corpusMu.Lock()
+	proc.fuzzer.stats[StatWaitingThreading] += uint64(len(knots))
+	proc.fuzzer.corpusMu.Unlock()
+
 	proc.fuzzer.workQueue.enqueue(&WorkThreading{
 		p:     p.Clone(),
 		calls: calls,
