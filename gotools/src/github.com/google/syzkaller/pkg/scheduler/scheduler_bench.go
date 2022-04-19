@@ -8,7 +8,18 @@ import (
 )
 
 func benchmarkExcavateKnots(b *testing.B) {
-	// data1 is larger than data2
+	testdata := []string{
+		"data1",
+	}
+	for _, testdata := range testdata {
+		benchmarkExcavateKnotsWithData(b, testdata)
+	}
+}
+
+var testdata string
+
+func benchmarkExcavateKnotsWithData(b *testing.B, _testdata string) {
+	testdata = _testdata
 	subBenchmarks := []struct {
 		name string
 		f    func(*testing.B)
@@ -21,12 +32,12 @@ func benchmarkExcavateKnots(b *testing.B) {
 		{"formKnots", benchmarkFormKnots},
 	}
 	for _, sub := range subBenchmarks {
-		b.Run(sub.name, sub.f)
+		b.Run(testdata+"/"+sub.name, sub.f)
 	}
 }
 
 func benchmarkTotal(b *testing.B) {
-	thrs := loadTestdata(b, []string{"data1"}, nil)
+	thrs := loadTestdata(b, []string{testdata}, nil)
 	thrs0 := make([][2]interleaving.SerialAccess, len(thrs))
 	copy(thrs0, thrs)
 	b.ReportAllocs()
@@ -87,7 +98,7 @@ func benchmarkFormKnots(b *testing.B) {
 }
 
 func doSubBenchmarks(b *testing.B, knotter *Knotter, prerequisites []func(), do func()) {
-	thrs := loadTestdata(b, []string{"data1"}, nil)
+	thrs := loadTestdata(b, []string{testdata}, nil)
 	knotter.AddSequentialTrace(thrs[0][:])
 	b.ReportAllocs()
 	b.ResetTimer()
