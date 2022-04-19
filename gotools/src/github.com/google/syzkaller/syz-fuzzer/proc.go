@@ -312,6 +312,12 @@ func (proc *Proc) smashInput(item *WorkSmash) {
 
 func (proc *Proc) threadingInput(item *WorkThreading) {
 	log.Logf(1, "proc #%v: threading an input", proc.pid)
+	defer func() {
+		proc.fuzzer.corpusMu.Lock()
+		defer proc.fuzzer.corpusMu.Unlock()
+		proc.fuzzer.stats[StatWaitingThreading] -= uint64(len(item.knots))
+	}()
+
 	p := item.p.Clone()
 	p.Threading(item.calls)
 	knotter := scheduler.Knotter{}
@@ -319,7 +325,7 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 		inf := proc.executeRaw(proc.execOpts, p, StatThreading)
 		seq := sequentialTrace(inf)
 		if !knotter.AddSequentialTrace(seq) {
-			log.Logf(0, "[WARN] failed to add the sequence trace")
+			log.Logf(1, "Failed to add sequential traces")
 			return
 		}
 		p.Reverse()
@@ -332,24 +338,25 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 	newKnots := proc.fuzzer.newKnot(knots)
 	newKnots = append(newKnots, interleaving.Intersect(knots, item.knots)...)
 
-	proc.fuzzer.corpusMu.Lock()
-	proc.fuzzer.stats[StatWaitingThreading] -= uint64(len(item.knots))
-	proc.fuzzer.corpusMu.Unlock()
-
 	// Now we know newly found knots
 	proc.fuzzer.bookScheduleGuide(p, newKnots)
 }
 
 func sequentialTrace(info *ipc.ProgInfo) []interleaving.SerialAccess {
+	// TODO: This should be called with a threaded Prog
 	res := []interleaving.SerialAccess{}
 	for _, c := range info.Calls {
 		if len(c.Access) != 0 {
 			res = append(res, c.Access)
 		}
 	}
-	// XXX: This is a current implementation's requirement
-	if !(len(res) == 0 || len(res) == 2) {
-		log.Fatalf("wrong")
+	if len(res) != 2 {
+		// XXX: This is a current implementation's requirement. We
+		// need exactly two traces. If info does not contain exactly
+		// two traces (e.g., one contender call does not give us its
+		// trace), just return nil to let a caller handle this case as
+		// an error.
+		return nil
 	}
 	return res
 }
@@ -429,7 +436,6 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 
 			knotter := scheduler.Knotter{ReassignThreadID: true}
 			if !knotter.AddSequentialTrace([]interleaving.SerialAccess{info.Calls[c1].Access, info.Calls[c2].Access}) {
-				log.Logf(0, "[WARN] failed to add the sequence trace")
 				continue
 			}
 			knotter.ExcavateKnots()
@@ -446,7 +452,9 @@ func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.Pro
 	// NOTE: The scheduling work is the only case reaching here
 	seq := sequentialTrace(info)
 	knotter := scheduler.Knotter{}
-	knotter.AddSequentialTrace(seq)
+	if !knotter.AddSequentialTrace(seq) {
+		return info
+	}
 	knotter.ExcavateKnots()
 	knots := knotter.GetKnots()
 
