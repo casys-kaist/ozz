@@ -10,6 +10,7 @@ import (
 func benchmarkExcavateKnots(b *testing.B) {
 	testdata := []string{
 		"data1",
+		"heavy_data",
 	}
 	for _, testdata := range testdata {
 		benchmarkExcavateKnotsWithData(b, testdata)
