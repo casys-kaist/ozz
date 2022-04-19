@@ -135,11 +135,7 @@ func (proc *Proc) relieveMemoryPressure() bool {
 }
 
 func (proc *Proc) needScheduling() bool {
-	thold := 5
-	if !proc.fuzzer.generate {
-		thold = 1
-	}
-	if len(proc.fuzzer.candidates) < thold {
+	if len(proc.fuzzer.candidates) == 0 {
 		return false
 	}
 
