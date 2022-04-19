@@ -46,6 +46,7 @@ type Fuzzer struct {
 	workQueue         *WorkQueue
 	needPoll          chan struct{}
 	choiceTable       *prog.ChoiceTable
+	collection        [CollectionCount]uint64
 	stats             [StatCount]uint64
 	manager           *rpctype.RPCClient
 	target            *prog.Target
@@ -93,6 +94,13 @@ type FuzzerSnapshot struct {
 type Stat int
 
 const (
+	// Stats of collected data
+	CollectionScheduleHint = iota
+	CollectionScheduleHintCandidate
+	CollectionCount
+)
+
+const (
 	// Stats of fuzzing strategies
 	StatGenerate Stat = iota
 	StatFuzz
@@ -104,24 +112,20 @@ const (
 	StatSeed
 	StatThreading
 	StatSchedule
-	// Stats of collected data
-	StatScheduleHint
-	StatWaitingThreading
 	StatCount
 )
 
 var statNames = [StatCount]string{
-	StatGenerate:     "exec gen",
-	StatFuzz:         "exec fuzz",
-	StatCandidate:    "exec candidate",
-	StatTriage:       "exec triage",
-	StatMinimize:     "exec minimize",
-	StatSmash:        "exec smash",
-	StatHint:         "exec hints",
-	StatSeed:         "exec seeds",
-	StatThreading:    "exec threadings",
-	StatScheduleHint: "total scheduling hints",
-	StatSchedule:     "exec schedulings",
+	StatGenerate:  "exec gen",
+	StatFuzz:      "exec fuzz",
+	StatCandidate: "exec candidate",
+	StatTriage:    "exec triage",
+	StatMinimize:  "exec minimize",
+	StatSmash:     "exec smash",
+	StatHint:      "exec hints",
+	StatSeed:      "exec seeds",
+	StatThreading: "exec threadings",
+	StatSchedule:  "exec schedulings",
 }
 
 type OutputType int
@@ -636,7 +640,8 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hint []interleaving.Segment) {
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()
-	fuzzer.stats[StatScheduleHint] += uint64(len(hint))
+	fuzzer.collection[CollectionScheduleHint] += uint64(len(hint))
+	log.Logf(1, "total schedule hint=%d", fuzzer.collection[CollectionScheduleHint])
 	fuzzer.candidates = append(fuzzer.candidates, &prog.Candidate{
 		P:    p,
 		Hint: hint,
@@ -763,7 +768,7 @@ func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog) bool {
 	// fuzzer. To prevent the OOM killer, we shut off the threading
 	// work if the threading queue already contains a lot of Knots
 	fuzzer.corpusMu.RLock()
-	threadingKnots := fuzzer.stats[StatThreading]
+	threadingKnots := fuzzer.collection[CollectionScheduleHintCandidate]
 	fuzzer.corpusMu.RUnlock()
 	if threadingKnots > maxThreadingKnots {
 		return true
@@ -774,7 +779,7 @@ func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog) bool {
 func (fuzzer *Fuzzer) spillOverThreading() bool {
 	const threshold = 100000
 	fuzzer.corpusMu.RLock()
-	threadingKnots := fuzzer.stats[StatWaitingThreading]
+	threadingKnots := fuzzer.collection[CollectionScheduleHintCandidate]
 	fuzzer.corpusMu.RUnlock()
 	return threadingKnots > threshold
 }
@@ -782,7 +787,7 @@ func (fuzzer *Fuzzer) spillOverThreading() bool {
 func (fuzzer *Fuzzer) spillOverScheduling() bool {
 	const threshold = 100000
 	fuzzer.corpusMu.RLock()
-	threadingKnots := fuzzer.stats[StatScheduleHint]
+	threadingKnots := fuzzer.collection[CollectionScheduleHint]
 	fuzzer.corpusMu.RUnlock()
 	return threadingKnots > threshold
 }

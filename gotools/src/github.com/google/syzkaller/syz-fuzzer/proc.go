@@ -180,12 +180,14 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot, force bool) {
 }
 
 func (proc *Proc) setHint(tp *prog.Candidate, remaining []interleaving.Segment) {
-	proc.fuzzer.corpusMu.Lock()
-	defer proc.fuzzer.corpusMu.Unlock()
 	debugHint(tp, remaining)
 	used := len(tp.Hint) - len(remaining)
-	proc.fuzzer.stats[StatScheduleHint] -= uint64(used)
+	proc.fuzzer.corpusMu.Lock()
+	defer proc.fuzzer.corpusMu.Unlock()
 	tp.Hint = remaining
+	proc.fuzzer.collection[CollectionScheduleHint] -= uint64(used)
+	log.Logf(1, "total schedule hint after a scheduling work=%d",
+		proc.fuzzer.collection[CollectionScheduleHint])
 }
 
 func (proc *Proc) triageInput(item *WorkTriage) {
@@ -315,7 +317,9 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 	defer func() {
 		proc.fuzzer.corpusMu.Lock()
 		defer proc.fuzzer.corpusMu.Unlock()
-		proc.fuzzer.stats[StatWaitingThreading] -= uint64(len(item.knots))
+		proc.fuzzer.collection[CollectionScheduleHintCandidate] -= uint64(len(item.knots))
+		log.Logf(1, "total schedule hint candidate after a threading work=%d",
+			proc.fuzzer.collection[CollectionScheduleHintCandidate])
 	}()
 
 	p := item.p.Clone()
@@ -453,6 +457,7 @@ func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.Pro
 	seq := sequentialTrace(info)
 	knotter := scheduler.Knotter{}
 	if !knotter.AddSequentialTrace(seq) {
+		log.Logf(1, "Failed to add sequential traces")
 		return info
 	}
 	knotter.ExcavateKnots()
@@ -492,7 +497,9 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 
 func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, knots []interleaving.Segment) {
 	proc.fuzzer.corpusMu.Lock()
-	proc.fuzzer.stats[StatWaitingThreading] += uint64(len(knots))
+	proc.fuzzer.collection[CollectionScheduleHintCandidate] += uint64(len(knots))
+	log.Logf(1, "total schedule hint candidate=%d",
+		proc.fuzzer.collection[CollectionScheduleHintCandidate])
 	proc.fuzzer.corpusMu.Unlock()
 
 	proc.fuzzer.workQueue.enqueue(&WorkThreading{
