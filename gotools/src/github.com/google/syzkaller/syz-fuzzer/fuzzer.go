@@ -757,18 +757,15 @@ func (fuzzer *Fuzzer) newKnot(knots []interleaving.Segment) []interleaving.Segme
 	return diff
 }
 
-func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog, calls prog.Contender) bool {
-	// Threading a given input requires at most O(n*n) re-execution to
-	// collect read-from inside an epoch (i.e., conflicts), so the
-	// threading queue may explode very quickly. To avoid that
-	// situation, we shut off the threading work if
-	if len(fuzzer.workQueue.threading) > maxWorkThreading {
-		// 1) the threading workqueue already contains lots of
-		// threading work. It is fine even if info contains
-		// interesting read-froms. We don't lose a chance to find
-		// threaded p because we don't collect the interesting
-		// read-froms so we will eventually find similar threaded p in
-		// the future.
+func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog) bool {
+	const maxThreadingKnots = 500000
+	// So the threading queue may explode very quickly when starting a
+	// fuzzer. To prevent the OOM killer, we shut off the threading
+	// work if the threading queue already contains a lot of Knots
+	fuzzer.corpusMu.RLock()
+	threadingKnots := fuzzer.stats[StatThreading]
+	fuzzer.corpusMu.RUnlock()
+	if threadingKnots > maxThreadingKnots {
 		return true
 	}
 	return false

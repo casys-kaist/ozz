@@ -73,8 +73,6 @@ type WorkThreading struct {
 	knots []interleaving.Segment
 }
 
-const maxWorkThreading = 10000
-
 func newWorkQueue(procs int, needCandidates chan struct{}) *WorkQueue {
 	return &WorkQueue{
 		procs:          procs,

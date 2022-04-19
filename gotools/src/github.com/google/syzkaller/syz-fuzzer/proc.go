@@ -142,6 +142,7 @@ func (proc *Proc) needScheduling() bool {
 	if len(proc.fuzzer.candidates) < thold {
 		return false
 	}
+
 	// prob = 1 / (1 + exp(-25 * (-x + 0.25))) where x = (scheduled/executed)
 	x := float64(proc.scheduled) / float64(proc.executed)
 	prob1000 := int(1 / (1 + math.Exp(-30*(-1*x+0.25))) * 1000)
@@ -420,6 +421,10 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 	maxIntermediateCalls := 3
 	for c1 := 0; c1 < len(p.Calls); c1++ {
 		for c2 := c1 + 1; c2 < len(p.Calls) && c2-c1-1 < maxIntermediateCalls; c2++ {
+			if proc.fuzzer.shutOffThreading(p) {
+				return
+			}
+
 			cont := prog.Contender{Calls: []int{c1, c2}}
 
 			knotter := scheduler.Knotter{ReassignThreadID: true}
@@ -478,10 +483,6 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 }
 
 func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, knots []interleaving.Segment) {
-	if proc.fuzzer.shutOffThreading(p, calls) {
-		return
-	}
-
 	proc.fuzzer.corpusMu.Lock()
 	proc.fuzzer.stats[StatWaitingThreading] += uint64(len(knots))
 	proc.fuzzer.corpusMu.Unlock()
