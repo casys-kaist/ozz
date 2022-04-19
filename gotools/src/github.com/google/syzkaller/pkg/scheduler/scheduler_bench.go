@@ -31,13 +31,16 @@ func benchmarkTotal(b *testing.B) {
 	copy(thrs0, thrs)
 	b.ReportAllocs()
 	b.ResetTimer()
+	total := 0
 	for i := 0; i < b.N; i++ {
 		knotter := &Knotter{}
 		for _, seq := range thrs {
 			knotter.AddSequentialTrace(seq[:])
 		}
 		knotter.ExcavateKnots()
+		total += len(knotter.GetKnots())
 	}
+	b.ReportMetric(float64(total/b.N), "knots/op")
 	b.StopTimer()
 	if !reflect.DeepEqual(thrs0, thrs) {
 		b.Fatalf("input data is corrupted")
