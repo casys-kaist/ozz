@@ -57,13 +57,12 @@ type Fuzzer struct {
 	faultInjectionEnabled    bool
 	comparisonTracingEnabled bool
 
-	corpusMu        sync.RWMutex
-	corpus          []*prog.Prog
-	corpusHashes    map[hash.Sig]struct{}
-	corpusPrios     []int64
-	sumPrios        int64
-	candidates      []*prog.Candidate
-	scheduledCorpus []*prog.ScheduledProg
+	corpusMu     sync.RWMutex
+	corpus       []*prog.Prog
+	corpusHashes map[hash.Sig]struct{}
+	corpusPrios  []int64
+	sumPrios     int64
+	candidates   []*prog.Candidate
 
 	signalMu     sync.RWMutex
 	corpusSignal signal.Signal // signal of inputs in corpus
@@ -652,13 +651,6 @@ func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, sign interleaving.S
 	// NOTE: We do not further mutate threaded prog so we do not add
 	// it to corpus. This can be possibly limiting the fuzzer, but we
 	// don't have any evidence of it.
-	fuzzer.corpusMu.Lock()
-	fuzzer.scheduledCorpus = append(fuzzer.scheduledCorpus, &prog.ScheduledProg{
-		P:      p,
-		Signal: sign,
-	})
-	fuzzer.corpusMu.Unlock()
-
 	fuzzer.signalMu.Lock()
 	fuzzer.maxInterleaving.Merge(sign)
 	fuzzer.corpusInterleaving.Merge(sign)
