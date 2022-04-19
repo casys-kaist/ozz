@@ -774,6 +774,22 @@ func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog, calls prog.Contender) bool 
 	return false
 }
 
+func (fuzzer *Fuzzer) spillOverThreading() bool {
+	const threshold = 100000
+	fuzzer.corpusMu.RLock()
+	threadingKnots := fuzzer.stats[StatWaitingThreading]
+	fuzzer.corpusMu.RUnlock()
+	return threadingKnots > threshold
+}
+
+func (fuzzer *Fuzzer) spillOverScheduling() bool {
+	const threshold = 100000
+	fuzzer.corpusMu.RLock()
+	threadingKnots := fuzzer.stats[StatScheduleHint]
+	fuzzer.corpusMu.RUnlock()
+	return threadingKnots > threshold
+}
+
 func signalPrio(p *prog.Prog, info *ipc.CallInfo, call int) (prio uint8) {
 	if call == -1 {
 		return 0

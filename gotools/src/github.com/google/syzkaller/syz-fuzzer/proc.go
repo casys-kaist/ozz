@@ -76,12 +76,10 @@ func (proc *Proc) loop() {
 	}
 	for i := 0; ; i++ {
 		log.Logf(2, "executed=%v scheduled=%v", proc.executed, proc.scheduled)
-		MonitorMemUsage()
-		if proc.needScheduling() {
-			fuzzerSnapshot := proc.fuzzer.snapshot()
-			proc.scheduleInput(fuzzerSnapshot, false)
+		if proc.relieveMemoryPressure() {
 			continue
 		}
+
 		item := proc.fuzzer.workQueue.dequeue()
 		if item != nil {
 			switch item := item.(type) {
@@ -120,6 +118,20 @@ func (proc *Proc) loop() {
 			log.Logf(0, "[WARN] Proc goroutine #%v runs on CPU other than 0", proc.pid)
 		}
 	}
+}
+
+func (proc *Proc) relieveMemoryPressure() bool {
+	MonitorMemUsage()
+	if proc.fuzzer.spillOverScheduling() {
+		fuzzerSnapshot := proc.fuzzer.snapshot()
+		proc.scheduleInput(fuzzerSnapshot, false)
+		return true
+	} else if proc.fuzzer.spillOverThreading() {
+		item := proc.fuzzer.workQueue.dequeueThreading()
+		proc.threadingInput(item)
+		return true
+	}
+	return false
 }
 
 func (proc *Proc) needScheduling() bool {
@@ -426,7 +438,7 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 }
 
 func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.ProgInfo {
-	// NOTE: The only case that reaches here is scheduling work
+	// NOTE: The scheduling work is the only case reaching here
 	seq := sequentialTrace(info)
 	knotter := scheduler.Knotter{}
 	knotter.AddSequentialTrace(seq)

@@ -157,6 +157,18 @@ func (wq *WorkQueue) dequeue() (item interface{}) {
 	return item
 }
 
+func (wq *WorkQueue) dequeueThreading() *WorkThreading {
+	wq.mu.Lock()
+	defer wq.mu.Unlock()
+	if len(wq.threading) == 0 {
+		return nil
+	}
+	last := len(wq.threading) - 1
+	item := wq.threading[last]
+	wq.threading = wq.threading[:last]
+	return item
+}
+
 func (wq *WorkQueue) wantCandidates() bool {
 	wq.mu.RLock()
 	defer wq.mu.RUnlock()
