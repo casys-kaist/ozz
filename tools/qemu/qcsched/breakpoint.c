@@ -59,7 +59,8 @@ static void kidnap_task(CPUState *cpu)
         return;
 
     // TODO: Do we want to kidnap more than one thread?
-    ASSERT(!trampoline->trampoled, "kidnapping more than one thread");
+    ASSERT(!trampoline->trampoled, "kidnapping more than one thread, cpu=%d",
+           cpu->cpu_index);
 
     DRPRINTF(cpu, "kidnapping\n");
     __copy_registers(&trampoline->orig_regs, &cpu->regs);

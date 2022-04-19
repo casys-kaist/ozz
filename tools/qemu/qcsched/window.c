@@ -492,7 +492,6 @@ void hand_over_baton_from(CPUState *cpu, int order)
 bool qcsched_window_lock_contending(CPUState *cpu)
 {
     CPUState *next_cpu;
-    bool contending;
     struct qcsched_entry *entry =
         lookup_entry_by_order(NULL, sched.current + 1);
 
@@ -521,10 +520,10 @@ bool qcsched_window_lock_contending(CPUState *cpu)
         next_cpu = qemu_get_cpu(entry->cpu);
     }
 
-    contending = qcsched_vmi_lock_contending(cpu, next_cpu);
-    if (contending)
-        DRPRINTF(cpu, "Contending on a lock\n");
-    return contending;
+    if (next_cpu == cpu)
+        return false;
+
+    return qcsched_vmi_lock_contending(cpu, next_cpu);
 }
 
 bool qcsched_window_consecutive_schedpoint(CPUState *cpu, int current_order)
