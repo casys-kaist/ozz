@@ -161,6 +161,13 @@ static void watchdog_breakpoint(CPUState *cpu)
     int index = cpu->cpu_index;
     struct qcsched_breakpoint_record *record = &sched.last_breakpoint[index];
 
+    if (breakpoint_on_hook(cpu))
+        // XXX: Because a breakpoint on the hook can be hit by
+        // multiple threads, it is not a subject of the watchdog. But
+        // we many want to kill the schedule if too many threads hit
+        // it to prevent the performance degradation.
+        return;
+
     watchdog_breakpoint_check_count(cpu, record);
 
     if (record->RIP == RIP(cpu))
