@@ -50,7 +50,7 @@ struct qcsched_entry *lookup_entry_by_address(CPUState *cpu, target_ulong inst)
 
 static int next_valid_order_of(CPUState *cpu, int order)
 {
-    struct qcsched_entry *entry = lookup_entry_by_order(NULL, order + 1);
+    struct qcsched_entry *entry = lookup_entry_by_order(cpu, order + 1);
     if (entry == NULL)
         return sched.total;
     else
@@ -483,9 +483,38 @@ void forward_focus(CPUState *cpu, int step)
              sched.entries[current].schedpoint.addr);
 }
 
+static CPUState *get_next_cpu(CPUState *cpu, struct qcsched_entry *entry)
+{
+    // XXX: Although at this point we support only two CPUs so
+    // this makes sense, the problem is that we don't have a
+    // mechanism to determine the next CPU after the last
+    // scheduling point. Need to fix it.
+    CPUState *next_cpu;
+    if (!entry) {
+        bool found = false;
+        CPU_FOREACH(next_cpu)
+        {
+            if (next_cpu != cpu &&
+                sched.cpu_state[next_cpu->cpu_index] == qcsched_cpu_activated) {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            return NULL;
+    } else {
+        next_cpu = qemu_get_cpu(entry->cpu);
+    }
+    return next_cpu;
+}
+
 void hand_over_baton_from(CPUState *cpu, int order)
 {
-    int next_order = next_valid_order_of(cpu, order);
+    CPUState *next_cpu;
+    int next_order;
+
+    next_cpu = get_next_cpu(cpu, NULL);
+    next_order = next_valid_order_of(next_cpu, order);
     forward_focus(cpu, next_order - sched.current);
 }
 
@@ -500,25 +529,9 @@ bool qcsched_window_lock_contending(CPUState *cpu)
         qcsched_check_cpu_state(cpu, qcsched_cpu_deactivated))
         return false;
 
-    if (!entry) {
-        // XXX: Although at this point we support only two CPUs so
-        // this makes sense, the problem is that we don't have a
-        // mechanism to determine the next CPU after the last
-        // scheduling point. Need to fix it.
-        bool found = false;
-        CPU_FOREACH(next_cpu)
-        {
-            if (next_cpu != cpu &&
-                sched.cpu_state[next_cpu->cpu_index] == qcsched_cpu_activated) {
-                found = true;
-                break;
-            }
-        }
-        if (!found)
-            return false;
-    } else {
-        next_cpu = qemu_get_cpu(entry->cpu);
-    }
+    next_cpu = get_next_cpu(cpu, entry);
+    if (next_cpu == NULL)
+        return false;
 
     if (next_cpu == cpu)
         return false;
@@ -529,7 +542,7 @@ bool qcsched_window_lock_contending(CPUState *cpu)
 bool qcsched_window_consecutive_schedpoint(CPUState *cpu, int current_order)
 {
     struct qcsched_entry *entry;
-    int next_order = next_valid_order_of(cpu, current_order);
+    int next_order = next_valid_order_of(NULL, current_order);
 
     if (next_order == sched.total)
         // We reach the end of the schedule window
