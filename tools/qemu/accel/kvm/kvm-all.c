@@ -50,8 +50,9 @@
 #include "hw/boards.h"
 
 #ifdef CONFIG_QCSCHED
-#include "qemu/qcsched/qcsched.h"
 #include "qemu/qcsched/hcall.h"
+#include "qemu/qcsched/qcsched.h"
+#include "qemu/qcsched/trampoline.h"
 #endif
 
 /* This check must be after config-host.h is included */

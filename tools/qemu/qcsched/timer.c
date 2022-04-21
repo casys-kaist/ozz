@@ -7,6 +7,7 @@
 #include "sysemu/kvm.h"
 
 #include "qemu/qcsched/qcsched.h"
+#include "qemu/qcsched/trampoline.h"
 #include "qemu/qcsched/vmi.h"
 
 #include <signal.h>

@@ -14,6 +14,7 @@
 #include "qemu/qcsched/hcall.h"
 #include "qemu/qcsched/qcsched.h"
 #include "qemu/qcsched/state.h"
+#include "qemu/qcsched/trampoline.h"
 #include "qemu/qcsched/vmi.h"
 
 static bool qcsched_entry_used(struct qcsched_entry *entry)

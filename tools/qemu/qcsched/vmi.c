@@ -120,7 +120,6 @@ static void qcsched_vmi_lock_acquire(CPUState *cpu, target_ulong lockdep_addr,
     if (qcsched_window_lock_contending(cpu)) {
         // This CPU is trying to acquire a lock and another CPU has
         // already acquired it. Let's yield a turn
-        DRPRINTF(cpu, "Contending on a lock. Yield a turn.\n");
         window = &sched.schedpoint_window[cpu->cpu_index];
         qcsched_yield_turn_from(cpu, window->from);
     }
