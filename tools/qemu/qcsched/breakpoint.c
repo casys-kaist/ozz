@@ -41,8 +41,19 @@ static bool breakpoint_on_schedpoint(CPUState *cpu)
 
 static void __handle_breakpoint_hook(CPUState *cpu)
 {
+    int err;
+
     DRPRINTF(cpu, "%s %llx\n", __func__, cpu->regs.rbx);
-    // If the task can make a progress, we don't need to do something.
+
+    if (!qcsched_vmi_running_context_being_scheduled(cpu)) {
+        // The context is switched, this is not a thread we want to
+        // control. Reinstall the brekapoint on the hook.
+        ASSERT(!(err = kvm_insert_breakpoint_cpu(cpu, vmi_info.hook_addr, 1,
+                                                 GDB_BREAKPOINT_HW)),
+               "failed to insert a breakpoint at the hook err=%d\n", err);
+        return;
+    }
+
     if (!qcsched_vmi_can_progress(cpu))
         kidnap_task(cpu);
     else
@@ -178,7 +189,7 @@ static int qcsched_handle_breakpoint_iolocked(CPUState *cpu)
     if (err)
         // XXX: I'm not sure this is a correct way to fix the
         // infinitely repeated breakpoint hit issue. Let's see what
-        // will happen.
+        // happens.
         kvm_update_guest_debug(cpu, 0);
 
     if (!qcsched_vmi_in_task(cpu))

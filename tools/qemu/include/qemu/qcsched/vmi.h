@@ -70,4 +70,6 @@ bool qcsched_vmi_in_task(CPUState *cpu);
 
 bool vmi_same_task(struct qcsched_vmi_task *t0, struct qcsched_vmi_task *t1);
 
+bool qcsched_vmi_running_context_being_scheduled(CPUState *cpu);
+
 #endif

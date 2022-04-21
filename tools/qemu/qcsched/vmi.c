@@ -73,7 +73,7 @@ qcsched_vmi_lock_info_duplicated(struct qcsched_vmi_lock_info *lock_info,
     return false;
 }
 
-static bool qcsched_vmi_running_context_being_scheduled(CPUState *cpu)
+bool qcsched_vmi_running_context_being_scheduled(CPUState *cpu)
 {
     struct qcsched_vmi_task running;
     qcsched_vmi_task(cpu, &running);
