@@ -81,6 +81,16 @@ bool qcsched_vmi_running_context_being_scheduled(CPUState *cpu)
     return __vmi_scheduling_subject(&running) && qcsched_vmi_in_task(cpu);
 }
 
+static bool qcsched_vmi_lockdep_whitelisted(target_ulong lockdep_addr)
+{
+    int i;
+    for (i = 0; i < vmi_info.lockdep_whitelist.count; i++) {
+        if (vmi_info.lockdep_whitelist.whitelist[i] == lockdep_addr)
+            return true;
+    }
+    return false;
+}
+
 static void qcsched_vmi_lock_acquire(CPUState *cpu, target_ulong lockdep_addr,
                                      int trylock, int read, target_ulong ip)
 {
@@ -89,6 +99,9 @@ static void qcsched_vmi_lock_acquire(CPUState *cpu, target_ulong lockdep_addr,
     struct qcsched_schedpoint_window *window;
     int cnt = lock_info->count;
     struct qcsched_vmi_lock vmi_lock;
+
+    if (qcsched_vmi_lockdep_whitelisted(lockdep_addr))
+        return;
 
     if (!qcsched_vmi_running_context_being_scheduled(cpu))
         return;
@@ -166,6 +179,16 @@ static void qcsched_vmi_lock_release(CPUState *cpu, target_ulong lockdep_addr)
     }
 }
 
+static void qcsched_vmi_lockdep_whitelist(CPUState *cpu, unsigned long addr)
+{
+    int idx;
+    if (vmi_info.lockdep_whitelist.count >= MAX_WHITELIST_ITEM)
+        return;
+    idx = vmi_info.lockdep_whitelist.count++;
+    vmi_info.lockdep_whitelist.whitelist[idx] = addr;
+    DRPRINTF(cpu, "whitelisting a lockdep=%lx\n", addr);
+}
+
 target_ulong qcsched_vmi_hint(CPUState *cpu, target_ulong type,
                               target_ulong addr, target_ulong ip)
 {
@@ -200,6 +223,9 @@ target_ulong qcsched_vmi_hint(CPUState *cpu, target_ulong type,
         break;
     case VMI_LOCK_RELEASE:
         qcsched_vmi_lock_release(cpu, addr);
+        break;
+    case VMI_LOCKDEP_WHITELIST:
+        qcsched_vmi_lockdep_whitelist(cpu, addr);
         break;
     default:
         DRPRINTF(cpu, "Unknown VMI type: %lx\n", type);

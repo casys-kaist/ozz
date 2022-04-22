@@ -28,6 +28,7 @@
 #define NMI_OFFSET (1UL << NMI_SHIFT)
 
 #define MAX_LOCKS 128
+#define MAX_WHITELIST_ITEM 16
 
 struct qcsched_vmi_lock {
     target_ulong lockdep_addr;
@@ -41,6 +42,11 @@ struct qcsched_vmi_lock_info {
     struct qcsched_vmi_lock acquired[MAX_LOCKS];
 };
 
+struct qcsched_lockdep_whitelist {
+    int count;
+    target_ulong whitelist[MAX_WHITELIST_ITEM];
+};
+
 struct qcsched_vmi_info {
     target_ulong trampoline_addr[2];
 #define trampoline_entry_addr trampoline_addr[0]
@@ -51,6 +57,7 @@ struct qcsched_vmi_info {
     target_ulong __ssb_do_emulate;
     target_ulong __preempt_count;
     struct qcsched_vmi_lock_info lock_info[MAX_CPUS];
+    struct qcsched_lockdep_whitelist lockdep_whitelist;
 };
 
 struct qcsched_vmi_task {
