@@ -99,6 +99,7 @@ static void qcsched_reset(CPUState *cpu)
     sched.total = sched.current = 0;
     sched.nr_cpus = 0;
     memset(&sched.entries, 0, sizeof(struct qcsched_entry) * MAX_SCHEDPOINTS);
+    memset(warn_once, 0, sizeof(warn_once));
 }
 
 static target_ulong qcsched_prepare(CPUState *cpu, unsigned int nr_bps,

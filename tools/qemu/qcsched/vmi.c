@@ -139,7 +139,8 @@ static void qcsched_vmi_lock_acquire(CPUState *cpu, target_ulong lockdep_addr,
         // of errors, we ignore the case invoking the assertion violation
         // in kidnap_task(). This workaounrd is definitely not correct,
         // but it lets our fuzzer keep working.
-        if (task_kidnapped(cpu)) {
+        if (task_kidnapped(cpu) && !warn_once[warn_once_task_kidnapped]) {
+            warn_once[warn_once_task_kidnapped] = true;
             DRPRINTF(cpu,
                      "WARN: a task already has been kidnapped and this CPU "
                      "tries to kidnap it (or another one) again.\n");

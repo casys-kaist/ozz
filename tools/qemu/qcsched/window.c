@@ -73,14 +73,14 @@ qcsched_window_activate_entry(CPUState *cpu,
     }
 
     if (entry->breakpoint.installed) {
-        DRPRINTF(cpu, "[WARN] trying to actdivate the entry at %lx again\n",
+        DRPRINTF(cpu, "WARN: trying to actdivate the entry at %lx again\n",
                  entry->schedpoint.addr);
         return;
     }
 
     if (entry->schedpoint.footprint != footprint_preserved)
         DRPRINTF(cpu,
-                 "[WARN] the footprint of the entry at %lx is not preserved. "
+                 "WARN: the footprint of the entry at %lx is not preserved. "
                  "Footprint: %d\n",
                  entry->schedpoint.addr, entry->schedpoint.footprint);
 
@@ -184,7 +184,7 @@ qcsched_window_deactivate_entry(CPUState *cpu,
 
     if (!entry->breakpoint.installed) {
         DRPRINTF(cpu,
-                 "[WARN] trying to deactivate the entry at %lx that has not "
+                 "WARN: trying to deactivate the entry at %lx that has not "
                  "been activated\n",
                  entry->schedpoint.addr);
         return;
@@ -269,7 +269,7 @@ qcsched_window_shrink_entry(CPUState *cpu,
 
     if (entry->schedpoint.order > window->from) {
         DRPRINTF(cpu,
-                 "[WARN] entry (%d) is not the first activated entry of the "
+                 "WARN: entry (%d) is not the first activated entry of the "
                  "window #%d (%d)\n",
                  entry->schedpoint.order, window->cpu, window->from);
         qcsched_window_shrink_before_entry(cpu, window, entry);
@@ -478,7 +478,7 @@ void forward_focus(CPUState *cpu, int step)
     if (footprint == footprint_missed)
         DRPRINTF(
             cpu,
-            "[WARN] moving the focus to an invalid entry: %d (footprint %d)\n",
+            "WARN: moving the focus to an invalid entry: %d (footprint %d)\n",
             current, footprint);
     sched.current = current;
 
@@ -581,7 +581,7 @@ void qcsched_window_leave_footprint_at(CPUState *cpu,
         footprint = footprint_hit;
 
     if (entry->schedpoint.footprint != footprint_preserved)
-        DRPRINTF(cpu, "[WARN] footprint is already left\n");
+        DRPRINTF(cpu, "WARN: footprint is already left\n");
 #ifdef _DEBUG_VERBOSE
     DRPRINTF(cpu, "Leave footprint %d at an entry #%d\n", footprint, order);
 #endif

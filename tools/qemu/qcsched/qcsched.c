@@ -17,6 +17,8 @@
 #include <time.h>
 #include <unistd.h>
 
+bool warn_once[warn_once_total];
+
 struct qcsched sched;
 
 #define INTERRUPT_FLAG_BIT 9

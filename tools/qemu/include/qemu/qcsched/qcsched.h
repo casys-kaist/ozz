@@ -59,6 +59,13 @@ bool qcsched_jumped_into_trampoline(CPUState *cpu);
 void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run);
 int qcsched_handle_breakpoint(CPUState *cpu);
 
+enum {
+    warn_once_task_kidnapped,
+    warn_once_total,
+};
+
+extern bool warn_once[warn_once_total];
+
 extern struct qcsched sched;
 
 struct qcsched_trampoline_info {
