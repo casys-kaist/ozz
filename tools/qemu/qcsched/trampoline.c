@@ -47,9 +47,18 @@ __attribute__((unused)) static void __restore_irq(CPUState *cpu)
     cpu->qcsched_restore_irq = true;
 }
 
+bool task_kidnapped(CPUState *cpu)
+{
+    struct qcsched_trampoline_info *trampoline = get_trampoline_info(cpu);
+    return trampoline->trampoled;
+}
+
 void kidnap_task(CPUState *cpu)
 {
     struct qcsched_trampoline_info *trampoline = get_trampoline_info(cpu);
+
+    ASSERT(qcsched_vmi_running_context_being_scheduled(cpu),
+           "kidnapping a wrong context");
 
     if (sched.current == sched.total || !sched.activated)
         // We hit the last breakpoint. TODO: This if statement allows

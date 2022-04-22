@@ -5,6 +5,7 @@
 
 #include "cpu.h"
 
+bool task_kidnapped(CPUState *cpu);
 void kidnap_task(CPUState *cpu);
 void resume_task(CPUState *cpu);
 void wake_cpu_up(CPUState *cpu, CPUState *wakeup);

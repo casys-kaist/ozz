@@ -6,6 +6,7 @@
 
 #include "qemu/qcsched/hcall_constant.h"
 #include "qemu/qcsched/qcsched.h"
+#include "qemu/qcsched/trampoline.h"
 #include "qemu/qcsched/vmi.h"
 #include "qemu/qcsched/window.h"
 
@@ -118,6 +119,19 @@ static void qcsched_vmi_lock_acquire(CPUState *cpu, target_ulong lockdep_addr,
     lock_info->count = cnt + 1;
 
     if (qcsched_window_lock_contending(cpu)) {
+        // XXX: I can't figure out why a thread is kidnapped and then a
+        // VMI hcall is called from that thread. This shouldn't happen,
+        // but it happens... Anyway our kidnapping/resumming mechanism is
+        // designed to make a CPU to keep executing even in the presence
+        // of errors, we ignore the case invoking the assertion violation
+        // in kidnap_task(). This workaounrd is definitely not correct,
+        // but it lets our fuzzer keep working.
+        if (task_kidnapped(cpu)) {
+            DRPRINTF(cpu,
+                     "WARN: a task already has been kidnapped and this CPU "
+                     "tries to kidnap it (or another one) again.\n");
+            return;
+        }
         // This CPU is trying to acquire a lock and another CPU has
         // already acquired it. Let's yield a turn
         window = &sched.schedpoint_window[cpu->cpu_index];
