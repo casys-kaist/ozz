@@ -30,7 +30,9 @@ def inspect_log(lines, time_threshold_s):
 
     threshold = datetime.timedelta(seconds=time_threshold_s)
 
+    first, last = None, None
     prev = None
+
     for line in lines:
         line = line.strip()
         time_strs = re.search("\[[^\[\]]*\]", line)
@@ -42,11 +44,15 @@ def inspect_log(lines, time_threshold_s):
             print("-----------------------------------------------------------")
         print(line)
         prev = time_obj
+        if first == None:
+            first = time_obj
+        last = time_obj
         typ = work_type(line)
         if typ == None:
             continue
         count[typ] = 1 if typ not in count else count[typ] + 1
 
+    print("Total time = ", last - first)
     print(count)
 
 
