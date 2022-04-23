@@ -278,6 +278,7 @@ struct qemu_work_item;
 
 #ifdef CONFIG_QCSCHED
 #define MAX_NR_CPUS 32
+typedef unsigned long long cookie_t;
 #endif
 
 /**
@@ -448,6 +449,10 @@ struct CPUState {
     bool qcsched_disable_irq;
     bool qcsched_restore_irq;
     bool qcsched_orig_irq_enabled;
+
+    cookie_t hcall_cookie;
+    cookie_t breakpoint_cookie;
+    cookie_t timer_cookie;
 #endif
 };
 

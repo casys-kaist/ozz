@@ -64,6 +64,13 @@ static void qcsched_reset_window(CPUState *cpu)
     window->cpu = cpu->cpu_index;
 }
 
+static void qcsched_reset_cookie(CPUState *cpu)
+{
+    cpu->breakpoint_cookie = 0;
+    cpu->hcall_cookie = 0;
+    cpu->timer_cookie = 0;
+}
+
 static void qcsched_reset(CPUState *cpu)
 {
     CPUState *cpu0;
@@ -94,6 +101,7 @@ static void qcsched_reset(CPUState *cpu)
 
         qcsched_set_cpu_state(cpu0, qcsched_cpu_idle);
         qcsched_reset_window(cpu0);
+        qcsched_reset_cookie(cpu0);
         qcsched_vmi_lock_info_reset(cpu0);
     }
     sched.total = sched.current = 0;
@@ -389,6 +397,7 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
     enum qcschedpoint_footprint footprint;
 
     qemu_mutex_lock_iothread();
+    qcsched_eat_cookie(cpu, cookie_hcall);
     switch (cmd) {
     case HCALL_RESET:
         qcsched_reset(cpu);

@@ -9,6 +9,7 @@ qcsched_ss.add(when: 'CONFIG_QCSCHED', if_true: files(
   'window.c',
   'state.c',
   'trampoline.c',
+  'cookie.c',
 ))
 
 specific_ss.add_all(when: 'CONFIG_SOFTMMU', if_true: [qcsched_ss])

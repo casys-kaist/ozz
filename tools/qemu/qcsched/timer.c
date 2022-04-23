@@ -55,6 +55,7 @@ static void qcsched_handle_kick_locked(CPUState *cpu)
 void qcsched_handle_kick(CPUState *cpu)
 {
     qemu_mutex_lock_iothread();
+    qcsched_eat_cookie(cpu, cookie_timer);
     qcsched_handle_kick_locked(cpu);
     qemu_mutex_unlock_iothread();
 }

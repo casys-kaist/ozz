@@ -80,11 +80,21 @@ struct qcsched_trampoline_info {
 void qcsched_arm_selfescape_timer(CPUState *cpu);
 void qcsched_handle_kick(CPUState *cpu);
 
+enum qcsched_cookie {
+    cookie_hcall,
+    cookie_breakpoint,
+    cookie_timer,
+};
+
+void qcsched_eat_cookie(CPUState *cpu, enum qcsched_cookie type);
+
 #define RIP(cpu) (cpu->regs.rip)
 
 #ifdef _DEBUG
 #define DRPRINTF(cpu, fmt, ...)                                                \
-    fprintf(stderr, "[CPU #%d] " fmt, cpu->cpu_index, ##__VA_ARGS__)
+    fprintf(stderr, "[CPU #%d-%llu/%llu/%llu] " fmt, cpu->cpu_index,           \
+            cpu->hcall_cookie, cpu->breakpoint_cookie, cpu->timer_cookie,      \
+            ##__VA_ARGS__)
 #else
 #define DRPRINTF(cpu, fmt, ...)                                                \
     do {                                                                       \

@@ -232,6 +232,7 @@ int qcsched_handle_breakpoint(CPUState *cpu)
 {
     int ret;
     qemu_mutex_lock_iothread();
+    qcsched_eat_cookie(cpu, cookie_breakpoint);
     ret = qcsched_handle_breakpoint_iolocked(cpu);
     qemu_mutex_unlock_iothread();
     return ret;
