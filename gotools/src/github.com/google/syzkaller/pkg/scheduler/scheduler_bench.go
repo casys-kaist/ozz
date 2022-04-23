@@ -43,17 +43,20 @@ func benchmarkTotal(b *testing.B) {
 	copy(thrs0, thrs)
 	b.ReportAllocs()
 	b.ResetTimer()
-	total := 0
+	totalKnots := 0
+	totalComms := 0
 	for i := 0; i < b.N; i++ {
 		knotter := &Knotter{}
 		for _, seq := range thrs {
 			knotter.AddSequentialTrace(seq[:])
 		}
 		knotter.ExcavateKnots()
-		total += len(knotter.GetKnots())
+		totalKnots += len(knotter.GetKnots())
+		totalComms += len(knotter.GetCommunications())
 	}
-	b.ReportMetric(float64(total/b.N), "knots/op")
 	b.StopTimer()
+	b.ReportMetric(float64(totalKnots/b.N), "knots/op")
+	b.ReportMetric(float64(totalComms/b.N), "comms/op")
 	if !reflect.DeepEqual(thrs0, thrs) {
 		b.Fatalf("input data is corrupted")
 	}
@@ -103,10 +106,17 @@ func doSubBenchmarks(b *testing.B, knotter *Knotter, prerequisites []func(), do 
 	knotter.AddSequentialTrace(thrs[0][:])
 	b.ReportAllocs()
 	b.ResetTimer()
+	totalKnots := 0
+	totalComms := 0
 	for i := 0; i < b.N; i++ {
 		reset(b, knotter, thrs, prerequisites)
 		do()
+		totalKnots += len(knotter.GetKnots())
+		totalComms += len(knotter.GetCommunications())
 	}
+	b.StopTimer()
+	b.ReportMetric(float64(totalKnots/b.N), "knots/op")
+	b.ReportMetric(float64(totalComms/b.N), "comms/op")
 }
 
 func reset(b *testing.B, knotter *Knotter, seqs [][2]interleaving.SerialAccess, prerequisites []func()) {
