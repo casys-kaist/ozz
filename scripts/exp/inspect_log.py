@@ -1,17 +1,38 @@
 #!/usr/bin/env python
 
 import argparse
+import re
 import sys
+
+work_types = [
+    ("executing a candidate", "candidate"),
+    ("triaging type=", "triage"),
+    ("generated", "generate"),
+    ("mutated", "mutate"),
+    ("scheduling an input", "schedule"),
+    ("smash mutated", "smash"),
+    ("threading an input", "thread"),
+]
+
+count = {}
+
+
+def work_type(line):
+    if re.search("proc #[0-9]", line) == None:
+        return None
+    for typ in work_types:
+        if line.find(typ[0]) != -1:
+            return typ[1]
 
 
 def inspect_log(lines, time_threshold_s):
     import datetime
-    import re
 
     threshold = datetime.timedelta(seconds=time_threshold_s)
 
     prev = None
     for line in lines:
+        line = line.strip()
         time_strs = re.search("\[[^\[\]]*\]", line)
         if time_strs == None:
             continue
@@ -19,8 +40,14 @@ def inspect_log(lines, time_threshold_s):
         time_obj = datetime.datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S.%f")
         if prev != None and time_obj - prev > threshold:
             print("-----------------------------------------------------------")
-        print(line.strip())
+        print(line)
         prev = time_obj
+        typ = work_type(line)
+        if typ == None:
+            continue
+        count[typ] = 1 if typ not in count else count[typ] + 1
+
+    print(count)
 
 
 def main():
