@@ -108,7 +108,7 @@ func TestExcavateKnots(t *testing.T) {
 func testExcavateKnots(t *testing.T, filename string, answer interleaving.Knot) []interleaving.Knot {
 	knots := loadKnots(t, []string{filename})
 	if !checkAnswer(t, knots, answer) {
-		t.Errorf("can't find the required knot")
+		t.Errorf("%s: can't find the required knot", filename)
 	}
 	return knots
 }
@@ -227,7 +227,7 @@ func TestExcavateKnotsTwoSeqs(t *testing.T) {
 	for _, test := range tests {
 		knots := loadKnots(t, test.filenames)
 		if !checkAnswer(t, knots, test.answer) {
-			t.Errorf("can't find the required knot")
+			t.Errorf("%v: can't find the required knot", test.filenames)
 		}
 	}
 }

@@ -105,16 +105,10 @@ func loadKnots(t *testing.T, paths []string) []interleaving.Knot {
 }
 
 func checkAnswer(t *testing.T, knots []interleaving.Knot, required interleaving.Knot) bool {
-	found := false
-	for i, knot := range knots {
-		t.Logf("Knot %d, type: %v", i, knot.Type())
-		t.Logf("  %x (%v) --> %x (%v)", knot[0][0].Inst, knot[0][0].Timestamp, knot[0][1].Inst, knot[0][1].Timestamp)
-		t.Logf("  %x (%v) --> %x (%v)", knot[1][0].Inst, knot[1][0].Timestamp, knot[1][1].Inst, knot[1][1].Timestamp)
+	for _, knot := range knots {
 		if knot.Same(required) {
-			t.Logf("found")
-			found = true
-			break
+			return true
 		}
 	}
-	return found
+	return false
 }
