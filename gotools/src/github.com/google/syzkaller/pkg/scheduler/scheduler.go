@@ -24,7 +24,6 @@ type Knotter struct {
 	ReassignThreadID bool
 
 	commHsh map[uint64]struct{}
-	knotHsh map[uint64]struct{}
 
 	// input
 	seqCount int
@@ -291,10 +290,9 @@ func (knotter *Knotter) duppedComm(comm interleaving.Communication) bool {
 
 func (knotter *Knotter) formKnots() {
 	knotter.knots = []interleaving.Segment{}
-	knotter.knotHsh = make(map[uint64]struct{})
 	for i := 0; i < len(knotter.comms); i++ {
 		for j := i + 1; j < len(knotter.comms); j++ {
-			comm1, comm2 := knotter.comms[i].(interleaving.Communication), knotter.comms[j].(interleaving.Communication)
+			comm1, comm2 := knotter.comms[i], knotter.comms[j]
 			if comm1[0].Timestamp > comm2[0].Timestamp {
 				comm1, comm2 = comm2, comm1
 			}
@@ -302,19 +300,9 @@ func (knotter *Knotter) formKnots() {
 			if typ := knot.Type(); typ == interleaving.KnotParallel || typ == interleaving.KnotInvalid {
 				continue
 			}
-			if knotter.duppedKnot(knot) {
-				continue
-			}
 			knotter.knots = append(knotter.knots, knot)
 		}
 	}
-}
-
-func (knotter *Knotter) duppedKnot(knot interleaving.Knot) bool {
-	hsh := knot.Hash()
-	_, ok := knotter.knotHsh[hsh]
-	knotter.knotHsh[hsh] = struct{}{}
-	return ok
 }
 
 func (knotter *Knotter) GetCommunications() []interleaving.Communication {

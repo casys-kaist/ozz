@@ -272,19 +272,6 @@ func TestDupCheck(t *testing.T) {
 		}
 	}
 	t.Logf("Duplicated communications pairs: %d", dupCommCnt)
-	knots := knotter.GetKnots()
-	t.Logf("Total knots: %d", len(knots))
-	dupKnotCnt := 0
-	mp := make(map[uint64]int)
-	// Although this does not detect all pairs of duplicated knots, it
-	// there is no detected dups, there is no dups in knots.
-	for i, knot := range knots {
-		if prev, ok := mp[knot.Hash()]; ok {
-			t.Errorf("duplicated knots:\n%v\n%v", knots[prev], knots[i])
-		}
-		mp[knot.Hash()] = i
-	}
-	t.Logf("Duplicated knots: %d", dupKnotCnt)
 }
 
 // TODO: answers depend on the data (i.e., two test data from the same
