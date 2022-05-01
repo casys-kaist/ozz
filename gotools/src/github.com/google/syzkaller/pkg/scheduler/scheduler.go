@@ -32,7 +32,7 @@ type Knotter struct {
 	seqs     [][]interleaving.SerialAccess // Used internally
 	// output
 	knots []interleaving.Segment
-	comms []interleaving.Segment
+	comms []interleaving.Communication
 }
 
 func (knotter *Knotter) AddSequentialTrace(seq []interleaving.SerialAccess) bool {
@@ -234,7 +234,7 @@ func (knotter *Knotter) buildAccessMapSerial(serial interleaving.SerialAccess, i
 }
 
 func (knotter *Knotter) formCommunications() {
-	knotter.comms = []interleaving.Segment{}
+	knotter.comms = []interleaving.Communication{}
 	knotter.commHsh = make(map[uint64]struct{})
 	for _, accs := range knotter.accessMap {
 		knotter.formCommunicationAddr(accs)
@@ -317,7 +317,7 @@ func (knotter *Knotter) duppedKnot(knot interleaving.Knot) bool {
 	return ok
 }
 
-func (knotter *Knotter) GetCommunications() []interleaving.Segment {
+func (knotter *Knotter) GetCommunications() []interleaving.Communication {
 	return knotter.comms
 }
 
