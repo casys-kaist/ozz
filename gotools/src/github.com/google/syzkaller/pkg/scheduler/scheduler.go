@@ -24,6 +24,8 @@ type Knotter struct {
 	ReassignThreadID bool
 
 	commHsh map[uint64]struct{}
+	comms0  []interleaving.Communication
+	comms1  []interleaving.Communication
 
 	// input
 	seqCount int
@@ -268,14 +270,22 @@ func (knotter *Knotter) formCommunicationAddr(accesses []interleaving.Access) {
 
 			// We are generating all possible knots so append both
 			// Communications
-			candidates := []interleaving.Communication{{acc1, acc2}, {acc2, acc1}}
-			for _, cand := range candidates {
-				if knotter.duppedComm(cand) {
-					continue
-				}
-				knotter.comms = append(knotter.comms, cand)
-			}
+			knotter.formCommunicationSingle(acc1, acc2)
+			knotter.formCommunicationSingle(acc2, acc1)
 		}
+	}
+}
+
+func (knotter *Knotter) formCommunicationSingle(acc0, acc1 interleaving.Access) {
+	comm := interleaving.Communication{acc0, acc1}
+	if knotter.duppedComm(comm) {
+		return
+	}
+	knotter.comms = append(knotter.comms, comm)
+	if acc0.Thread < acc1.Thread {
+		knotter.comms0 = append(knotter.comms0, comm)
+	} else {
+		knotter.comms1 = append(knotter.comms1, comm)
 	}
 }
 
@@ -290,19 +300,18 @@ func (knotter *Knotter) duppedComm(comm interleaving.Communication) bool {
 
 func (knotter *Knotter) formKnots() {
 	knotter.knots = []interleaving.Segment{}
-	for i := 0; i < len(knotter.comms); i++ {
-		for j := i + 1; j < len(knotter.comms); j++ {
-			comm1, comm2 := knotter.comms[i], knotter.comms[j]
-			if comm1[0].Timestamp > comm2[0].Timestamp {
-				comm1, comm2 = comm2, comm1
-			}
+	for i := 0; i < len(knotter.comms0); i++ {
+		for j := 0; j < len(knotter.comms1); j++ {
+			comm1, comm2 := knotter.comms0[i], knotter.comms1[j]
 			knot := interleaving.Knot{comm1, comm2}
-			if typ := knot.Type(); typ == interleaving.KnotParallel || typ == interleaving.KnotInvalid {
+			if typ := knot.Type(); typ == interleaving.KnotInvalid {
 				continue
 			}
 			knotter.knots = append(knotter.knots, knot)
 		}
 	}
+	knotter.comms0 = nil
+	knotter.comms1 = nil
 }
 
 func (knotter *Knotter) GetCommunications() []interleaving.Communication {
