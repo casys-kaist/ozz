@@ -347,25 +347,6 @@ func (sched *Scheduler) GenerateSchedPoints() ([]interleaving.Access, bool) {
 	return sched.schedPoints, true
 }
 
-func (sched *Scheduler) SqueezeSchedPoints() []interleaving.Access {
-	new := []interleaving.Access{}
-	preempted := make(map[uint64]bool)
-	for i := range sched.schedPoints {
-		if preempted[sched.schedPoints[i].Thread] {
-			// This is the first instruction after the thread is
-			// preempted. This should be a sched point
-			preempted[sched.schedPoints[i].Thread] = false
-			new = append(new, sched.schedPoints[i])
-		}
-		if i == len(sched.schedPoints)-1 || sched.schedPoints[i].Thread != sched.schedPoints[i+1].Thread {
-			preempted[sched.schedPoints[i].Thread] = true
-		}
-	}
-
-	sched.schedPoints = new
-	return sched.schedPoints
-}
-
 func (sched *Scheduler) buildDAG() dag {
 	d := newDAG()
 	threads := make(map[uint64][]interleaving.Access)
