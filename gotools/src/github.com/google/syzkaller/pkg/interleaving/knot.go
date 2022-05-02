@@ -1,5 +1,7 @@
 package interleaving
 
+import "fmt"
+
 type Knot [2]Communication
 
 func (knot Knot) Same(knot0 Knot) bool {
@@ -52,5 +54,19 @@ func (knot Knot) invalidContext() bool {
 	}
 	return false
 }
+
+func (knot0 Knot) Imply(knot1 Knot) (bool, error) {
+	comm00, comm01 := knot0[0], knot0[1]
+	comm10, comm11 := knot1[0], knot1[1]
+	if !comm10.Parallel(comm00) {
+		comm00, comm01 = comm01, comm00
+	}
+	if !comm10.Parallel(comm00) || !comm11.Parallel(comm01) {
+		return false, ErrorNotParallel
+	}
+	return comm00.Imply(comm10) && comm01.Imply(comm11), nil
+}
+
+var ErrorNotParallel = fmt.Errorf("Knot.Imply(): Communications are not parallel")
 
 const CommonPath = 0xff

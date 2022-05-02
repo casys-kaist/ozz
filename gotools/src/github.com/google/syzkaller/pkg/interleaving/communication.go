@@ -5,6 +5,11 @@ package interleaving
 // the same order as the program order
 type Communication [2]Access
 
+func (comm Communication) Imply(comm1 Communication) bool {
+	return comm.Former().Timestamp >= comm1.Former().Timestamp &&
+		comm.Latter().Timestamp <= comm1.Latter().Timestamp
+}
+
 func (comm *Communication) Former() Access {
 	return comm[0]
 }
