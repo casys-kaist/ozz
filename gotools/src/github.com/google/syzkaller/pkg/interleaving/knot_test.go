@@ -68,3 +68,12 @@ func TestKnotType(t *testing.T) {
 		}
 	}
 }
+
+func TestKnotImply(t *testing.T) {
+	var knot = interleaving.Knot{
+		{{Inst: 0x8bbb79d6, Size: 4, Typ: interleaving.TypeLoad}, {Inst: 0x8bbca80b, Size: 4, Typ: interleaving.TypeStore, Thread: 1}},
+		{{Inst: 0x8bbc9093, Size: 4, Typ: interleaving.TypeLoad, Thread: 1}, {Inst: 0x8bbb75a0, Size: 4, Typ: interleaving.TypeStore}}}
+	if ok, _ := knot.Imply(knot); !ok {
+		t.Errorf("Imply should return true for the same knot")
+	}
+}

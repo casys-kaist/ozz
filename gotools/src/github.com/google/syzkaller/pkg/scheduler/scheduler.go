@@ -208,7 +208,6 @@ func (knotter *Knotter) alignThread(thr []interleaving.SerialAccess) {
 
 func (knotter *Knotter) buildAccessMap() {
 	knotter.accessMap = make(map[uint32][]interleaving.Access)
-
 	for _, seq := range knotter.seqs {
 		for _id, serial := range seq {
 			if len(serial) == 0 {
@@ -307,11 +306,26 @@ func (knotter *Knotter) formKnots() {
 			if typ := knot.Type(); typ == interleaving.KnotInvalid {
 				continue
 			}
+			if knotter.redundantKnot(knot) {
+				continue
+			}
 			knotter.knots = append(knotter.knots, knot)
 		}
 	}
 	knotter.comms0 = nil
 	knotter.comms1 = nil
+}
+
+func (knotter *Knotter) redundantKnot(knot0 interleaving.Knot) bool {
+	for _, _knot := range knotter.knots {
+		knot1 := _knot.(interleaving.Knot)
+		if ok, err := knot1.Imply(knot0); err != nil {
+			panic(err)
+		} else if ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (knotter *Knotter) GetCommunications() []interleaving.Communication {
