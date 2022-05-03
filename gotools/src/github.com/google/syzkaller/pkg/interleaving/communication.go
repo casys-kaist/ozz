@@ -5,9 +5,22 @@ package interleaving
 // the same order as the program order
 type Communication [2]Access
 
-func (comm Communication) Imply(comm1 Communication) bool {
-	return comm.Former().Timestamp >= comm1.Former().Timestamp &&
-		comm.Latter().Timestamp <= comm1.Latter().Timestamp
+func (inner Communication) Imply(outer Communication) bool {
+	// If inner --> outer
+	// outer[0]
+	// inner[0]
+	//             inner[1]
+	//             outer[1]
+	chk := func(acc1, acc2 Access) bool {
+		return acc1.Context == CommonPath ||
+			acc2.Context == CommonPath ||
+			acc1.Context == acc2.Context
+	}
+	if !chk(inner.Former(), outer.Former()) || !chk(inner.Latter(), outer.Latter()) {
+		return false
+	}
+	return inner.Former().Timestamp >= outer.Former().Timestamp &&
+		inner.Latter().Timestamp <= outer.Latter().Timestamp
 }
 
 func (comm *Communication) Former() Access {

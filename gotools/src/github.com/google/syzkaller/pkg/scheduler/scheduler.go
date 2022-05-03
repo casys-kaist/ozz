@@ -23,9 +23,10 @@ type Knotter struct {
 	// Thread to each Access when fastening Knots
 	ReassignThreadID bool
 
-	commHsh map[uint64]struct{}
-	comms0  []interleaving.Communication
-	comms1  []interleaving.Communication
+	commHsh        map[uint64]struct{}
+	innerCommCount map[interleaving.Communication]int
+	comms0         []interleaving.Communication
+	comms1         []interleaving.Communication
 
 	// input
 	seqCount int
@@ -236,6 +237,7 @@ func (knotter *Knotter) buildAccessMapSerial(serial interleaving.SerialAccess, i
 func (knotter *Knotter) formCommunications() {
 	knotter.comms = []interleaving.Communication{}
 	knotter.commHsh = make(map[uint64]struct{})
+	knotter.innerCommCount = make(map[interleaving.Communication]int)
 	for _, accs := range knotter.accessMap {
 		knotter.formCommunicationAddr(accs)
 	}
@@ -283,8 +285,10 @@ func (knotter *Knotter) formCommunicationSingle(acc0, acc1 interleaving.Access) 
 	knotter.comms = append(knotter.comms, comm)
 	if acc0.Thread < acc1.Thread {
 		knotter.comms0 = append(knotter.comms0, comm)
+		knotter.countInnerCommunication(knotter.comms0, comm)
 	} else {
 		knotter.comms1 = append(knotter.comms1, comm)
+		knotter.countInnerCommunication(knotter.comms1, comm)
 	}
 }
 
@@ -297,23 +301,53 @@ func (knotter *Knotter) duppedComm(comm interleaving.Communication) bool {
 	return ok
 }
 
+func (knotter *Knotter) countInnerCommunication(comms []interleaving.Communication, comm interleaving.Communication) {
+	for _, inner := range comms {
+		if inner.Imply(comm) {
+			knotter.innerCommCount[comm]++
+		}
+	}
+}
+
 func (knotter *Knotter) formKnots() {
 	knotter.knots = []interleaving.Segment{}
 	for i := 0; i < len(knotter.comms0); i++ {
+		comm0 := knotter.comms0[i]
+		if knotter.tooManyNestedComm(comm0) {
+			continue
+		}
 		for j := 0; j < len(knotter.comms1); j++ {
-			comm1, comm2 := knotter.comms0[i], knotter.comms1[j]
-			knot := interleaving.Knot{comm1, comm2}
-			if typ := knot.Type(); typ == interleaving.KnotInvalid {
-				continue
-			}
-			if knotter.redundantKnot(knot) {
-				continue
-			}
-			knotter.knots = append(knotter.knots, knot)
+			comm1 := knotter.comms1[j]
+			knotter.formKnotSingle(comm0, comm1)
 		}
 	}
 	knotter.comms0 = nil
 	knotter.comms1 = nil
+}
+
+func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication) {
+	knot := interleaving.Knot{comm0, comm1}
+	if typ := knot.Type(); typ == interleaving.KnotInvalid {
+		return
+	}
+	if knotter.tooManyNestedKnot(knot) {
+		return
+	}
+	knotter.knots = append(knotter.knots, knot)
+}
+
+const thresholdTooManyNested = 10
+
+func (knotter *Knotter) tooManyNestedComm(comm interleaving.Communication) bool {
+	return knotter.innerCommCount[comm] >= thresholdTooManyNested
+}
+
+func (knotter *Knotter) tooManyNestedKnot(knot interleaving.Knot) bool {
+	if knot.Type() == interleaving.KnotSeparated {
+		return false
+	}
+	comm0, comm1 := knot[0], knot[1]
+	return knotter.innerCommCount[comm0]+knotter.innerCommCount[comm1] >= thresholdTooManyNested
 }
 
 func (knotter *Knotter) redundantKnot(knot0 interleaving.Knot) bool {
