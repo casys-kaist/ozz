@@ -350,18 +350,6 @@ func (knotter *Knotter) tooManyNestedKnot(knot interleaving.Knot) bool {
 	return knotter.innerCommCount[comm0]+knotter.innerCommCount[comm1] >= thresholdTooManyNested
 }
 
-func (knotter *Knotter) redundantKnot(knot0 interleaving.Knot) bool {
-	for _, _knot := range knotter.knots {
-		knot1 := _knot.(interleaving.Knot)
-		if ok, err := knot1.Imply(knot0); err != nil {
-			panic(err)
-		} else if ok {
-			return true
-		}
-	}
-	return false
-}
-
 func (knotter *Knotter) GetCommunications() []interleaving.Communication {
 	return knotter.comms
 }
