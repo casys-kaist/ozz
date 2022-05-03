@@ -93,7 +93,7 @@ var testsSingleSeq = []struct {
 }{
 	{"data1", CVE20168655, -1},
 	{"data2", CVE20196974, -1},
-	{"data1_simple", CVE20168655, 16},
+	{"data1_simple", CVE20168655, -1},
 }
 
 func TestExcavateKnots(t *testing.T) {
@@ -242,22 +242,21 @@ func TestDupCheck(t *testing.T) {
 // CVE may differ depending on the binary they ran on such as
 // CVE20196974 and CVE20196974_2), so it should reside in the data
 // file.
-
 var CVE20168655 = interleaving.Knot{
-	{{Inst: 0x8bbb79d6, Size: 4, Typ: interleaving.TypeLoad}, {Inst: 0x8bbca80b, Size: 4, Typ: interleaving.TypeStore}},
-	{{Inst: 0x8bbc9093, Size: 4, Typ: interleaving.TypeLoad}, {Inst: 0x8bbb75a0, Size: 4, Typ: interleaving.TypeStore}}}
+	{{Inst: 0x8bbb79d6, Size: 4, Typ: interleaving.TypeLoad, Timestamp: 6}, {Inst: 0x8bbca80b, Size: 4, Typ: interleaving.TypeStore, Thread: 1, Timestamp: 156}},
+	{{Inst: 0x8bbc9093, Size: 4, Typ: interleaving.TypeLoad, Thread: 1, Timestamp: 149}, {Inst: 0x8bbb75a0, Size: 4, Typ: interleaving.TypeStore, Timestamp: 14}}}
 
 var CVE20196974 = interleaving.Knot{
-	{{Inst: 0x81f2b4e1, Size: 4, Typ: interleaving.TypeStore}, {Inst: 0x81f2bbd3, Size: 4, Typ: interleaving.TypeLoad}},
-	{{Inst: 0x8d34b095, Size: 4, Typ: interleaving.TypeStore}, {Inst: 0x8d3662f0, Size: 4, Typ: interleaving.TypeLoad}}}
+	{{Inst: 0x81f2b4e1, Size: 4, Typ: interleaving.TypeStore, Timestamp: 812}, {Inst: 0x81f2bbd3, Size: 4, Typ: interleaving.TypeLoad, Thread: 1, Timestamp: 845}},
+	{{Inst: 0x8d34b095, Size: 4, Typ: interleaving.TypeStore, Thread: 1, Timestamp: 895}, {Inst: 0x8d3662f0, Size: 4, Typ: interleaving.TypeLoad, Timestamp: 824}}}
 
 var CVE20196974_2 = interleaving.Knot{
-	{{Inst: 0x8d57633a, Size: 4, Typ: interleaving.TypeStore}, {Inst: 0x8d592198, Size: 4, Typ: interleaving.TypeLoad}},
-	{{Inst: 0x81f9e606, Size: 4, Typ: interleaving.TypeStore}, {Inst: 0x81f9ecf8, Size: 4, Typ: interleaving.TypeLoad}}}
+	{{Inst: 0x8d57633a, Size: 4, Typ: interleaving.TypeStore, Thread: 1, Timestamp: 174}, {Inst: 0x8d592198, Size: 4, Typ: interleaving.TypeLoad, Timestamp: 336}},
+	{{Inst: 0x81f9e606, Size: 4, Typ: interleaving.TypeStore, Timestamp: 331}, {Inst: 0x81f9ecf8, Size: 4, Typ: interleaving.TypeLoad, Thread: 1, Timestamp: 147}}}
 
 var CVE20196974_3 = interleaving.Knot{
-	{{Inst: 0x8d576637, Size: 4, Typ: interleaving.TypeStore}, {Inst: 0x8d592495, Size: 4, Typ: interleaving.TypeLoad}},
-	{{Inst: 0x81f9ebf6, Size: 4, Typ: interleaving.TypeStore}, {Inst: 0x81f9f2e8, Size: 4, Typ: interleaving.TypeLoad}}}
+	{{Inst: 0x8d576637, Size: 4, Typ: interleaving.TypeStore, Thread: 1, Timestamp: 68}, {Inst: 0x8d592495, Size: 4, Typ: interleaving.TypeLoad, Timestamp: 276}},
+	{{Inst: 0x81f9ebf6, Size: 4, Typ: interleaving.TypeStore, Timestamp: 230}, {Inst: 0x81f9f2e8, Size: 4, Typ: interleaving.TypeLoad, Thread: 1, Timestamp: 161}}}
 
 func BenchmarkExcavateKnots(b *testing.B) {
 	benchmarkExcavateKnots(b)

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/syzkaller/pkg/interleaving"
+	"github.com/google/syzkaller/pkg/log"
 )
 
 func _loadTestdata(raw []byte) (threads [2]interleaving.SerialAccess, e error) {
@@ -106,9 +107,19 @@ func loadKnots(t *testing.T, paths []string) []interleaving.Knot {
 
 func checkAnswer(t *testing.T, knots []interleaving.Knot, required interleaving.Knot) bool {
 	for _, knot := range knots {
-		if knot.Same(required) {
+		if ok, err := knot.Imply(required); err != nil {
+			printKnot(knot)
+			printKnot(required)
+			panic(err)
+		} else if ok {
 			return true
 		}
 	}
 	return false
+}
+
+func printKnot(knot interleaving.Knot) {
+	for _, comm := range knot {
+		log.Logf(0, "%v --> %v", comm.Former(), comm.Latter())
+	}
 }
