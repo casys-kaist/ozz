@@ -336,7 +336,7 @@ func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication) 
 	knotter.knots = append(knotter.knots, knot)
 }
 
-const thresholdTooManyNested = 10
+const thresholdTooManyNested = 20
 
 func (knotter *Knotter) tooManyNestedComm(comm interleaving.Communication) bool {
 	return knotter.innerCommCount[comm] >= thresholdTooManyNested
