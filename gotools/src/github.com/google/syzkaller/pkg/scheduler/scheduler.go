@@ -105,6 +105,7 @@ func (knotter *Knotter) ExcavateKnots() {
 
 func (knotter *Knotter) fastenKnots() {
 	knotter.collectCommChans()
+	knotter.reassignThreadID()
 	knotter.inferProgramOrder()
 	// At this point, two accesses conducted by a single thread are
 	// same if they have the same timestamp
@@ -166,17 +167,21 @@ func (knotter *Knotter) distillSerial(serial *interleaving.SerialAccess, distile
 	}
 }
 
-func (knotter *Knotter) inferProgramOrder() {
-	if knotter.seqCount == 1 {
-		// If we have only one sequential execution, ts timestamps
-		// represent the program order as is.
+func (knotter *Knotter) reassignThreadID() {
+	if !knotter.ReassignThreadID {
 		return
 	}
-
-	if knotter.ReassignThreadID {
-		panic("not yet handled") // And probably will not be handled
+	if len(knotter.seqs) != 1 {
+		panic("wrong")
 	}
+	for id := range knotter.seqs[0] {
+		for i := range knotter.seqs[0][id] {
+			knotter.seqs[0][id][i].Thread = uint64(id)
+		}
+	}
+}
 
+func (knotter *Knotter) inferProgramOrder() {
 	for i := 0; i < knotter.numThr; i++ {
 		serials := knotter.pickThread(uint64(i))
 		knotter.alignThread(serials)
@@ -210,15 +215,8 @@ func (knotter *Knotter) alignThread(thr []interleaving.SerialAccess) {
 func (knotter *Knotter) buildAccessMap() {
 	knotter.accessMap = make(map[uint32][]interleaving.Access)
 	for _, seq := range knotter.seqs {
-		for _id, serial := range seq {
-			if len(serial) == 0 {
-				continue
-			}
-			id := serial[0].Thread
-			if knotter.ReassignThreadID {
-				id = uint64(_id)
-			}
-			knotter.buildAccessMapSerial(serial, id)
+		for _, serial := range seq {
+			knotter.buildAccessMapSerial(serial)
 		}
 	}
 	// Communication channels will not be used after this point. Let's
@@ -226,10 +224,9 @@ func (knotter *Knotter) buildAccessMap() {
 	knotter.commChan = nil
 }
 
-func (knotter *Knotter) buildAccessMapSerial(serial interleaving.SerialAccess, id uint64) {
+func (knotter *Knotter) buildAccessMapSerial(serial interleaving.SerialAccess) {
 	for _, acc := range serial {
 		addr := wordify(acc.Addr)
-		acc.Thread = id
 		knotter.accessMap[addr] = append(knotter.accessMap[addr], acc)
 	}
 }
