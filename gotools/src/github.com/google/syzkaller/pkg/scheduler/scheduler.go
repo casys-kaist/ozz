@@ -28,6 +28,7 @@ type Knotter struct {
 	innerCommCount map[interleaving.Communication]int
 	comms0         []interleaving.Communication
 	comms1         []interleaving.Communication
+	windowSize     []int
 
 	// input
 	seqCount int
@@ -108,6 +109,7 @@ func (knotter *Knotter) fastenKnots() {
 	knotter.collectCommChans()
 	knotter.reassignThreadID()
 	knotter.inferProgramOrder()
+	knotter.inferWindowSize()
 	// At this point, two accesses conducted by a single thread are
 	// same if they have the same timestamp
 	knotter.buildAccessMap()
@@ -186,6 +188,25 @@ func (knotter *Knotter) inferProgramOrder() {
 	for i := 0; i < knotter.numThr; i++ {
 		serials := knotter.pickThread(uint64(i))
 		knotter.alignThread(serials)
+	}
+}
+
+func (knotter *Knotter) inferWindowSize() {
+	knotter.windowSize = make([]int, knotter.numThr)
+	for tid := 0; tid < knotter.numThr; tid++ {
+		serials := knotter.pickThread(uint64(tid))
+		size := 0
+		for _, serial := range serials {
+			if len(serial) == 0 {
+				continue
+			}
+			last := len(serial) - 1
+			curSize := int(serial[last].Timestamp - serial[0].Timestamp)
+			if size < curSize {
+				size = curSize
+			}
+		}
+		knotter.windowSize[tid] = size
 	}
 }
 
@@ -327,28 +348,46 @@ func (knotter *Knotter) formKnots() {
 }
 
 func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication) {
-	knot := interleaving.Knot{comm0, comm1}
-	if typ := knot.Type(); typ == interleaving.KnotInvalid {
+	if knotter.tooFarComms(comm0, comm1) {
 		return
 	}
-	if knotter.tooManyNestedKnot(knot) {
+	knot := interleaving.Knot{comm0, comm1}
+	if typ := knot.Type(); typ == interleaving.KnotInvalid {
 		return
 	}
 	knotter.knots = append(knotter.knots, knot)
 }
 
-const thresholdTooManyNested = 20
+const thresholdTooManyNested = 10
 
 func (knotter *Knotter) tooManyNestedComm(comm interleaving.Communication) bool {
 	return knotter.innerCommCount[comm] >= thresholdTooManyNested
 }
 
-func (knotter *Knotter) tooManyNestedKnot(knot interleaving.Knot) bool {
-	if knot.Type() == interleaving.KnotSeparated {
-		return false
+func (knotter *Knotter) tooFarComms(comm0, comm1 interleaving.Communication) bool {
+	tooFar := func(acc0, acc1 interleaving.Access) bool {
+		if acc0.Thread != acc1.Thread {
+			panic("wrong")
+		}
+		tid := acc0.Thread
+		windowSize := knotter.windowSize[tid]
+		factor := float32(0.15)
+		if windowSize < 2000 {
+			factor = 1
+		}
+		dist := timeDiff(acc0, acc1)
+		return dist > uint32(float32(windowSize)*factor)
 	}
-	comm0, comm1 := knot[0], knot[1]
-	return knotter.innerCommCount[comm0]+knotter.innerCommCount[comm1] >= thresholdTooManyNested
+	return tooFar(comm0.Former(), comm1.Latter()) && tooFar(comm1.Latter(), comm0.Former())
+}
+
+func timeDiff(acc0, acc1 interleaving.Access) (dist uint32) {
+	if acc0.Timestamp > acc1.Timestamp {
+		dist = acc0.Timestamp - acc1.Timestamp
+	} else {
+		dist = acc1.Timestamp - acc0.Timestamp
+	}
+	return dist
 }
 
 func (knotter *Knotter) GetCommunications() []interleaving.Communication {
