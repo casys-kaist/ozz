@@ -451,7 +451,7 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.ProgInfo {
 	// NOTE: The scheduling work is the only case reaching here
 	seq := sequentialTrace(info)
-	knotter := scheduler.Knotter{}
+	knotter := scheduler.Knotter{StrictTimestamp: true}
 	if !knotter.AddSequentialTrace(seq) {
 		log.Logf(1, "Failed to add sequential traces")
 		return info

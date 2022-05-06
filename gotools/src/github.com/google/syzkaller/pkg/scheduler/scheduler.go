@@ -16,6 +16,7 @@ type Knotter struct {
 	accessMap   map[uint32][]interleaving.Access
 	numThr      int
 
+	StrictTimestamp bool
 	// Used only for thread works. Our implmenetation requires to
 	// distinguish two accesses will be executed in different threads,
 	// while all Access have same Thread when sequentially executing
@@ -275,6 +276,9 @@ func (knotter *Knotter) formCommunicationAddr(accesses []interleaving.Access) {
 }
 
 func (knotter *Knotter) formCommunicationSingle(acc0, acc1 interleaving.Access) {
+	if knotter.StrictTimestamp && acc0.Timestamp > acc1.Timestamp {
+		return
+	}
 	comm := interleaving.Communication{acc0, acc1}
 	if knotter.duppedComm(comm) {
 		return
