@@ -28,6 +28,9 @@ func benchmarkExcavateKnotsWithData(b *testing.B, _testdata string) {
 		{"total", benchmarkTotal},
 		{"fastenKnots", benchmarkFastenKnots},
 		{"collectCommChans", benchmarkCollectCommChans},
+		// reassignThreadID
+		// inferProgramOrder
+		// inferWindowSize
 		{"buildAccessMap", benchmarkBuildAccessMap},
 		{"formCommunications", benchmarkFormCommunications},
 		{"formKnots", benchmarkFormKnots},
@@ -81,6 +84,7 @@ func benchmarkBuildAccessMap(b *testing.B) {
 	knotter := &Knotter{loopAllowed: loopAllowed}
 	doSubBenchmarks(b, knotter, []func(){
 		knotter.collectCommChans,
+		knotter.inferWindowSize,
 	}, knotter.buildAccessMap)
 }
 
@@ -88,6 +92,7 @@ func benchmarkFormCommunications(b *testing.B) {
 	knotter := &Knotter{loopAllowed: loopAllowed}
 	doSubBenchmarks(b, knotter, []func(){
 		knotter.collectCommChans,
+		knotter.inferWindowSize,
 		knotter.buildAccessMap,
 	}, knotter.formCommunications)
 }
@@ -96,6 +101,7 @@ func benchmarkFormKnots(b *testing.B) {
 	knotter := &Knotter{loopAllowed: loopAllowed}
 	doSubBenchmarks(b, knotter, []func(){
 		knotter.collectCommChans,
+		knotter.inferWindowSize,
 		knotter.buildAccessMap,
 		knotter.formCommunications,
 	}, knotter.formKnots)
@@ -123,7 +129,6 @@ func reset(b *testing.B, knotter *Knotter, seqs [][2]interleaving.SerialAccess, 
 	b.StopTimer()
 	knotter.commChan = nil
 	knotter.accessMap = nil
-	knotter.numThr = 0
 	knotter.seqs = nil
 	knotter.comms = nil
 	knotter.knots = nil
