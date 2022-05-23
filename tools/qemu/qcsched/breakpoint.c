@@ -102,6 +102,11 @@ static void __handle_breakpoint_schedpoint(CPUState *cpu)
 
     DRPRINTF(cpu, "%s (%llx)\n", __func__, RIP(cpu));
 
+    // XXX: still we are facing double-kidnapping. Is this
+    // workardound find...?
+    if (task_kidnapped(cpu))
+        return;
+
     // This function handles a scheduling point regardless of that it
     // is behind of the current window focus.
 
