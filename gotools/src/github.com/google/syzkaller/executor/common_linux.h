@@ -2589,12 +2589,26 @@ static void initialize_vhci()
 	close(vhci_fd);
 	vhci_fd = kVhciFd;
 
+	bool first_read = true;
+retry:
 	struct vhci_vendor_pkt vendor_pkt;
 	if (read(vhci_fd, &vendor_pkt, sizeof(vendor_pkt)) != sizeof(vendor_pkt))
 		fail("read failed");
 
-	if (vendor_pkt.type != HCI_VENDOR_PKT)
+	if (vendor_pkt.type != HCI_VENDOR_PKT) {
+		if (vendor_pkt.type == 1 && first_read) {
+			// XXX: This seems like a race condition between
+			// hci_send_frame() and __vhci_create_device() in a
+			// kernel. I can reproduce this syzfail with
+			// tests/vhci_init_test.c (which is not affected by my
+			// modification) in the lastest kernel (v5.18, 4b0986a36).
+			// I'm not sure this is a bug or not, but it is not our
+			// fault anyway, so let's ignore it.
+			first_read = false;
+			goto retry;
+		}
 		failmsg("wrong response packet", "expected=%d, got=%d", HCI_VENDOR_PKT, vendor_pkt.type);
+	}
 
 	debug("hci dev id: %x\n", vendor_pkt.id);
 
