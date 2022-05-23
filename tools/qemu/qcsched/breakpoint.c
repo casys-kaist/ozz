@@ -156,9 +156,11 @@ watchdog_breakpoint_check_count(CPUState *cpu,
     // will be addressed in the future). So if a breakpoint is hit
     // multiple times in a row, something goes wrong (e.g., race
     // condition in QEMU). This watchdog detects it early.
-    ASSERT(++record->count < WATCHDOG_BREAKPOINT_COUNT_MAX,
-           "watchdog failed: a breakpoint at %lx is hit %d times", record->RIP,
-           record->count);
+    if (++record->count >= WATCHDOG_BREAKPOINT_COUNT_MAX) {
+        DRPRINTF(cpu, "watchdog failed: a breakpoint at %lx is hit %d times",
+                 record->RIP, record->count);
+        qcsched_window_close_window(cpu);
+    }
 }
 
 static void watchdog_breakpoint(CPUState *cpu)
