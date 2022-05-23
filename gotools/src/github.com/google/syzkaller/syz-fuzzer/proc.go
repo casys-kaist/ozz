@@ -114,7 +114,7 @@ func (proc *Proc) loop() {
 			proc.execute(proc.execOpts, p, ProgNormal, StatFuzz)
 		} else {
 			// Mutate a schedule of an existing prog.
-			proc.scheduleInput(fuzzerSnapshot, true)
+			proc.scheduleInput(fuzzerSnapshot)
 		}
 		if i%100 == 0 && !affinity.RunOnCPU(1<<0) {
 			log.Logf(0, "[WARN] Proc goroutine #%v runs on CPU other than 0", proc.pid)
@@ -154,18 +154,15 @@ func (proc *Proc) needScheduling() bool {
 	return prob1000 >= proc.rnd.Intn(1000)
 }
 
-func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot, force bool) {
-	// proc.scheduleInput() does not queue additional works, so
+func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
+	// NOTE: proc.scheduleInput() does not queue additional works, so
 	// executing proc.scheduleInput() does not cause the workqueues
 	// exploding.
-	for cnt := 0; cnt < 10 && (proc.needScheduling() || force); cnt++ {
-		force = false
+	for cnt := 0; cnt < 10; cnt++ {
 		tp := fuzzerSnapshot.chooseThreadedProgram(proc.rnd)
-		if tp == nil || len(tp.Hint) == 0 {
-			continue
+		if tp == nil {
+			break
 		}
-		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
-
 		p, hint := tp.P.Clone(), tp.Hint
 		ok, remaining := p.MutateScheduleFromHint(proc.rnd, hint)
 		// We exclude used knots from tp.Hint even if the schedule
@@ -175,7 +172,11 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot, force bool) {
 			continue
 		}
 		proc.scheduled++
+		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
 		proc.execute(proc.execOpts, p, ProgNormal, StatSchedule)
+		if !proc.needScheduling() {
+			break
+		}
 	}
 }
 
@@ -186,7 +187,7 @@ func (proc *Proc) setHint(tp *prog.Candidate, remaining []interleaving.Segment) 
 	defer proc.fuzzer.corpusMu.Unlock()
 	tp.Hint = remaining
 	proc.fuzzer.collection[CollectionScheduleHint] -= uint64(used)
-	log.Logf(1, "total schedule hint after a scheduling work=%d",
+	log.Logf(2, "total schedule hint after a scheduling work=%d",
 		proc.fuzzer.collection[CollectionScheduleHint])
 }
 

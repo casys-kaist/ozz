@@ -597,12 +597,13 @@ func (fuzzer *FuzzerSnapshot) chooseProgram(r *rand.Rand) *prog.Prog {
 func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.Candidate {
 	// TODO: Prioritize inputs according to the number of
 	// hints.
-	for len(fuzzer.candidates) != 0 {
+	retry := 0
+	for len(fuzzer.candidates) != 0 && retry < 100 {
 		ln := len(fuzzer.candidates)
 		idx := r.Intn(ln)
 		tp := fuzzer.candidates[idx]
 		if len(tp.Hint) == 0 {
-			fuzzer.candidates[idx] = fuzzer.candidates[ln-1]
+			retry++
 			continue
 		}
 		return tp
