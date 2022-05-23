@@ -572,6 +572,12 @@ func (mgr *Manager) preloadCorpus() {
 				// have done enough testing, include them again.
 				continue
 			}
+			if seed.Name() == "fuse_deadlock" {
+				// TODO: This test will not finish as it is the
+				// purpose of it. It takes too long time so it
+				// disturbs us. Let's skip it
+				continue
+			}
 			if wanted != "" && seed.Name() != wanted {
 				continue
 			}
