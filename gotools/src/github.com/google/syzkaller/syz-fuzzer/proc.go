@@ -37,7 +37,9 @@ type Proc struct {
 	execOptsCover     *ipc.ExecOpts
 	execOptsComps     *ipc.ExecOpts
 	execOptsNoCollide *ipc.ExecOpts
-	// To give a half of computing power for scheduling
+	// To give a half of computing power for scheduling. We don't use
+	// proc.fuzzer.Stats and proc.env.StatExec as it is periodically
+	// set to 0.
 	executed  uint64
 	scheduled uint64
 }
@@ -154,9 +156,6 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot, force bool) {
 	// exploding.
 	for cnt := 0; cnt < 10 && (proc.needScheduling() || force); cnt++ {
 		force = false
-		// increase scheduled here so let needScheduling() know that
-		// we tried to mutate a schedule.
-		proc.scheduled++
 		tp := fuzzerSnapshot.chooseThreadedProgram(proc.rnd)
 		if tp == nil || len(tp.Hint) == 0 {
 			continue
@@ -171,6 +170,7 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot, force bool) {
 		if !ok {
 			continue
 		}
+		proc.scheduled++
 		proc.execute(proc.execOpts, p, ProgNormal, StatSchedule)
 	}
 }
