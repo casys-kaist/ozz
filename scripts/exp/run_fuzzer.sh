@@ -43,7 +43,10 @@ WORKDIR=${WORKDIR## }
 
 if [ -n "$DEBUG" ]; then
 	_DEBUG="-debug"
-else
+	BENCH=1
+fi
+
+if [ -n "$BENCH" ]; then
 	_BENCH="-bench $WORKDIR/bench-$(date +%y%m%d-%H%M%S).txt"
 fi
 
