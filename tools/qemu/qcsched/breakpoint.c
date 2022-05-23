@@ -190,14 +190,14 @@ static int qcsched_handle_breakpoint_iolocked(CPUState *cpu)
     // qcsched_deacitavte_breakpoint() which falsify sched.activated,
     // we can check sched.activated to confirm that the error code is
     // actually benign.
-    ASSERT(!err || (err == -ENOENT && sched.activated == false),
-           "failed to remove breakpoint at %llx err=%d\n", RIP(cpu), err);
-
-    if (err)
-        // XXX: I'm not sure this is a correct way to fix the
-        // infinitely repeated breakpoint hit issue. Let's see what
-        // happens.
-        kvm_update_guest_debug(cpu, 0);
+    if (err && !(err == -ENOENT && sched.activated == false)) {
+        // Let's abort the schedule
+        DRPRINTF(cpu,
+                 "Failed to remove a breakpoint (error=%d). Abort a schedule\n",
+                 err);
+        qcsched_window_close_window(cpu);
+        return 0;
+    }
 
     if (!qcsched_vmi_in_task(cpu))
         // XXX: Temporary workaround of schedpoint that can be hit by
