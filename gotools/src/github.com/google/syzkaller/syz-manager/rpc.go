@@ -351,6 +351,7 @@ func (serv *RPCServer) NewScheduledInput(a *rpctype.NewScheduledInputArgs, r *in
 
 func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 	serv.stats.mergeNamed(a.Stats)
+	serv.stats.replaceNamed(a.Collections)
 
 	serv.mu.Lock()
 	defer serv.mu.Unlock()

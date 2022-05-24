@@ -115,6 +115,17 @@ func (stats *Stats) mergeNamed(named map[string]uint64) {
 	}
 }
 
+func (stats *Stats) replaceNamed(named map[string]uint64) {
+	stats.mu.Lock()
+	defer stats.mu.Unlock()
+	if stats.namedStats == nil {
+		stats.namedStats = make(map[string]uint64)
+	}
+	for k, v := range named {
+		stats.namedStats[k] = v
+	}
+}
+
 func (s *Stat) get() uint64 {
 	return atomic.LoadUint64((*uint64)(s))
 }

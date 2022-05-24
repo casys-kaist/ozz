@@ -90,14 +90,21 @@ type FuzzerSnapshot struct {
 	sumPrios    int64
 }
 
-type Stat int
+type Collection int
 
 const (
 	// Stats of collected data
-	CollectionScheduleHint = iota
-	CollectionScheduleHintCandidate
+	CollectionScheduleHint Collection = iota
+	CollectionThreadingHint
 	CollectionCount
 )
+
+var collectionNames = [CollectionCount]string{
+	CollectionScheduleHint:  "scheduling hint",
+	CollectionThreadingHint: "threading hint",
+}
+
+type Stat int
 
 const (
 	// Stats of fuzzing strategies
@@ -309,7 +316,7 @@ func main() {
 	fuzzer.gate = ipc.NewGate(2**flagProcs, gateCallback)
 
 	for needCandidates, more := true, true; more; needCandidates = false {
-		more = fuzzer.poll(needCandidates, nil)
+		more = fuzzer.poll(needCandidates, nil, nil)
 		// This loop lead to "no output" in qemu emulation, tell manager we are not dead.
 		log.Logf(0, "fetching corpus: %v, signal %v/%v (executing program)",
 			len(fuzzer.corpus), len(fuzzer.corpusSignal), len(fuzzer.maxSignal))
@@ -463,7 +470,12 @@ func (fuzzer *Fuzzer) pollLoop() {
 				stats[statNames[stat]] = v
 				execTotal += v
 			}
-			if !fuzzer.poll(needCandidates, stats) {
+			collections := make(map[string]uint64)
+			for collection := Collection(0); collection < CollectionCount; collection++ {
+				name := fuzzer.name + "-" + collectionNames[collection]
+				collections[name] = fuzzer.collection[collection]
+			}
+			if !fuzzer.poll(needCandidates, stats, collections) {
 				lastPoll = time.Now()
 			}
 			if !affinity.RunOnCPU(1 << 0) {
@@ -473,13 +485,14 @@ func (fuzzer *Fuzzer) pollLoop() {
 	}
 }
 
-func (fuzzer *Fuzzer) poll(needCandidates bool, stats map[string]uint64) bool {
+func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]uint64) bool {
 	a := &rpctype.PollArgs{
 		Name:            fuzzer.name,
 		NeedCandidates:  needCandidates,
 		MaxSignal:       fuzzer.grabNewSignal().Serialize(),
 		MaxInterleaving: fuzzer.grabNewInterleaving().Serialize(),
 		Stats:           stats,
+		Collections:     collections,
 	}
 	r := &rpctype.PollRes{}
 	if err := fuzzer.manager.Call("Manager.Poll", a, r); err != nil {
@@ -761,7 +774,7 @@ func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog) bool {
 	// fuzzer. To prevent the OOM killer, we shut off the threading
 	// work if the threading queue already contains a lot of Knots
 	fuzzer.corpusMu.RLock()
-	threadingKnots := fuzzer.collection[CollectionScheduleHintCandidate]
+	threadingKnots := fuzzer.collection[CollectionThreadingHint]
 	fuzzer.corpusMu.RUnlock()
 	if threadingKnots > maxThreadingKnots {
 		return true
@@ -772,7 +785,7 @@ func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog) bool {
 func (fuzzer *Fuzzer) spillOverThreading() bool {
 	const threshold = 100000
 	fuzzer.corpusMu.RLock()
-	threadingKnots := fuzzer.collection[CollectionScheduleHintCandidate]
+	threadingKnots := fuzzer.collection[CollectionThreadingHint]
 	fuzzer.corpusMu.RUnlock()
 	return threadingKnots > threshold
 }

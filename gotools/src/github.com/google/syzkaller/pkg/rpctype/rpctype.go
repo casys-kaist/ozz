@@ -84,6 +84,7 @@ type PollArgs struct {
 	MaxSignal       signal.Serial
 	MaxInterleaving interleaving.SerialSignal
 	Stats           map[string]uint64
+	Collections     map[string]uint64
 }
 
 type PollRes struct {

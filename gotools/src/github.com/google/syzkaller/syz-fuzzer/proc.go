@@ -318,9 +318,9 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 	defer func() {
 		proc.fuzzer.corpusMu.Lock()
 		defer proc.fuzzer.corpusMu.Unlock()
-		proc.fuzzer.collection[CollectionScheduleHintCandidate] -= uint64(len(item.knots))
+		proc.fuzzer.collection[CollectionThreadingHint] -= uint64(len(item.knots))
 		log.Logf(1, "total schedule hint candidate after a threading work=%d",
-			proc.fuzzer.collection[CollectionScheduleHintCandidate])
+			proc.fuzzer.collection[CollectionThreadingHint])
 	}()
 
 	p := item.p.Clone()
@@ -498,9 +498,9 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 
 func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, knots []interleaving.Segment) {
 	proc.fuzzer.corpusMu.Lock()
-	proc.fuzzer.collection[CollectionScheduleHintCandidate] += uint64(len(knots))
+	proc.fuzzer.collection[CollectionThreadingHint] += uint64(len(knots))
 	log.Logf(1, "total schedule hint candidate=%d",
-		proc.fuzzer.collection[CollectionScheduleHintCandidate])
+		proc.fuzzer.collection[CollectionThreadingHint])
 	proc.fuzzer.corpusMu.Unlock()
 
 	proc.fuzzer.workQueue.enqueue(&WorkThreading{
