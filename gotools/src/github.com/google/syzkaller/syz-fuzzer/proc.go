@@ -126,9 +126,9 @@ func (proc *Proc) relieveMemoryPressure() {
 	if !needSchedule && !needThreading {
 		return
 	}
-	log.Logf(2, "Relieving memory pressure")
 	MonitorMemUsage()
-	for cnt := 0; needSchedule && needThreading && cnt < 10; cnt++ {
+	for cnt := 0; (needSchedule || needThreading) && cnt < 10; cnt++ {
+		log.Logf(2, "Relieving memory pressure schedule=%v threading=%v", needSchedule, needThreading)
 		if needSchedule {
 			fuzzerSnapshot := proc.fuzzer.snapshot()
 			proc.scheduleInput(fuzzerSnapshot)
