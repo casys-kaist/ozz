@@ -618,11 +618,14 @@ func (mgr *Manager) loadCorpus() {
 	}
 	broken := 0
 	if *flagCorpus {
+		// If we are using a new kernel, previous scheduled progs are
+		// not meaningful anymore. Drop them.
+		allowThreaded := !mgr.newKernel
 		for key, rec := range mgr.corpusDB.Records {
 			if key == versionKey {
 				continue
 			}
-			if !mgr.loadProg(rec.Val, minimized, smashed, !mgr.newKernel) {
+			if !mgr.loadProg(rec.Val, minimized, smashed, allowThreaded) {
 				mgr.corpusDB.Delete(key)
 				broken++
 			}
@@ -659,8 +662,8 @@ func (mgr *Manager) loadCorpus() {
 	mgr.phase = phaseLoadedCorpus
 }
 
-func (mgr *Manager) loadProg(data []byte, minimized, smashed, enableThreaded bool) bool {
-	bad, disabled := checkProgram(mgr.target, mgr.targetEnabledSyscalls, enableThreaded, data)
+func (mgr *Manager) loadProg(data []byte, minimized, smashed, allowThreaded bool) bool {
+	bad, disabled := checkProgram(mgr.target, mgr.targetEnabledSyscalls, allowThreaded, data)
 	if bad {
 		return false
 	}
@@ -679,7 +682,7 @@ func (mgr *Manager) loadProg(data []byte, minimized, smashed, enableThreaded boo
 	return true
 }
 
-func checkProgram(target *prog.Target, enabled map[*prog.Syscall]bool, enableThreaded bool, data []byte) (bad, disabled bool) {
+func checkProgram(target *prog.Target, enabled map[*prog.Syscall]bool, allowThreaded bool, data []byte) (bad, disabled bool) {
 	p, err := target.Deserialize(data, prog.NonStrict)
 	if err != nil {
 		return true, true
@@ -692,7 +695,7 @@ func checkProgram(target *prog.Target, enabled map[*prog.Syscall]bool, enableThr
 			return false, true
 		}
 	}
-	if !enableThreaded && p.Threaded {
+	if !allowThreaded && p.Threaded {
 		return true, true
 	}
 	return false, false
