@@ -100,7 +100,7 @@ const (
 )
 
 var collectionNames = [CollectionCount]string{
-	CollectionScheduleHint:  "scheduling hint",
+	CollectionScheduleHint:  "schedule hint",
 	CollectionThreadingHint: "threading hint",
 }
 
@@ -651,10 +651,7 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 }
 
 func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hint []interleaving.Segment) {
-	fuzzer.corpusMu.Lock()
-	defer fuzzer.corpusMu.Unlock()
-	fuzzer.collection[CollectionScheduleHint] += uint64(len(hint))
-	log.Logf(1, "total schedule hint=%d", fuzzer.collection[CollectionScheduleHint])
+	fuzzer.addCollection(CollectionScheduleHint, uint64(len(hint)))
 	fuzzer.candidates = append(fuzzer.candidates, &prog.Candidate{
 		P:    p,
 		Hint: hint,
@@ -796,6 +793,26 @@ func (fuzzer *Fuzzer) spillOverScheduling() bool {
 	threadingKnots := fuzzer.collection[CollectionScheduleHint]
 	fuzzer.corpusMu.RUnlock()
 	return threadingKnots > threshold
+}
+
+func (fuzzer *Fuzzer) addCollection(collection Collection, num uint64) {
+	fuzzer.corpusMu.Lock()
+	defer fuzzer.corpusMu.Unlock()
+	fuzzer.collection[collection] += num
+	log.Logf(2, "add %d collection to %s, total=%d",
+		num,
+		collectionNames[collection],
+		fuzzer.collection[collection])
+}
+
+func (fuzzer *Fuzzer) subCollection(collection Collection, num uint64) {
+	fuzzer.corpusMu.Lock()
+	defer fuzzer.corpusMu.Unlock()
+	fuzzer.collection[CollectionThreadingHint] -= num
+	log.Logf(2, "sub %d collection to %s, total=%d",
+		num,
+		collectionNames[collection],
+		fuzzer.collection[collection])
 }
 
 func signalPrio(p *prog.Prog, info *ipc.CallInfo, call int) (prio uint8) {

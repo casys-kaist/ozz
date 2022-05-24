@@ -78,9 +78,7 @@ func (proc *Proc) loop() {
 	}
 	for i := 0; ; i++ {
 		log.Logf(2, "executed=%v scheduled=%v", proc.executed, proc.scheduled)
-		if proc.relieveMemoryPressure() {
-			continue
-		}
+		proc.relieveMemoryPressure()
 
 		item := proc.fuzzer.workQueue.dequeue()
 		if item != nil {
@@ -122,22 +120,28 @@ func (proc *Proc) loop() {
 	}
 }
 
-func (proc *Proc) relieveMemoryPressure() bool {
+func (proc *Proc) relieveMemoryPressure() {
 	needSchedule := proc.fuzzer.spillOverScheduling()
 	needThreading := proc.fuzzer.spillOverThreading()
 	if !needSchedule && !needThreading {
-		return false
+		return
 	}
 	log.Logf(2, "Relieving memory pressure")
 	MonitorMemUsage()
-	if needSchedule {
-		fuzzerSnapshot := proc.fuzzer.snapshot()
-		proc.scheduleInput(fuzzerSnapshot)
-	} else {
-		item := proc.fuzzer.workQueue.dequeueThreading()
-		proc.threadingInput(item)
+	for cnt := 0; needSchedule && needThreading && cnt < 10; cnt++ {
+		if needSchedule {
+			fuzzerSnapshot := proc.fuzzer.snapshot()
+			proc.scheduleInput(fuzzerSnapshot)
+		} else if item := proc.fuzzer.workQueue.dequeueThreading(); item != nil {
+			proc.threadingInput(item)
+		}
+		needSchedule = proc.fuzzer.spillOverScheduling()
+		needThreading = proc.fuzzer.spillOverThreading()
+		if !needSchedule && !needThreading {
+			break
+		}
 	}
-	return true
+	return
 }
 
 func (proc *Proc) needScheduling() bool {
@@ -183,12 +187,11 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 func (proc *Proc) setHint(tp *prog.Candidate, remaining []interleaving.Segment) {
 	debugHint(tp, remaining)
 	used := len(tp.Hint) - len(remaining)
+	proc.fuzzer.subCollection(CollectionScheduleHint, uint64(used))
+
 	proc.fuzzer.corpusMu.Lock()
-	defer proc.fuzzer.corpusMu.Unlock()
 	tp.Hint = remaining
-	proc.fuzzer.collection[CollectionScheduleHint] -= uint64(used)
-	log.Logf(2, "total schedule hint after a scheduling work=%d",
-		proc.fuzzer.collection[CollectionScheduleHint])
+	defer proc.fuzzer.corpusMu.Unlock()
 }
 
 func (proc *Proc) triageInput(item *WorkTriage) {
@@ -315,13 +318,8 @@ func (proc *Proc) smashInput(item *WorkSmash) {
 
 func (proc *Proc) threadingInput(item *WorkThreading) {
 	log.Logf(1, "proc #%v: threading an input", proc.pid)
-	defer func() {
-		proc.fuzzer.corpusMu.Lock()
-		defer proc.fuzzer.corpusMu.Unlock()
-		proc.fuzzer.collection[CollectionThreadingHint] -= uint64(len(item.knots))
-		log.Logf(1, "total schedule hint candidate after a threading work=%d",
-			proc.fuzzer.collection[CollectionThreadingHint])
-	}()
+
+	proc.fuzzer.subCollection(CollectionThreadingHint, uint64(len(item.knots)))
 
 	p := item.p.Clone()
 	p.Threading(item.calls)
@@ -430,9 +428,12 @@ func (proc *Proc) postExecute(p *prog.Prog, flags ProgTypes, info *ipc.ProgInfo)
 }
 
 func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
-	maxIntermediateCalls := 3
+	maxIntermediateCalls := 2
+	intermediateCalls := func(c1, c2 int) int {
+		return c2 - c1 - 1
+	}
 	for c1 := 0; c1 < len(p.Calls); c1++ {
-		for c2 := c1 + 1; c2 < len(p.Calls) && c2-c1-1 < maxIntermediateCalls; c2++ {
+		for c2 := c1 + 1; c2 < len(p.Calls) && intermediateCalls(c1, c2) < maxIntermediateCalls; c2++ {
 			if proc.fuzzer.shutOffThreading(p) {
 				return
 			}
@@ -497,12 +498,7 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 }
 
 func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, knots []interleaving.Segment) {
-	proc.fuzzer.corpusMu.Lock()
-	proc.fuzzer.collection[CollectionThreadingHint] += uint64(len(knots))
-	log.Logf(1, "total schedule hint candidate=%d",
-		proc.fuzzer.collection[CollectionThreadingHint])
-	proc.fuzzer.corpusMu.Unlock()
-
+	proc.fuzzer.addCollection(CollectionThreadingHint, uint64(len(knots)))
 	proc.fuzzer.workQueue.enqueue(&WorkThreading{
 		p:     p.Clone(),
 		calls: calls,
