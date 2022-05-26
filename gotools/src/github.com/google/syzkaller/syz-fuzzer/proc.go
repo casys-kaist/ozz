@@ -168,15 +168,17 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 			break
 		}
 		p, hint := tp.P.Clone(), tp.Hint
+
 		ok, remaining := p.MutateScheduleFromHint(proc.rnd, hint)
+		proc.setHint(tp, remaining)
 		// We exclude used knots from tp.Hint even if the schedule
 		// mutation fails.
-		proc.setHint(tp, remaining)
 		if !ok {
 			continue
 		}
-		proc.scheduled++
+
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
+		proc.scheduled++
 		proc.execute(proc.execOpts, p, ProgNormal, StatSchedule)
 		if !proc.needScheduling() {
 			break
@@ -188,10 +190,9 @@ func (proc *Proc) setHint(tp *prog.Candidate, remaining []interleaving.Segment) 
 	debugHint(tp, remaining)
 	used := len(tp.Hint) - len(remaining)
 	proc.fuzzer.subCollection(CollectionScheduleHint, uint64(used))
-
 	proc.fuzzer.corpusMu.Lock()
-	tp.Hint = remaining
 	defer proc.fuzzer.corpusMu.Unlock()
+	tp.Hint = remaining
 }
 
 func (proc *Proc) triageInput(item *WorkTriage) {
@@ -336,13 +337,15 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 	knotter.ExcavateKnots()
 	knots := knotter.GetKnots()
 
-	// Newly found knots := {newly found knots during threading work}
-	// \cup {speculated knots when picking up threading work}
+	// newly found knots during threading work
 	newKnots := proc.fuzzer.newKnot(knots)
-	newKnots = append(newKnots, interleaving.Intersect(knots, item.knots)...)
+	// knots that actually occurred among speculated knots
+	speculatedKnots := interleaving.Intersect(knots, item.knots)
 
-	// Now we know newly found knots
-	proc.fuzzer.bookScheduleGuide(p, newKnots)
+	// schedule hint := {newly found knots during threading work}
+	// \cup {speculated knots when picking up threading work}
+	scheduleHint := append(newKnots, speculatedKnots...)
+	proc.fuzzer.bookScheduleGuide(p, scheduleHint)
 }
 
 func sequentialTrace(info *ipc.ProgInfo) []interleaving.SerialAccess {

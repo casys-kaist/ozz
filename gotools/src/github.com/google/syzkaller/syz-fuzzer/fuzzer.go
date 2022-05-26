@@ -88,6 +88,7 @@ type FuzzerSnapshot struct {
 	candidates  []*prog.Candidate
 	corpusPrios []int64
 	sumPrios    int64
+	fuzzer      *Fuzzer
 }
 
 type Collection int
@@ -96,12 +97,14 @@ const (
 	// Stats of collected data
 	CollectionScheduleHint Collection = iota
 	CollectionThreadingHint
+	CollectionCandidate
 	CollectionCount
 )
 
 var collectionNames = [CollectionCount]string{
 	CollectionScheduleHint:  "schedule hint",
 	CollectionThreadingHint: "threading hint",
+	CollectionCandidate:     "candidate",
 }
 
 type Stat int
@@ -473,7 +476,8 @@ func (fuzzer *Fuzzer) pollLoop() {
 			collections := make(map[string]uint64)
 			for collection := Collection(0); collection < CollectionCount; collection++ {
 				name := fuzzer.name + "-" + collectionNames[collection]
-				collections[name] = fuzzer.collection[collection]
+				v := atomic.LoadUint64(&fuzzer.collection[collection])
+				collections[name] = v
 			}
 			if !fuzzer.poll(needCandidates, stats, collections) {
 				lastPoll = time.Now()
@@ -610,18 +614,25 @@ func (fuzzer *FuzzerSnapshot) chooseProgram(r *rand.Rand) *prog.Prog {
 func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.Candidate {
 	// TODO: Prioritize inputs according to the number of
 	// hints.
-	retry := 0
-	for len(fuzzer.candidates) != 0 && retry < 100 {
-		ln := len(fuzzer.candidates)
-		idx := r.Intn(ln)
+	for retry := 0; len(fuzzer.candidates) != 0 && retry < 100; retry++ {
+		idx := r.Intn(len(fuzzer.candidates))
 		tp := fuzzer.candidates[idx]
-		if len(tp.Hint) == 0 {
-			retry++
-			continue
+		if len(tp.Hint) != 0 {
+			return tp
 		}
-		return tp
+		fuzzer.removeCandidateAt(idx)
 	}
 	return nil
+}
+
+func (fuzzer *FuzzerSnapshot) removeCandidateAt(idx int) {
+	log.Logf(2, "remove a schedule guide")
+	fuzzer.fuzzer.corpusMu.Lock()
+	ln := len(fuzzer.candidates)
+	fuzzer.fuzzer.candidates[idx] = fuzzer.fuzzer.candidates[ln-1]
+	fuzzer.fuzzer.corpusMu.Unlock()
+	fuzzer.fuzzer.subCollection(CollectionCandidate, 1)
+	*fuzzer = fuzzer.fuzzer.snapshot()
 }
 
 func (fuzzer *Fuzzer) __addInputToCorpus(p *prog.Prog, sig hash.Sig, prio int64) {
@@ -651,7 +662,11 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 }
 
 func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hint []interleaving.Segment) {
+	log.Logf(2, "book a schedule guide")
 	fuzzer.addCollection(CollectionScheduleHint, uint64(len(hint)))
+	fuzzer.addCollection(CollectionCandidate, 1)
+	fuzzer.corpusMu.Lock()
+	defer fuzzer.corpusMu.Unlock()
 	fuzzer.candidates = append(fuzzer.candidates, &prog.Candidate{
 		P:    p,
 		Hint: hint,
@@ -671,7 +686,7 @@ func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, sign interleaving.S
 func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
 	fuzzer.corpusMu.RLock()
 	defer fuzzer.corpusMu.RUnlock()
-	return FuzzerSnapshot{fuzzer.corpus, fuzzer.candidates, fuzzer.corpusPrios, fuzzer.sumPrios}
+	return FuzzerSnapshot{fuzzer.corpus, fuzzer.candidates, fuzzer.corpusPrios, fuzzer.sumPrios, fuzzer}
 }
 
 func (fuzzer *Fuzzer) addMaxSignal(sign signal.Signal) {
