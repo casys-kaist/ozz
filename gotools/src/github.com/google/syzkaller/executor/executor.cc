@@ -904,9 +904,10 @@ retry:
 
 	filter_size = (int)read_input(&input_pos);
 	for (int i = 0; i < filter_size; i++) {
+		int f = (int)read_input(&input_pos);
 		if (i >= kMaxSchedule)
 			continue;
-		filter[i] = (int)read_input(&input_pos);
+		filter[i] = f;
 	}
 	if (filter_size > kMaxSchedule)
 		filter_size = kMaxSchedule;
