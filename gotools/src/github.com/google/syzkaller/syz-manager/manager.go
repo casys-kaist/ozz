@@ -52,6 +52,7 @@ var (
 	flagCorpus       = flag.Bool("load-corpus", true, "load corpus")
 	flagNewKernel    = flag.Bool("new-kernel", false, "set true if using a new kernel version")
 	flagDumpCoverage = flag.String("dump-coverage", "", "for experiments. dump both coverages periodically")
+	flagOneShot      = flag.Bool("-one-shot", false, "quit after a crash occurs")
 )
 
 type Manager struct {
@@ -433,6 +434,10 @@ func (mgr *Manager) vmLoop() {
 			// which we detect as "lost connection". Don't save that as crash.
 			if shutdown != nil && res.crash != nil {
 				needRepro := mgr.saveCrash(res.crash)
+				if *flagOneShot {
+					log.Logf(0, "exiting...")
+					os.Exit(0)
+				}
 				if needRepro {
 					log.Logf(1, "loop: add pending repro for '%v'", res.crash.Title)
 					pendingRepro[res.crash] = true
@@ -556,6 +561,9 @@ func (mgr *Manager) preloadCorpus() {
 	if strings.IndexByte(seedType, '/') != -1 {
 		toks := strings.SplitN(seedType, "/", 2)
 		seedType, wanted = toks[0], toks[1]
+		// We are testing a fuzzer with a specific bug. It's okay with
+		// one crash
+		*flagOneShot = true
 	}
 	seedDir := mgr.seedDir(seedType)
 
