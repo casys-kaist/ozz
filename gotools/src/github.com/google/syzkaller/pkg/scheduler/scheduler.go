@@ -11,6 +11,8 @@ import (
 // extend, for example, to three threads.
 
 type Knotter struct {
+	config config
+
 	loopAllowed []int
 	commChan    map[uint32]struct{}
 	accessMap   map[uint32][]interleaving.Access
@@ -37,6 +39,11 @@ type Knotter struct {
 	// output
 	knots []interleaving.Segment
 	comms []interleaving.Communication
+}
+
+type config struct {
+	factor    float32
+	threshold int
 }
 
 func (knotter *Knotter) AddSequentialTrace(seq []interleaving.SerialAccess) bool {
@@ -241,9 +248,6 @@ func (knotter *Knotter) buildAccessMap() {
 			knotter.buildAccessMapSerial(serial)
 		}
 	}
-	// Communication channels will not be used after this point. Let's
-	// nil it for the garbage collector to know it.
-	knotter.commChan = nil
 }
 
 func (knotter *Knotter) buildAccessMapSerial(serial interleaving.SerialAccess) {
@@ -260,9 +264,6 @@ func (knotter *Knotter) formCommunications() {
 	for _, accs := range knotter.accessMap {
 		knotter.formCommunicationAddr(accs)
 	}
-	// As same to knotter.commChan, let's nil it for GC.
-	knotter.accessMap = nil
-	knotter.commHsh = nil
 }
 
 func (knotter *Knotter) formCommunicationAddr(accesses []interleaving.Access) {
@@ -332,6 +333,19 @@ func (knotter *Knotter) countInnerCommunication(comms []interleaving.Communicati
 }
 
 func (knotter *Knotter) formKnots() {
+	configs := []config{
+		{0.2, 10},
+		{0.15, 13},
+		{0.1, 16},
+		{0.05, 20},
+	}
+	for step, stop := 0, false; step < 4 && !stop; step++ {
+		knotter.config = configs[step]
+		stop = knotter.doFormKnots()
+	}
+}
+
+func (knotter *Knotter) doFormKnots() bool {
 	knotter.knots = []interleaving.Segment{}
 	for i := 0; i < len(knotter.comms0); i++ {
 		comm0 := knotter.comms0[i]
@@ -343,8 +357,7 @@ func (knotter *Knotter) formKnots() {
 			knotter.formKnotSingle(comm0, comm1)
 		}
 	}
-	knotter.comms0 = nil
-	knotter.comms1 = nil
+	return len(knotter.knots) < thresholdKnots
 }
 
 func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication) {
@@ -358,10 +371,8 @@ func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication) 
 	knotter.knots = append(knotter.knots, knot)
 }
 
-const thresholdTooManyNested = 10
-
 func (knotter *Knotter) tooManyNestedComm(comm interleaving.Communication) bool {
-	return knotter.innerCommCount[comm] >= thresholdTooManyNested
+	return knotter.innerCommCount[comm] >= knotter.config.threshold
 }
 
 func (knotter *Knotter) tooFarComms(comm0, comm1 interleaving.Communication) bool {
@@ -371,7 +382,7 @@ func (knotter *Knotter) tooFarComms(comm0, comm1 interleaving.Communication) boo
 		}
 		tid := acc0.Thread
 		windowSize := knotter.windowSize[tid]
-		factor := float32(0.15)
+		factor := knotter.config.factor
 		if windowSize < 2000 {
 			factor = 1
 		}
@@ -465,3 +476,5 @@ func wordify(addr uint32) uint32 {
 // we do not handle them.
 // var loopAllowed = []int{1, 2, 4, 8, 16, 32}
 var loopAllowed = []int{1}
+
+const thresholdKnots = 20000
