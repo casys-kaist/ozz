@@ -121,8 +121,8 @@ func (proc *Proc) loop() {
 }
 
 func (proc *Proc) relieveMemoryPressure() {
-	needSchedule := proc.fuzzer.spillOverScheduling()
-	needThreading := proc.fuzzer.spillOverThreading()
+	needSchedule := proc.fuzzer.spillScheduling()
+	needThreading := proc.fuzzer.spillThreading()
 	if !needSchedule && !needThreading {
 		return
 	}
@@ -135,8 +135,8 @@ func (proc *Proc) relieveMemoryPressure() {
 		} else if item := proc.fuzzer.workQueue.dequeueThreading(); item != nil {
 			proc.threadingInput(item)
 		}
-		needSchedule = proc.fuzzer.spillOverScheduling()
-		needThreading = proc.fuzzer.spillOverThreading()
+		needSchedule = proc.fuzzer.spillScheduling()
+		needThreading = proc.fuzzer.spillThreading()
 		if !needSchedule && !needThreading {
 			break
 		}

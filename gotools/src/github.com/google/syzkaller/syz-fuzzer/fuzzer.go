@@ -794,20 +794,20 @@ func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog) bool {
 	return false
 }
 
-func (fuzzer *Fuzzer) spillOverThreading() bool {
-	const threshold = 100000
+func (fuzzer *Fuzzer) spillCollection(collection Collection, threshold uint64) bool {
 	fuzzer.corpusMu.RLock()
-	threadingKnots := fuzzer.collection[CollectionThreadingHint]
-	fuzzer.corpusMu.RUnlock()
-	return threadingKnots > threshold
+	defer fuzzer.corpusMu.RUnlock()
+	return fuzzer.collection[collection] > threshold
 }
 
-func (fuzzer *Fuzzer) spillOverScheduling() bool {
-	const threshold = 100000
-	fuzzer.corpusMu.RLock()
-	threadingKnots := fuzzer.collection[CollectionScheduleHint]
-	fuzzer.corpusMu.RUnlock()
-	return threadingKnots > threshold
+const spillThreshold = uint64(100000)
+
+func (fuzzer *Fuzzer) spillThreading() bool {
+	return fuzzer.spillCollection(CollectionThreadingHint, spillThreshold)
+}
+
+func (fuzzer *Fuzzer) spillScheduling() bool {
+	return fuzzer.spillCollection(CollectionScheduleHint, spillThreshold)
 }
 
 func (fuzzer *Fuzzer) addCollection(collection Collection, num uint64) {
@@ -823,7 +823,7 @@ func (fuzzer *Fuzzer) addCollection(collection Collection, num uint64) {
 func (fuzzer *Fuzzer) subCollection(collection Collection, num uint64) {
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()
-	fuzzer.collection[CollectionThreadingHint] -= num
+	fuzzer.collection[collection] -= num
 	log.Logf(2, "sub %d collection to %s, total=%d",
 		num,
 		collectionNames[collection],
