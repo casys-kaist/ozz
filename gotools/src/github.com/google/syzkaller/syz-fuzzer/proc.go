@@ -345,6 +345,9 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 	// schedule hint := {newly found knots during threading work}
 	// \cup {speculated knots when picking up threading work}
 	scheduleHint := append(newKnots, speculatedKnots...)
+	if len(scheduleHint) == 0 {
+		return
+	}
 	proc.fuzzer.bookScheduleGuide(p, scheduleHint)
 }
 
