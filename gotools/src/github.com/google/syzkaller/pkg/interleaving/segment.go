@@ -10,11 +10,10 @@ type Segment interface {
 }
 
 func (comm Communication) Hash() uint64 {
-	b := make([]byte, 24)
+	b := make([]byte, 16)
 	w := writer{b: b}
 	for i := 0; i < 2; i++ {
 		w.write(comm[i].Inst)
-		w.write(uint32(comm[i].Thread))
 		w.write(comm[i].Timestamp)
 	}
 	return hash(b)
@@ -24,12 +23,11 @@ func (knot Knot) Hash() uint64 {
 	// NOTE: Assumption: the knot type is not Invalid or Parallel, and
 	// there are only two threads. TODO: extend the implmentation if
 	// needed.
-	b := make([]byte, 48)
+	b := make([]byte, 32)
 	w := writer{b: b}
 	for i := 0; i < 2; i++ {
 		for j := 0; j < 2; j++ {
 			w.write(knot[i][j].Inst)
-			w.write(uint32(knot[i][j].Thread))
 			var normalized uint32
 			if knot[i][j].Timestamp > knot[1-i][1-j].Timestamp {
 				normalized = 1

@@ -7,9 +7,9 @@ import (
 )
 
 func TestCommHash(t *testing.T) {
-	comm0 := interleaving.Communication{{Thread: 1}, {Thread: 2}}
+	comm0 := interleaving.Communication{{Inst: 1}, {Inst: 2}}
 	hsh0 := comm0.Hash()
-	comm1 := interleaving.Communication{{Thread: 2}, {Thread: 1}}
+	comm1 := interleaving.Communication{{Inst: 2}, {Inst: 1}}
 	hsh1 := comm1.Hash()
 	t.Logf("hsh0: %x", hsh0)
 	t.Logf("hsh1: %x", hsh1)
@@ -20,13 +20,13 @@ func TestCommHash(t *testing.T) {
 
 func TestKnotHash(t *testing.T) {
 	knot0 := interleaving.Knot{
-		{{Timestamp: 0, Thread: 0}, {Timestamp: 3, Thread: 1}},
-		{{Timestamp: 1, Thread: 1}, {Timestamp: 2, Thread: 0}},
+		{{Timestamp: 0, Inst: 0}, {Timestamp: 3, Inst: 1}},
+		{{Timestamp: 1, Inst: 1}, {Timestamp: 2, Inst: 0}},
 	}
 	hsh0 := knot0.Hash()
 	knot1 := interleaving.Knot{
-		{{Timestamp: 100, Thread: 0}, {Timestamp: 103, Thread: 1}},
-		{{Timestamp: 101, Thread: 1}, {Timestamp: 102, Thread: 0}},
+		{{Timestamp: 100, Inst: 0}, {Timestamp: 103, Inst: 1}},
+		{{Timestamp: 101, Inst: 1}, {Timestamp: 102, Inst: 0}},
 	}
 	hsh1 := knot1.Hash()
 
