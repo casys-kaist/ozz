@@ -266,6 +266,7 @@ func RunManager(cfg *mgrconfig.Config) {
 				}
 				mgr.minimizeCorpus()
 				vals["corpus"] = uint64(len(mgr.corpus))
+				vals["scheduled corpus"] = uint64(len(mgr.scheduledCorpus))
 				vals["uptime"] = uint64(time.Since(mgr.firstConnect)) / 1e9
 				vals["fuzzing"] = uint64(mgr.fuzzingTime) / 1e9
 				mgr.mu.Unlock()
