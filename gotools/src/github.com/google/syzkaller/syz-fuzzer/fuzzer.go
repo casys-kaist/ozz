@@ -630,6 +630,7 @@ func (fuzzer *FuzzerSnapshot) removeCandidateAt(idx int) {
 	fuzzer.fuzzer.corpusMu.Lock()
 	ln := len(fuzzer.candidates)
 	fuzzer.fuzzer.candidates[idx] = fuzzer.fuzzer.candidates[ln-1]
+	fuzzer.fuzzer.candidates = fuzzer.fuzzer.candidates[:ln-1]
 	fuzzer.fuzzer.corpusMu.Unlock()
 	fuzzer.fuzzer.subCollection(CollectionCandidate, 1)
 	*fuzzer = fuzzer.fuzzer.snapshot()
