@@ -157,9 +157,12 @@ watchdog_breakpoint_check_count(CPUState *cpu,
     // multiple times in a row, something goes wrong (e.g., race
     // condition in QEMU). This watchdog detects it early.
     if (++record->count >= WATCHDOG_BREAKPOINT_COUNT_MAX) {
+        int err;
         DRPRINTF(cpu, "watchdog failed: a breakpoint at %lx is hit %d times",
                  record->RIP, record->count);
         qcsched_window_close_window(cpu);
+        ASSERT(!(err = kvm_update_guest_debug(cpu, 0)),
+               "%s, kvm_update_guest_debug_debug returns %d", __func__, err);
     }
 }
 
@@ -203,6 +206,8 @@ static int qcsched_handle_breakpoint_iolocked(CPUState *cpu)
                  "Failed to remove a breakpoint (error=%d). Abort a schedule\n",
                  err);
         qcsched_window_close_window(cpu);
+        ASSERT(!(err = kvm_update_guest_debug(cpu, 0)),
+               "%s, kvm_update_guest_debug_debug returns %d", __func__, err);
         return 0;
     }
 

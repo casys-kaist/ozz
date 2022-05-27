@@ -359,12 +359,15 @@ void qcsched_window_prune_missed_schedpoint(CPUState *cpu)
     legit = lookup_entry_by_order(cpu, window->from);
 
     if (legit == NULL || hit == NULL) {
+        int err;
         // There are two cases that legit or hit is NULL: 1) the
         // window is closed (i.e., window->from ==
         // END_OF_SCHEDPOINT_WINDOW), 2) another CPU resets the
         // schedule. For either case, we close the window, and abort
         // the schedule.
         qcsched_window_close_window(cpu);
+        ASSERT(!(err = kvm_update_guest_debug(cpu, 0)),
+               "%s, kvm_update_guest_debug_debug returns %d", __func__, err);
         return;
     }
 
