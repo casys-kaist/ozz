@@ -37,14 +37,18 @@ type Proc struct {
 	execOptsCover     *ipc.ExecOpts
 	execOptsComps     *ipc.ExecOpts
 	execOptsNoCollide *ipc.ExecOpts
+
+	knotterOptsThreading knotterOpts
+	knotterOptsSchedule  knotterOpts
+
 	// To give a half of computing power for scheduling. We don't use
 	// proc.fuzzer.Stats and proc.env.StatExec as it is periodically
 	// set to 0.
 	executed  uint64
 	scheduled uint64
-
-	knotterOptsThreading knotterOpts
-	knotterOptsSchedule  knotterOpts
+	// If scheduled is too large, we block Proc.pickupThreadingWorks()
+	// to give more chance to sequential-fuzzing.
+	threadingPlugged bool
 }
 
 func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
@@ -86,6 +90,9 @@ func (proc *Proc) loop() {
 	for i := 0; ; i++ {
 		log.Logf(2, "executed=%v scheduled=%v", proc.executed, proc.scheduled)
 		proc.relieveMemoryPressure()
+		if i%100 == 0 {
+			proc.powerSchedule()
+		}
 
 		item := proc.fuzzer.workQueue.dequeue()
 		if item != nil {
@@ -124,6 +131,28 @@ func (proc *Proc) loop() {
 		if i%100 == 0 && !affinity.RunOnCPU(1<<0) {
 			log.Logf(0, "[WARN] Proc goroutine #%v runs on CPU other than 0", proc.pid)
 		}
+	}
+}
+
+func (proc *Proc) powerSchedule() {
+	if proc.threadingPlugged {
+		proc.unplugThreading()
+	} else {
+		proc.plugThreading()
+	}
+}
+
+func (proc *Proc) unplugThreading() {
+	if proc.scheduled < uint64(float64(proc.executed)*0.4) {
+		proc.fuzzer.addCollection(CollectionUnplug, 1)
+		proc.threadingPlugged = false
+	}
+}
+
+func (proc *Proc) plugThreading() {
+	if proc.scheduled > uint64(float64(proc.executed)*0.7) {
+		proc.fuzzer.addCollection(CollectionPlug, 1)
+		proc.threadingPlugged = true
 	}
 }
 
@@ -449,6 +478,10 @@ func (proc *Proc) postExecute(p *prog.Prog, flags ProgTypes, info *ipc.ProgInfo)
 }
 
 func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
+	if proc.threadingPlugged {
+		return
+	}
+
 	maxIntermediateCalls := 2
 	intermediateCalls := func(c1, c2 int) int {
 		return c2 - c1 - 1

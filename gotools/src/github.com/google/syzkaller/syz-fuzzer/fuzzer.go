@@ -98,6 +98,8 @@ const (
 	CollectionScheduleHint Collection = iota
 	CollectionThreadingHint
 	CollectionCandidate
+	CollectionPlug
+	CollectionUnplug
 	CollectionCount
 )
 
@@ -105,6 +107,8 @@ var collectionNames = [CollectionCount]string{
 	CollectionScheduleHint:  "schedule hint",
 	CollectionThreadingHint: "threading hint",
 	CollectionCandidate:     "candidate",
+	CollectionPlug:          "plug",
+	CollectionUnplug:        "unplug",
 }
 
 type Stat int
