@@ -361,10 +361,10 @@ func (knotter *Knotter) countInnerCommunication(comms []interleaving.Communicati
 
 func (knotter *Knotter) formKnots() {
 	configs := []config{
-		{0.2, 10},
-		{0.15, 13},
-		{0.1, 16},
-		{0.05, 20},
+		{0.2, 20},
+		{0.15, 16},
+		{0.1, 13},
+		{0.05, 10},
 	}
 	for step, stop := 0, false; step < 4 && !stop; step++ {
 		knotter.config = configs[step]
