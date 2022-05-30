@@ -42,6 +42,9 @@ type Proc struct {
 	// set to 0.
 	executed  uint64
 	scheduled uint64
+
+	knotterOptsThreading knotterOpts
+	knotterOptsSchedule  knotterOpts
 }
 
 func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
@@ -56,15 +59,19 @@ func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
 	execOptsCover.Flags |= ipc.FlagCollectCover
 	execOptsComps := execOptsNoCollide
 	execOptsComps.Flags |= ipc.FlagCollectComps
+	knotterOptsThreading := knotterOpts{&fuzzer.maxInterleaving, true, false}
+	knotterOptsSchedule := knotterOpts{&fuzzer.corpusInterleaving, false, true}
 	proc := &Proc{
-		fuzzer:            fuzzer,
-		pid:               pid,
-		env:               env,
-		rnd:               rnd,
-		execOpts:          fuzzer.execOpts,
-		execOptsCover:     &execOptsCover,
-		execOptsComps:     &execOptsComps,
-		execOptsNoCollide: &execOptsNoCollide,
+		fuzzer:               fuzzer,
+		pid:                  pid,
+		env:                  env,
+		rnd:                  rnd,
+		execOpts:             fuzzer.execOpts,
+		execOptsCover:        &execOptsCover,
+		execOptsComps:        &execOptsComps,
+		execOptsNoCollide:    &execOptsNoCollide,
+		knotterOptsThreading: knotterOptsThreading,
+		knotterOptsSchedule:  knotterOptsSchedule,
 	}
 	return proc, nil
 }
@@ -324,18 +331,11 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 
 	p := item.p.Clone()
 	p.Threading(item.calls)
-	knotter := scheduler.Knotter{}
-	for i := 0; i < 2; i++ {
-		inf := proc.executeRaw(proc.execOpts, p, StatThreading)
-		seq := sequentialTrace(inf)
-		if !knotter.AddSequentialTrace(seq) {
-			log.Logf(1, "Failed to add sequential traces")
-			return
-		}
-		p.Reverse()
+
+	knots := proc.executeThreading(p)
+	if len(knots) == 0 {
+		return
 	}
-	knotter.ExcavateKnots()
-	knots := knotter.GetKnots()
 
 	// newly found knots during threading work
 	newKnots := proc.fuzzer.newKnot(knots)
@@ -349,6 +349,21 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 		return
 	}
 	proc.fuzzer.bookScheduleGuide(p, scheduleHint)
+}
+
+func (proc *Proc) executeThreading(p *prog.Prog) []interleaving.Segment {
+	knotter := scheduler.GetKnotter(&proc.fuzzer.maxInterleaving, &proc.fuzzer.signalMu)
+	for i := 0; i < 2; i++ {
+		inf := proc.executeRaw(proc.execOpts, p, StatThreading)
+		seq := sequentialTrace(inf)
+		if !knotter.AddSequentialTrace(seq) {
+			log.Logf(1, "Failed to add sequential traces")
+			return nil
+		}
+		p.Reverse()
+	}
+	knotter.ExcavateKnots()
+	return knotter.GetKnots()
 }
 
 func sequentialTrace(info *ipc.ProgInfo) []interleaving.SerialAccess {
@@ -445,14 +460,10 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 			}
 
 			cont := prog.Contender{Calls: []int{c1, c2}}
-
-			knotter := scheduler.Knotter{ReassignThreadID: true}
-			if !knotter.AddSequentialTrace([]interleaving.SerialAccess{info.Calls[c1].Access, info.Calls[c2].Access}) {
+			knots := proc.extractKnots(info, cont, proc.knotterOptsThreading)
+			if len(knots) == 0 {
 				continue
 			}
-			knotter.ExcavateKnots()
-			knots := knotter.GetKnots()
-
 			if newKnots := proc.fuzzer.newKnot(knots); len(newKnots) != 0 {
 				proc.enqueueThreading(p, cont, newKnots)
 			}
@@ -462,14 +473,11 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 
 func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.ProgInfo {
 	// NOTE: The scheduling work is the only case reaching here
-	seq := sequentialTrace(info)
-	knotter := scheduler.Knotter{StrictTimestamp: true}
-	if !knotter.AddSequentialTrace(seq) {
+	knots := proc.extractKnots(info, p.Contender, proc.knotterOptsSchedule)
+	if len(knots) != 0 {
 		log.Logf(1, "Failed to add sequential traces")
 		return info
 	}
-	knotter.ExcavateKnots()
-	knots := knotter.GetKnots()
 
 	if new := proc.fuzzer.newSegment(&proc.fuzzer.corpusInterleaving, knots); len(new) == 0 {
 		return info
@@ -487,6 +495,40 @@ func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.Pro
 	})
 	proc.fuzzer.addThreadedInputToCorpus(p, signal)
 	return info
+}
+
+type knotterOpts struct {
+	collected        *interleaving.Signal
+	reassignThreadID bool
+	strictTimestamp  bool
+}
+
+func (proc *Proc) extractKnots(info *ipc.ProgInfo, calls prog.Contender, opts knotterOpts) []interleaving.Segment {
+	knotter := scheduler.GetKnotter(
+		opts.collected,
+		&proc.fuzzer.signalMu,
+	)
+	if opts.reassignThreadID {
+		knotter.SetReassignThreadID()
+	}
+	if opts.strictTimestamp {
+		knotter.SetStrictTimestamp()
+	}
+
+	seq := sequentialAccesses(info, calls)
+	if !knotter.AddSequentialTrace(seq) {
+		return nil
+	}
+	knotter.ExcavateKnots()
+
+	return knotter.GetKnots()
+}
+
+func sequentialAccesses(info *ipc.ProgInfo, calls prog.Contender) (seq []interleaving.SerialAccess) {
+	for _, call := range calls.Calls {
+		seq = append(seq, info.Calls[call].Access)
+	}
+	return
 }
 
 func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int, info ipc.CallInfo) {

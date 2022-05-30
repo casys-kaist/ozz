@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"sort"
+	"sync"
 
 	"github.com/google/syzkaller/pkg/interleaving"
 )
@@ -32,6 +33,9 @@ type Knotter struct {
 	comms1         []interleaving.Communication
 	windowSize     []int
 
+	havingMu *sync.RWMutex
+	having   *interleaving.Signal
+
 	// input
 	seqCount int
 	seqs0    [][]interleaving.SerialAccess // Unmodified input
@@ -39,6 +43,29 @@ type Knotter struct {
 	// output
 	knots []interleaving.Segment
 	comms []interleaving.Communication
+}
+
+func GetKnotter(having *interleaving.Signal, havingMu *sync.RWMutex) Knotter {
+	if having == nil {
+		havingMu = nil
+	}
+	if havingMu != nil {
+		(*havingMu).RLock()
+		defer (*havingMu).RUnlock()
+	}
+	return Knotter{
+		havingMu: havingMu,
+		having:   having,
+	}
+}
+
+func (knotter *Knotter) SetReassignThreadID() {
+	knotter.ReassignThreadID = true
+}
+
+func (knotter *Knotter) SetStrictTimestamp() {
+	knotter.StrictTimestamp = true
+
 }
 
 type config struct {
@@ -347,6 +374,10 @@ func (knotter *Knotter) formKnots() {
 
 func (knotter *Knotter) doFormKnots() bool {
 	knotter.knots = []interleaving.Segment{}
+	if knotter.havingMu != nil {
+		(*knotter.havingMu).RLock()
+		defer (*knotter.havingMu).RUnlock()
+	}
 	for i := 0; i < len(knotter.comms0); i++ {
 		comm0 := knotter.comms0[i]
 		if knotter.tooManyNestedComm(comm0) {
@@ -361,14 +392,26 @@ func (knotter *Knotter) doFormKnots() bool {
 }
 
 func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication) {
+	knot := interleaving.Knot{comm0, comm1}
+	if knotter.alreadyHave(knot) {
+		return
+	}
 	if knotter.tooFarComms(comm0, comm1) {
 		return
 	}
-	knot := interleaving.Knot{comm0, comm1}
 	if typ := knot.Type(); typ == interleaving.KnotInvalid {
 		return
 	}
 	knotter.knots = append(knotter.knots, knot)
+}
+
+func (knotter *Knotter) alreadyHave(knot interleaving.Knot) bool {
+	if knotter.having == nil {
+		return false
+	}
+	hsh := knot.Hash()
+	_, ok := (*knotter.having)[hsh]
+	return ok
 }
 
 func (knotter *Knotter) tooManyNestedComm(comm interleaving.Communication) bool {
