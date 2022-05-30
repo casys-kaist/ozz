@@ -52,7 +52,7 @@ var (
 	flagCorpus       = flag.Bool("load-corpus", true, "load corpus")
 	flagNewKernel    = flag.Bool("new-kernel", false, "set true if using a new kernel version")
 	flagDumpCoverage = flag.String("dump-coverage", "", "for experiments. dump both coverages periodically")
-	flagOneShot      = flag.Bool("-one-shot", false, "quit after a crash occurs")
+	flagOneShot      = flag.Bool("one-shot", false, "quit after a crash occurs")
 )
 
 type Manager struct {
@@ -240,13 +240,14 @@ func RunManager(cfg *mgrconfig.Config) {
 			corpusCover := mgr.stats.corpusCover.get()
 			corpusSignal := mgr.stats.corpusSignal.get()
 			corpusInterleaving := mgr.stats.corpusInterleaving.get()
+			maxInterleaving := mgr.stats.maxInterleaving.get()
 			maxSignal := mgr.stats.maxSignal.get()
 			mgr.mu.Unlock()
 			numReproducing := atomic.LoadUint32(&mgr.numReproducing)
 			numFuzzing := atomic.LoadUint32(&mgr.numFuzzing)
 
-			log.Logf(0, "VMs %v, executed %v, cover %v, signal %v/%v, interleaving %v crashes %v, repro %v",
-				numFuzzing, executed, corpusCover, corpusSignal, maxSignal, corpusInterleaving, crashes, numReproducing)
+			log.Logf(0, "VMs %v, executed %v, cover %v, signal %v/%v, interleaving %v/%v, crashes %v, repro %v",
+				numFuzzing, executed, corpusCover, corpusSignal, maxSignal, corpusInterleaving, maxInterleaving, crashes, numReproducing)
 		}
 	}()
 
