@@ -1,7 +1,7 @@
 #ifndef __QCSCHED_CONSTANT_H
 #define __QCSCHED_CONSTANT_H
 
-#define MAX_SCHEDPOINTS 128
+#define MAX_SCHEDPOINTS 256
 // TODO: Do not use this macro
 #define MAX_CPUS 8
 
