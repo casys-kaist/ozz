@@ -632,10 +632,8 @@ func needRetry(p *prog.Prog, info *ipc.ProgInfo) bool {
 
 func buildScheduleFilter(p *prog.Prog, info *ipc.ProgInfo) []uint32 {
 	const FOOTPRINT_MISSED = 1
-	cnt := 0
 	filter := make([]uint32, p.Schedule.Len())
 	for _, ci := range info.Calls {
-		cnt += len(ci.SchedpointOutcome)
 		for _, outcome := range ci.SchedpointOutcome {
 			order := outcome.Order
 			if order >= uint32(len(filter)) {
@@ -645,9 +643,6 @@ func buildScheduleFilter(p *prog.Prog, info *ipc.ProgInfo) []uint32 {
 				filter[order] = 1
 			}
 		}
-	}
-	if cnt != p.Schedule.Len() {
-		return nil
 	}
 	return filter
 }
