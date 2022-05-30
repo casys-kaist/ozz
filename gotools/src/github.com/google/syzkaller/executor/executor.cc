@@ -298,6 +298,7 @@ struct thread_t {
 	int epoch;
 	uint64 num_sched;
 	schedule_t sched[kMaxSchedule];
+	uint64 num_filter;
 	uint64 footprint[kMaxSchedule];
 	bool retry;
 	intptr_t res;
@@ -428,7 +429,7 @@ static void write_call_output(thread_t* th, bool finished);
 static void write_extra_output();
 static void execute_call(thread_t* th);
 static void setup_schedule(int num_sched, schedule_t* sched);
-static bool clear_schedule(int num_sched, uint64* footprint);
+static bool clear_schedule(int num_sched, uint64* num_filter, uint64* footprint);
 static int lookup_available_cpu(int id);
 static void coverage_pre_call(thread_t* th);
 static void coverage_post_call(thread_t* th);
@@ -1397,7 +1398,7 @@ void write_call_output(thread_t* th, bool finished)
 	uint32* cover_count_pos = write_output(0); // filled in later
 	uint32* comps_count_pos = write_output(0); // filled in later
 	uint32* rfcover_count_pos = write_output(0); // filled in later
-	write_output((uint32)th->num_sched);
+	write_output((uint32)th->num_filter);
 
 	if (flag_comparisons) {
 		// Collect only the comparisons
@@ -1428,7 +1429,7 @@ void write_call_output(thread_t* th, bool finished)
 			write_coverage_signal<uint32>(&th->cov, signal_count_pos, cover_count_pos);
 		}
 	}
-	for (int i = 0; i < (int)th->num_sched; i++) {
+	for (int i = 0; i < (int)th->num_filter; i++) {
 		write_output((uint32)th->sched[i].order);
 		write_output((uint32)th->footprint[i]);
 	}
@@ -1551,7 +1552,7 @@ void execute_call(thread_t* th)
 	coverage_pre_call(th);
 	NONFAILING(th->res = execute_syscall(call, th->args));
 	coverage_post_call(th);
-	th->retry = clear_schedule(th->num_sched, th->footprint);
+	th->retry = clear_schedule(th->num_sched, &th->num_filter, th->footprint);
 	th->reserrno = errno;
 	// Our pseudo-syscalls may misbehave.
 	if ((th->res == -1 && th->reserrno == 0) || call->attrs.ignore_return)
@@ -1595,7 +1596,7 @@ void setup_schedule(int num_sched, schedule_t* sched)
 		debug("failed to setup a schedule: %llx\n", res);
 }
 
-bool clear_schedule(int num_sched, uint64* footprint)
+bool clear_schedule(int num_sched, uint64* num_filter, uint64* footprint)
 {
 	if (num_sched == 0)
 		return false;
@@ -1607,8 +1608,9 @@ bool clear_schedule(int num_sched, uint64* footprint)
 	WARN_ON_NOT_NULL(hypercall(HCALL_FOOTPRINT_BP, (unsigned long)&count, (unsigned long)footprint,
 				   (unsigned long)&retry),
 			 "HCALL_FOOTPRINT_BP");
-	if ((int)count != num_sched)
-		debug("[WARN] count != num_sched, count=%d, num_sched=%d\n", (int)count, num_sched);
+	if ((int)count > num_sched)
+		debug("[WARN] count > num_sched, count=%d, num_sched=%d\n", (int)count, num_sched);
+	*num_filter = count;
 	WARN_ON_NOT_NULL(hypercall(HCALL_CLEAR_BP, 0, 0, 0), "HCALL_CLEAR_BP");
 	return !!retry;
 }
