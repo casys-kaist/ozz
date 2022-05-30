@@ -203,7 +203,7 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 		if tp == nil {
 			break
 		}
-		p, hint := tp.P.Clone(), tp.Hint
+		p, hint := tp.P.Clone(), proc.pruneHint(tp.Hint)
 
 		ok, remaining := p.MutateScheduleFromHint(proc.rnd, hint)
 		proc.setHint(tp, remaining)
@@ -220,6 +220,17 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 			break
 		}
 	}
+}
+
+func (proc *Proc) pruneHint(hint []interleaving.Segment) []interleaving.Segment {
+	pruned := make([]interleaving.Segment, 0, len(hint))
+	for _, h := range hint {
+		hsh := h.Hash()
+		if _, ok := proc.fuzzer.corpusInterleaving[hsh]; !ok {
+			pruned = append(pruned, h)
+		}
+	}
+	return pruned
 }
 
 func (proc *Proc) setHint(tp *prog.Candidate, remaining []interleaving.Segment) {
