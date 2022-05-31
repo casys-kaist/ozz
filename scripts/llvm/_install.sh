@@ -11,7 +11,7 @@ _download() {
 
 _build() {
 	# Apply patches first
-	# __git_am "$LLVM_PATH" "$SCRIPTS_DIR/llvm/patches"
+	__git_am "$LLVM_PATH" "$SCRIPTS_DIR/llvm/patches"
 	# Then build LLVM
 	_ENABLE="-DLLVM_ENABLE_PROJECTS=clang\;compiler-rt\;lld\;clang-tools-extra"
 	_OPTIONS="-DCMAKE_INSTALL_PREFIX=$LLVM_INSTALL -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLLVM_ENABLE_ASSERTIONS=ON"
