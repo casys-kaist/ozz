@@ -214,7 +214,6 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 		}
 
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
-		proc.scheduled++
 		proc.execute(proc.execOpts, p, ProgNormal, StatSchedule)
 		if !proc.needScheduling() {
 			break
@@ -600,6 +599,9 @@ func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, knots []i
 
 func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.ProgInfo {
 	proc.executed++
+	if stat == StatSchedule || stat == StatThreading {
+		proc.scheduled++
+	}
 	if opts.Flags&ipc.FlagDedupCover == 0 {
 		log.Fatalf("dedup cover is not enabled")
 	}
