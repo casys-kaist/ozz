@@ -15,5 +15,5 @@ for _FN in "$@"
 do
 	echo "Uploading $_FN into /root/$FN"
 	FN=$(basename $_FN);
-	scp -P $PORT $KEY_OPTS $_FN root@localhost:/root/$FN
+	scp -P $PORT $KEY_OPTS $_FN root@127.0.0.1:/root/$FN
 done
