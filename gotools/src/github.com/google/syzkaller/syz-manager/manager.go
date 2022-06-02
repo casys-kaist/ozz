@@ -628,9 +628,8 @@ func (mgr *Manager) loadCorpus() {
 	}
 	broken := 0
 	if *flagCorpus {
-		// If we are using a new kernel, previous scheduled progs are
-		// not meaningful anymore. Drop them.
-		allowThreaded := !mgr.newKernel
+		// We don't save multi-thread progs anymore.
+		allowThreaded := false
 		for key, rec := range mgr.corpusDB.Records {
 			if key == versionKey {
 				continue
