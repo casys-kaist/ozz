@@ -1,5 +1,11 @@
 package interleaving
 
+import (
+	"bytes"
+	"fmt"
+	"strconv"
+)
+
 type Signal map[uint64]struct{}
 
 func (i Signal) Copy() Signal {
@@ -87,6 +93,30 @@ func (i *Signal) Merge(i1 Signal) {
 
 func (i Signal) Len() int {
 	return len(i)
+}
+
+func (i Signal) ToHex() (ret []byte) {
+	for k := range i {
+		hex := fmt.Sprintf("%x\n", k)
+		ret = append(ret, []byte(hex)...)
+	}
+	return
+}
+
+func (i *Signal) FromHex(ret []byte) {
+	i0 := *i
+	if i0 == nil {
+		i0 = make(Signal)
+		*i = i0
+	}
+	raws := bytes.Fields(ret)
+	for _, raw := range raws {
+		sig, err := strconv.ParseUint(string(raw), 16, 64)
+		if err != nil {
+			panic(err)
+		}
+		(*i)[sig] = struct{}{}
+	}
 }
 
 func FromCoverToSignal(c Cover) Signal {
