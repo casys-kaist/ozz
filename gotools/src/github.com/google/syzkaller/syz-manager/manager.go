@@ -579,18 +579,6 @@ func (mgr *Manager) preloadCorpus() {
 			log.Fatalf("failed to read seeds dir: %v", err)
 		}
 		for _, seed := range seeds {
-			if strings.HasPrefix(seed.Name(), "syz_") {
-				// TODO: lots of syz_mount_image* seeds contain only 1
-				// syscall, which is not interesting to test race
-				// condition. Let's ignore them for now, and once we
-				// have done enough testing, include them again.
-				continue
-			}
-			if strings.Contains(seed.Name(), "fuse") {
-				// TODO: some fuse tests are too long to
-				// execute. Ignore all.
-				continue
-			}
 			if wanted != "" && seed.Name() != wanted {
 				continue
 			}
