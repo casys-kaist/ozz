@@ -56,27 +56,29 @@ var (
 )
 
 type Manager struct {
-	cfg            *mgrconfig.Config
-	vmPool         *vm.Pool
-	target         *prog.Target
-	sysTarget      *targets.Target
-	reporter       *report.Reporter
-	crashdir       string
-	serv           *RPCServer
-	corpusDB       *db.DB
-	newKernel      bool
-	kernelHash     []byte
-	startTime      time.Time
-	firstConnect   time.Time
-	fuzzingTime    time.Duration
-	stats          *Stats
-	crashTypes     map[string]bool
-	vmStop         chan bool
-	checkResult    *rpctype.CheckArgs
-	fresh          bool
-	numFuzzing     uint32
-	numReproducing uint32
-	shifterPath    string
+	cfg                 *mgrconfig.Config
+	vmPool              *vm.Pool
+	target              *prog.Target
+	sysTarget           *targets.Target
+	reporter            *report.Reporter
+	crashdir            string
+	serv                *RPCServer
+	corpusDB            *db.DB
+	newKernel           bool
+	kernelHash          []byte
+	startTime           time.Time
+	firstConnect        time.Time
+	fuzzingTime         time.Duration
+	stats               *Stats
+	crashTypes          map[string]bool
+	vmStop              chan bool
+	checkResult         *rpctype.CheckArgs
+	fresh               bool
+	numFuzzing          uint32
+	numReproducing      uint32
+	shifterPath         string
+	interleavingCovPath string
+	interleavingCovFile *os.File
 
 	seedType string
 
@@ -215,6 +217,8 @@ func RunManager(cfg *mgrconfig.Config) {
 	if err != nil {
 		log.Fatalf("failed to create rpc server: %v", err)
 	}
+
+	mgr.loadInterleavingCoverage()
 
 	if cfg.DashboardAddr != "" {
 		mgr.dash, err = dashapi.New(cfg.DashboardClient, cfg.DashboardAddr, cfg.DashboardKey)
@@ -600,6 +604,26 @@ func (mgr *Manager) preloadCorpus() {
 			mgr.seeds = append(mgr.seeds, data)
 		}
 	}
+}
+
+func (mgr *Manager) loadInterleavingCoverage() {
+	fn := filepath.Join(mgr.cfg.Workdir,
+		fmt.Sprintf("interleaving-%v", hex.EncodeToString(mgr.kernelHash)))
+
+	data, err := ioutil.ReadFile(fn)
+	mgr.serv.corpusInterleaving.FromHex(data)
+	mgr.serv.maxInterleaving.FromHex(data)
+	total := mgr.serv.corpusInterleaving.Len()
+	mgr.stats.corpusInterleaving.set(total)
+	mgr.stats.maxInterleaving.set(total)
+	log.Logf(0, "loaded %d interleaving coverage", total)
+
+	f, err := os.OpenFile(fn, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		panic(err)
+	}
+	mgr.interleavingCovPath = fn
+	mgr.interleavingCovFile = f
 }
 
 func (mgr *Manager) loadCorpus() {
@@ -1301,10 +1325,10 @@ func (mgr *Manager) newScheduledInput(inp rpctype.RPCScheduledInput, sign interl
 		mgr.scheduledCorpus[sig] = old
 	} else {
 		mgr.scheduledCorpus[sig] = inp
-		mgr.corpusDB.Save(sig, inp.Prog, 0)
-		if err := mgr.corpusDB.Flush(); err != nil {
-			log.Logf(0, "failed to save corpus database: %v", err)
-		}
+		corpusInterleaving := mgr.serv.corpusInterleaving
+		diff := corpusInterleaving.Diff(sign)
+		data := diff.ToHex()
+		mgr.interleavingCovFile.Write(data)
 	}
 	return true
 }
