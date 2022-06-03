@@ -3,27 +3,56 @@
 We need to build a custom kvm module to allow hypercalls from the
 userspace. host-Ubuntu-* branches are for this purpose.
 
+# Building a custom kvm module
+
+- Copy a config of the host kernel into `kernels/linux`
+
+```
+cp /boot/config-`uname -r` kernels/linux
+```
+
+- Apply patches in host/patches to kernels/linux
+
+```
+git am kernels/host/patches/0001-arch-x86-kvm-Allow-hypercall-with-CPL-larger-than-0.patch
+...
+```
+
+- Build kvm and kvm-intel modules
+
+```
+make -C /lib/modules/`uname -r`/build M=$PWD arch/x86/kvm/kvm.ko
+make -C /lib/modules/`uname -r`/build M=$PWD arch/x86/kvm/kvm-intel.ko
+```
+
+- (Optional) if your host kernel is even older, handle_vmcall() in
+  vmx.c may always return 1. In that case, apply the last patch
+
+```
+git am optional-0004-kvm-let-kvm_emulate_hypercall-decide-whether-to-esca.patch
+```
+
 # Caution
 
-For some reasons, building a custom kvm module is broken in old
-branches (i.e., host-Ubuntu-4.15.0-76.86). The following command will
-rise the "No such file or directory" error.
+Building a custom kvm module is broken in old branches (e.g.,
+host-Ubuntu-4.15.0-76.86). Running the following command in
+kernels/linux will rise the "No such file or directory" error.
 ```
 make -C /lib/modules/`uname -r`/build M=$PWD arch/x86/kvm/kvm.ko
 ```
 
-The reason is that building KVM relied on relative pathes in
-arch/x86/kvm/Makefile and arch/x86/kvm/trace.h and these pathes are
-broken.
+My best guess is that building KVM relied on relative paths in
+arch/x86/kvm/Makefile and arch/x86/kvm/trace.h and this somehow does
+not work.
 
-To workaround it, I temporary modified the pathes to absolute pathes
-in my local machine. For example,
+To workaround it, I temporary modified the paths to absolute paths.
+For example, I modify
 ```
 ccflags-y += -Iarch/x86/kvm
 ```
 into
 ```
-ccflags-y += -I/home/daeryong/workdir/relrazzer/kernels/asdf/arch/x86/kvm
+ccflags-y += -I/real/path/to/arch/x86/kvm
 ```
 , and
 
@@ -32,10 +61,9 @@ ccflags-y += -I/home/daeryong/workdir/relrazzer/kernels/asdf/arch/x86/kvm
 ```
 into
 ```
-#define TRACE_INCLUDE_PATH /home/daeryong/workdir/relrazzer/kernels/asdf/arch/x86/kvm
+#define TRACE_INCLUDE_PATH /real/path/to/arch/x86/kvm
 ```
 
-Note that I also changed the directory name of the linux source code
-(i.e., kernels/linux) to some randome name (i.e., kernels/asdf)
-because __stringify() macro somehow changes the string "linux" into
-"1".
+I also changed the directory name of the linux source code (i.e.,
+kernels/linux) to some randome name (i.e., kernels/asdf) because
+__stringify() macro somehow changes the string "linux" into "1".
