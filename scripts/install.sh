@@ -18,6 +18,9 @@ __install_tool() {
 	if [ ! -f "$1/_install.sh" ]; then
 		return 0
 	fi
+	if [ -f "$1/SKIP" ] ; then
+		return 0
+	fi
 	unset -f  _install _build _download
 	unset _target
 	_SCRIPTDIR=$(realpath $1)
