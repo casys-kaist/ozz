@@ -319,7 +319,7 @@ static target_ulong qcsched_footprint_breakpoint(CPUState *cpu,
 {
     struct qcsched_entry *entry;
     target_ulong footprintul, cntul, retryul;
-    int i, idx;
+    int i, idx, err;
 
     DRPRINTF(cpu, "%s\n", __func__);
 
@@ -341,9 +341,12 @@ static target_ulong qcsched_footprint_breakpoint(CPUState *cpu,
 #ifdef _DEBUG_VERBOSE
         DRPRINTF(cpu, "footprint at %d: %lu\n", i, footprintul);
 #endif
-        ASSERT(!cpu_memory_rw_debug(cpu, data_uptr + idx, &footprintul,
-                                    sizeof(target_ulong), 1),
-               "Can't write order");
+        if ((err = cpu_memory_rw_debug(cpu, data_uptr + idx, &footprintul,
+                                       sizeof(target_ulong), 1))) {
+            DRPRINTF(cpu, "error while writing an order %d, error=%d\n", i,
+                     err);
+            return -EFAULT;
+        }
         idx += 8;
         cntul++;
     }
@@ -351,12 +354,17 @@ static target_ulong qcsched_footprint_breakpoint(CPUState *cpu,
 #ifdef _DEBUG_VERBOSE
     DRPRINTF(cpu, "local entries %lu\n", cntul);
 #endif
-    ASSERT(!cpu_memory_rw_debug(cpu, cnt_uptr, &cntul, sizeof(target_ulong), 1),
-           "Can't write count");
+    if ((err = cpu_memory_rw_debug(cpu, cnt_uptr, &cntul, sizeof(target_ulong),
+                                   1))) {
+        DRPRINTF(cpu, "error while writing count, error=%d\n", err);
+        return -EFAULT;
+    }
     DRPRINTF(cpu, "Retry: %lu\n", retryul);
-    ASSERT(!cpu_memory_rw_debug(cpu, retry_uptr, &retryul, sizeof(target_ulong),
-                                1),
-           "Can't write retry");
+    if ((err = cpu_memory_rw_debug(cpu, retry_uptr, &retryul,
+                                   sizeof(target_ulong), 1))) {
+        DRPRINTF(cpu, "error while writing retry, error=%d\n", err);
+        return -EFAULT;
+    }
     return 0;
 }
 
