@@ -136,8 +136,7 @@ void debug_dump_data(const char* data, int length);
 	}
 #else
 #define WARN_ON_NOT_NULL(exp, name) \
-	do {                        \
-	} while (0)
+	exp
 #endif
 
 static void receive_execute();
@@ -1603,11 +1602,14 @@ bool clear_schedule(int num_sched, uint64* num_filter, uint64* footprint)
 
 	uint64_t count;
 	uint64_t retry;
+	unsigned long ret;
 
 	WARN_ON_NOT_NULL(hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0), "HCALL_DEACTIVATE_BP");
-	WARN_ON_NOT_NULL(hypercall(HCALL_FOOTPRINT_BP, (unsigned long)&count, (unsigned long)footprint,
-				   (unsigned long)&retry),
+	WARN_ON_NOT_NULL((ret = hypercall(HCALL_FOOTPRINT_BP, (unsigned long)&count, (unsigned long)footprint,
+					  (unsigned long)&retry)),
 			 "HCALL_FOOTPRINT_BP");
+	if (ret != 0)
+		count = 0;
 	if ((int)count > num_sched)
 		debug("[WARN] count > num_sched, count=%d, num_sched=%d\n", (int)count, num_sched);
 	*num_filter = count;
