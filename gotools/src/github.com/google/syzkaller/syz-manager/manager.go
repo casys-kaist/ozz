@@ -1444,28 +1444,28 @@ func (mgr *Manager) dumpCoverage() {
 	knots := mgr.serv.corpusKnots
 	mgr.serv.mu.Unlock()
 
-	now := time.Now().Format("2006-01-02-15:04:05")
 	dir := filepath.Join(mgr.cfg.Workdir, *flagDumpCoverage)
 	osutil.MkdirAll(dir)
-	codef, err := os.OpenFile(filepath.Join(dir, fmt.Sprintf("%s.code", now)), os.O_WRONLY|os.O_CREATE|os.O_EXCL, osutil.DefaultFilePerm)
-	if err != nil {
-		log.Fatalf("failed to open code coverage file: %v", err)
-	}
+
 	var codecov bytes.Buffer
 	for _, cc := range code {
 		codecov.WriteString(fmt.Sprintf("%x\n", cc))
+	}
+	codef, err := os.OpenFile(filepath.Join(dir, "code"), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, osutil.DefaultFilePerm)
+	if err != nil {
+		log.Fatalf("failed to open code coverage file: %v", err)
 	}
 	if _, err := codef.Write(codecov.Bytes()); err != nil {
 		log.Fatalf("failed to write code coverage: %v", err)
 	}
 
-	knotf, err := os.OpenFile(filepath.Join(dir, fmt.Sprintf("%s.knot", now)), os.O_WRONLY|os.O_CREATE|os.O_EXCL, osutil.DefaultFilePerm)
-	if err != nil {
-		log.Fatalf("failed to open read-from coverage file: %v", err)
-	}
 	var knotcov bytes.Buffer
 	for i := 0; i < len(knots); i++ {
 		knotcov.WriteString(fmt.Sprintf("%v\n", knots[i]))
+	}
+	knotf, err := os.OpenFile(filepath.Join(dir, "knot"), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, osutil.DefaultFilePerm)
+	if err != nil {
+		log.Fatalf("failed to open read-from coverage file: %v", err)
 	}
 	if _, err := knotf.Write(knotcov.Bytes()); err != nil {
 		log.Fatalf("failed to write read-from coverage: %v", err)
