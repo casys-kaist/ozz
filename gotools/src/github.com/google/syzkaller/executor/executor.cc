@@ -631,7 +631,6 @@ void setup_control_pipes()
 void parse_env_flags(uint64 flags)
 {
 	// Note: Values correspond to ordering in pkg/ipc/ipc.go, e.g. FlagSandboxNamespace
-	flags ^= 1 << 5;
 	flag_debug = flags & (1 << 0);
 	flag_coverage = flags & (1 << 1);
 	if (flags & (1 << 2))
@@ -642,8 +641,7 @@ void parse_env_flags(uint64 flags)
 		flag_sandbox_android = true;
 	else
 		flag_sandbox_none = true;
-	debug("env_flags=%llx\n", flags);
-	flag_extra_coverage = flags & (1 << 5);
+	flag_extra_coverage = false;
 	flag_net_injection = flags & (1 << 6);
 	flag_net_devices = flags & (1 << 7);
 	flag_net_reset = flags & (1 << 8);
