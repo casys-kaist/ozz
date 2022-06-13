@@ -1380,6 +1380,7 @@ void write_call_output(thread_t* th, bool finished)
 	uint32 reserrno = 999;
 	const bool blocked = finished && th != last_scheduled;
 	uint32 call_flags = call_flag_executed | (blocked ? call_flag_blocked : 0);
+	uint32 num_filter = (uint32)th->num_filter;
 	if (finished) {
 		reserrno = th->res != -1 ? 0 : th->reserrno;
 		call_flags |= call_flag_finished |
@@ -1395,7 +1396,7 @@ void write_call_output(thread_t* th, bool finished)
 	uint32* cover_count_pos = write_output(0); // filled in later
 	uint32* comps_count_pos = write_output(0); // filled in later
 	uint32* rfcover_count_pos = write_output(0); // filled in later
-	write_output((uint32)th->num_filter);
+	write_output(num_filter);
 
 	if (flag_comparisons) {
 		// Collect only the comparisons
@@ -1426,7 +1427,7 @@ void write_call_output(thread_t* th, bool finished)
 			write_coverage_signal<uint32>(&th->cov, signal_count_pos, cover_count_pos);
 		}
 	}
-	for (int i = 0; i < (int)th->num_filter; i++) {
+	for (int i = 0; i < (int)num_filter; i++) {
 		write_output((uint32)th->sched[i].order);
 		write_output((uint32)th->footprint[i]);
 	}
