@@ -14,8 +14,8 @@ else
 	TARGET_ARCH="aarch64"
 fi
 
-UID=$(id -u)
-GDBPORT=$(echo "1234 + $UID" | bc -l)
+_UID=$(id -u)
+GDBPORT=$(echo "1234 + $_UID" | bc -l)
 
 cat <<EOF > $BATCHCMD_DEFAULT
 set architecture $TARGET_ARCH

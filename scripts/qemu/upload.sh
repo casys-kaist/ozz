@@ -1,7 +1,7 @@
 #!/bin/sh -e
 
-UID=$(id -u)
-PORT=$(echo "5555 + $UID" | bc -l)
+_UID=$(id -u)
+PORT=$(echo "5555 + $_UID" | bc -l)
 
 if [ -z "$ARCH" ]; then
 	ARCH=x86_64

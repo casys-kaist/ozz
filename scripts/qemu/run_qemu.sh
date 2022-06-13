@@ -3,11 +3,11 @@
 $SCRIPTS_DIR/linux/__create_symlinks.sh "linux"
 $SCRIPTS_DIR/linux/__check_suffix.sh "linux"
 
-UID=$(id -u)
+_UID=$(id -u)
 
 MEMORY=2048
-PORT=$(echo "5555 + $UID" | bc -l)
-GDBPORT=$(echo "1234 + $UID" | bc -l)
+PORT=$(echo "5555 + $_UID" | bc -l)
+GDBPORT=$(echo "1234 + $_UID" | bc -l)
 
 HMP="-monitor unix:$TMP_DIR/monitor.sock,server,nowait -serial mon:stdio"
 QMP="-qmp unix:$TMP_DIR/qmp.sock,server,nowait"
