@@ -51,7 +51,7 @@ var (
 	flagGen          = flag.Bool("gen", true, "generate/mutate inputs")
 	flagCorpus       = flag.Bool("load-corpus", true, "load corpus")
 	flagNewKernel    = flag.Bool("new-kernel", false, "set true if using a new kernel version")
-	flagDumpCoverage = flag.String("dump-coverage", "", "for experiments. dump both coverages periodically")
+	flagDumpCoverage = flag.Bool("dump-coverage", false, "for experiments. dump both coverages periodically")
 	flagOneShot      = flag.Bool("one-shot", false, "quit after a crash occurs")
 )
 
@@ -287,7 +287,7 @@ func RunManager(cfg *mgrconfig.Config) {
 		}()
 	}
 
-	if *flagDumpCoverage != "" {
+	if *flagDumpCoverage {
 		go func() {
 			for {
 				mgr.dumpCoverage()
@@ -1439,19 +1439,25 @@ func (mgr *Manager) dashboardReporter() {
 }
 
 func (mgr *Manager) dumpCoverage() {
+	const (
+		coverageDir             = "coverage"
+		codeCovFilename         = "code"
+		interleavingCovFilename = "knot"
+	)
+
 	mgr.serv.mu.Lock()
 	code := mgr.serv.corpusCover.Serialize()
-	knots := mgr.serv.corpusKnots
+	interleaving := mgr.serv.corpusInterleaving
 	mgr.serv.mu.Unlock()
 
-	dir := filepath.Join(mgr.cfg.Workdir, *flagDumpCoverage)
+	dir := filepath.Join(mgr.cfg.Workdir, coverageDir, hex.EncodeToString(mgr.kernelHash))
 	osutil.MkdirAll(dir)
 
 	var codecov bytes.Buffer
 	for _, cc := range code {
 		codecov.WriteString(fmt.Sprintf("%x\n", cc))
 	}
-	codef, err := os.OpenFile(filepath.Join(dir, "code"), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, osutil.DefaultFilePerm)
+	codef, err := os.OpenFile(filepath.Join(dir, codeCovFilename), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, osutil.DefaultFilePerm)
 	if err != nil {
 		log.Fatalf("failed to open code coverage file: %v", err)
 	}
@@ -1459,15 +1465,15 @@ func (mgr *Manager) dumpCoverage() {
 		log.Fatalf("failed to write code coverage: %v", err)
 	}
 
-	var knotcov bytes.Buffer
-	for i := 0; i < len(knots); i++ {
-		knotcov.WriteString(fmt.Sprintf("%v\n", knots[i]))
+	var intcov bytes.Buffer
+	for k := range interleaving {
+		intcov.WriteString(fmt.Sprintf("%x\n", k))
 	}
-	knotf, err := os.OpenFile(filepath.Join(dir, "knot"), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, osutil.DefaultFilePerm)
+	intf, err := os.OpenFile(filepath.Join(dir, interleavingCovFilename), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, osutil.DefaultFilePerm)
 	if err != nil {
 		log.Fatalf("failed to open read-from coverage file: %v", err)
 	}
-	if _, err := knotf.Write(knotcov.Bytes()); err != nil {
+	if _, err := intf.Write(intcov.Bytes()); err != nil {
 		log.Fatalf("failed to write read-from coverage: %v", err)
 	}
 }
