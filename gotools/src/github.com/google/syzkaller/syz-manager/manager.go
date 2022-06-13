@@ -1446,9 +1446,9 @@ func (mgr *Manager) dumpCoverage() {
 	)
 
 	mgr.serv.mu.Lock()
+	defer mgr.serv.mu.Unlock()
 	code := mgr.serv.corpusCover.Serialize()
 	interleaving := mgr.serv.corpusInterleaving
-	mgr.serv.mu.Unlock()
 
 	dir := filepath.Join(mgr.cfg.Workdir, coverageDir, hex.EncodeToString(mgr.kernelHash))
 	osutil.MkdirAll(dir)
