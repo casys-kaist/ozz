@@ -492,7 +492,7 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 		return
 	}
 
-	maxIntermediateCalls := 2
+	maxIntermediateCalls := 3
 	intermediateCalls := func(c1, c2 int) int {
 		return c2 - c1 - 1
 	}
