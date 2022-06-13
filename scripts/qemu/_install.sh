@@ -12,7 +12,7 @@ _download() {
 _build() {
 	TARGETS="x86_64-softmmu,aarch64-softmmu,riscv64-softmmu,aarch64-linux-user,riscv64-linux-user,x86_64-linux-user"
 	_DEPS="--ninja=$NINJA --meson=$MESON --cc=$GCC --cxx=$GXX"
-	_OPTS="--enable-curses --enable-kvm --prefix=$QEMU_INSTALL"
+	_OPTS="--enable-curses --enable-kvm --prefix=$QEMU_INSTALL" + "$OPTS"
 	__make_dir_and_exec_cmd "$QEMU_BUILD" \
 							"$QEMU_PATH/configure --target-list=$TARGETS $_DEPS $_OPTS" \
 							"ninja"
