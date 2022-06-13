@@ -1,4 +1,5 @@
 *.cfg
 workdir*/
 archive*/
-machines.txt
+machines.json
+crashes

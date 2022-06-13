@@ -1,46 +1,73 @@
-#!python3
-"""Temporary script to grap all titles from all machines
-"""
+#!/usr/bin/env python
+
+"""script to grap all titles from machines"""
+
 import argparse
+import json
 import os
 import subprocess
 
-def grab(addr, port, workdir):
-    path = os.path.join(workdir, "exp/x86_64/workdir/crashes")
-    find_cmd = "find {} -name description -exec cat {{}} \;".format(path)
-    cmd = ['ssh', addr, '-p', port, find_cmd]
+
+def grab(machine):
+    path = os.path.join(machine["workdir"])
+    find_cmd = 'find {} -name description -printf "%h " -exec cat {{}} \;'.format(path)
+
+    cmd = ["ssh", machine["addr"]]
+    if "port" in machine:
+        cmd.extend(["-p", machine["port"]])
+    cmd.append(find_cmd)
+
     sp = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     output, _ = sp.communicate()
     output = output.decode("utf-8")
-    crashes = output.split('\n')
+    raw_crashes = output.split("\n")
+    crashes = {}
+    for raw in raw_crashes:
+        toks = raw.split(maxsplit=1)
+        if len(toks) < 2:
+            continue
+        path, desc = toks[0].rsplit("/")[-1], toks[1]
+        crashes[path] = desc
     return crashes
 
+
 def filterout(crash):
-    if crash.startswith('SYZFAIL'):
+    blacklist = ["SYZFAIL", "lost connection", "no output", "suppressed"]
+    if len(crash) == 0:
         return True
-    if crash.startswith('lost connection'):
-        return True
-    if crash.startswith('no output'):
-        return True
-    if crash.startswith('WARNING: The mand mount option'):
-        return True
-    if crash.startswith('WARNING in sbitmap_get'):
-        return True
+    for b in blacklist:
+        if crash.startswith(b):
+            return True
     return False
+
+
+def print_crashes(name, crashes):
+    print(name)
+    list_crashes = [(k, v) for k, v in crashes.items()]
+    list_crashes.sort(key=lambda x: x[1])
+    print(
+        *["  " + k + "    " + v for k, v in list_crashes if not filterout(v)], sep="\n"
+    )
+
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--machine', action='store', default='machines.txt')
+    parser.add_argument("--machine", action="store", default="machines.json")
+    parser.add_argument("--all", action="store_true", default=False)
     args = parser.parse_args()
+
     with open(args.machine) as f:
-        machines = f.readlines()
+        machines = json.load(f)
+
+    total = {}
     for machine in machines:
-        name, addr, port, workdir = machine.split()
-        print(name)
-        crashes = grab(addr, port, workdir)
-        for crash in crashes:
-            if not filterout(crash):
-                print(crash)
+        crashes = grab(machine)
+        if args.all:
+            print_crashes(machine["name"], crashes)
+        total = total | crashes
+
+    print_crashes("total", total)
+
 
 if __name__ == "__main__":
     main()
