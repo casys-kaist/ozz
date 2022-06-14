@@ -6,9 +6,12 @@ import argparse
 import json
 import os
 import subprocess
+import sys
+
+from bs4 import BeautifulSoup
 
 
-def grab(machine):
+def grab_crashes_from_machine(machine):
     path = os.path.join(machine["workdir"])
     find_cmd = 'find {} -name description -printf "%h " -exec cat {{}} \;'.format(path)
 
@@ -31,42 +34,109 @@ def grab(machine):
     return crashes
 
 
-def filterout(crash):
+def filterout(title, fixed):
     blacklist = ["SYZFAIL", "lost connection", "no output", "suppressed"]
-    if len(crash) == 0:
-        return True
-    for b in blacklist:
-        if crash.startswith(b):
-            return True
-    return False
+    return (
+        len(title) == 0
+        or any(title.startswith(b) for b in blacklist)
+        or any(f.startswith(title) for f in fixed)
+    )
 
 
-def print_crashes(name, crashes):
+def print_crashes(name, crashes, fixed):
     print(name)
     list_crashes = [(k, v) for k, v in crashes.items()]
     list_crashes.sort(key=lambda x: x[1])
     print(
-        *["  " + k + "    " + v for k, v in list_crashes if not filterout(v)], sep="\n"
+        *["  " + k + "    " + v for k, v in list_crashes if not filterout(v, fixed)],
+        sep="\n"
     )
+
+
+def grab_titles(table):
+    title_tags = table.find_all("td", {"class": "title"})
+    titles = set()
+    for tag in title_tags:
+        title = tag.get_text()
+        titles.add(title)
+    return titles
+
+
+def retrieve_titles_from_soup(soup, desires):
+    tables = []
+
+    def add_table(table):
+        if table == None:
+            raise Exception("Unknown table")
+        else:
+            tables.append(table)
+
+    if len(desires) == 0:
+        # There is only one table and it is what we want
+        table = soup.find("table", {"class": "list_table"})
+        add_table(table)
+    else:
+        for caption_tag in soup.find_all("caption"):
+            caption = caption_tag.get_text().strip()
+            if any(caption.startswith(d) for d in desires):
+                table = caption_tag.find_parent("table", {"class": "list_table"})
+                add_table(table)
+
+    titles = set()
+    for table in tables:
+        titles = titles | grab_titles(table)
+    return titles
+
+
+def crawl_fixed_titles():
+    import requests
+
+    url_open = "https://syzkaller.appspot.com/upstream"
+    url_fixed = "https://syzkaller.appspot.com/upstream/fixed"
+    urls = [("open", ["open", "moderation"], url_open), ("fixed", [], url_fixed)]
+
+    titles = set()
+    for name, captions, url in urls:
+        response = requests.get(url)
+        if response.status_code == 200:
+            html = response.text
+            soup = BeautifulSoup(html, "html.parser")
+            titles = titles | retrieve_titles_from_soup(soup, captions)
+        else:
+            print(
+                "Error during crawling {} (code={}). Skipping".format(
+                    name, response.status_code
+                ),
+                file=sys.stderr,
+            )
+    return titles
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--machine", action="store", default="machines.json")
-    parser.add_argument("--all", action="store_true", default=False)
+    parser.add_argument("--all", action="store_true")
+    parser.add_argument("--unfixed-only", action="store_true")
+    parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
     with open(args.machine) as f:
         machines = json.load(f)
 
+    fixed = crawl_fixed_titles() if args.unfixed_only else []
+    if args.verbose:
+        print("fixed")
+        for f in fixed:
+            print("  " + f)
+
     total = {}
     for machine in machines:
-        crashes = grab(machine)
+        crashes = grab_crashes_from_machine(machine)
         if args.all:
-            print_crashes(machine["name"], crashes)
+            print_crashes(machine["name"], crashes, fixed)
         total = total | crashes
 
-    print_crashes("total", total)
+    print_crashes("total", total, fixed)
 
 
 if __name__ == "__main__":
