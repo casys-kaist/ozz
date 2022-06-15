@@ -1,0 +1,140 @@
+bond0 (unregistering): (slave bond_slave_0): Releasing backup interface
+device bond_slave_0 left promiscuous mode
+bond0 (unregistering): Released all slaves
+==================================================================
+BUG: KASAN: use-after-free in cfusbl_device_notify+0x155/0xf40 home/daeryong/workspace/relrazzer/kernels/linux/net/caif/caif_usb.c:138
+Read of size 8 at addr ffff888054d546f0 by task kworker/u8:0/24272
+
+CPU: 3 PID: 24272 Comm: kworker/u8:0 Not tainted 5.19.0-rc1-31595-gdf1bbda1a939 #1
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
+Workqueue: netns cleanup_net
+Call Trace:
+ <TASK>
+ __dump_stack home/daeryong/workspace/relrazzer/kernels/linux/lib/dump_stack.c:88 [inline]
+ dump_stack_lvl+0x240/0x35a home/daeryong/workspace/relrazzer/kernels/linux/lib/dump_stack.c:106
+ print_address_description+0x65/0x4f0 home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/report.c:313
+ print_report+0xf4/0x1e0 home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/report.c:429
+ kasan_report+0xe5/0x110 home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/report.c:491
+ cfusbl_device_notify+0x155/0xf40 home/daeryong/workspace/relrazzer/kernels/linux/net/caif/caif_usb.c:138
+ notifier_call_chain home/daeryong/workspace/relrazzer/kernels/linux/kernel/notifier.c:87 [inline]
+ raw_notifier_call_chain+0xd4/0x170 home/daeryong/workspace/relrazzer/kernels/linux/kernel/notifier.c:455
+ call_netdevice_notifiers_info home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:1943 [inline]
+ call_netdevice_notifiers_extack home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:1981 [inline]
+ call_netdevice_notifiers home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:1995 [inline]
+ netdev_wait_allrefs_any home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:10225 [inline]
+ netdev_run_todo+0x14e6/0x23c0 home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:10337
+ default_device_exit_batch+0x99a/0xa10 home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:11329
+ ops_exit_list home/daeryong/workspace/relrazzer/kernels/linux/net/core/net_namespace.c:167 [inline]
+ cleanup_net+0xd23/0x15a0 home/daeryong/workspace/relrazzer/kernels/linux/net/core/net_namespace.c:594
+ process_one_work+0x909/0x12b0 home/daeryong/workspace/relrazzer/kernels/linux/kernel/workqueue.c:2289
+ worker_thread+0xab1/0x1320 home/daeryong/workspace/relrazzer/kernels/linux/kernel/workqueue.c:2436
+ kthread+0x294/0x330 home/daeryong/workspace/relrazzer/kernels/linux/kernel/kthread.c:376
+ ret_from_fork+0x1f/0x30
+ </TASK>
+
+Allocated by task 6691:
+ kasan_save_stack home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/common.c:38 [inline]
+ kasan_set_track home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/common.c:45 [inline]
+ set_alloc_info home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/common.c:436 [inline]
+ ____kasan_kmalloc home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/common.c:515 [inline]
+ __kasan_kmalloc+0xac/0xe0 home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/common.c:524
+ kasan_kmalloc home/daeryong/workspace/relrazzer/kernels/linux/include/linux/kasan.h:234 [inline]
+ __kmalloc_node+0xed/0x780 home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:4465
+ kmalloc_node home/daeryong/workspace/relrazzer/kernels/linux/include/linux/slab.h:623 [inline]
+ kvmalloc_node+0x6e/0x1a0 home/daeryong/workspace/relrazzer/kernels/linux/mm/util.c:613
+ kvmalloc home/daeryong/workspace/relrazzer/kernels/linux/include/linux/slab.h:750 [inline]
+ kvzalloc home/daeryong/workspace/relrazzer/kernels/linux/include/linux/slab.h:758 [inline]
+ alloc_netdev_mqs+0x94/0x1da0 home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:10576
+ rtnl_create_link+0x4ec/0x1360 home/daeryong/workspace/relrazzer/kernels/linux/net/core/rtnetlink.c:3241
+ veth_newlink+0x4a9/0x1810 home/daeryong/workspace/relrazzer/kernels/linux/drivers/net/veth.c:1749
+ rtnl_newlink_create home/daeryong/workspace/relrazzer/kernels/linux/net/core/rtnetlink.c:3363 [inline]
+ __rtnl_newlink home/daeryong/workspace/relrazzer/kernels/linux/net/core/rtnetlink.c:3580 [inline]
+ rtnl_newlink+0x251d/0x2fc0 home/daeryong/workspace/relrazzer/kernels/linux/net/core/rtnetlink.c:3593
+ rtnetlink_rcv_msg+0x1103/0x1a60 home/daeryong/workspace/relrazzer/kernels/linux/net/core/rtnetlink.c:6089
+ netlink_rcv_skb+0x2b6/0x670 home/daeryong/workspace/relrazzer/kernels/linux/net/netlink/af_netlink.c:2501
+ netlink_unicast_kernel home/daeryong/workspace/relrazzer/kernels/linux/net/netlink/af_netlink.c:1319 [inline]
+ netlink_unicast+0xc68/0xff0 home/daeryong/workspace/relrazzer/kernels/linux/net/netlink/af_netlink.c:1345
+ netlink_sendmsg+0x11a0/0x1680 home/daeryong/workspace/relrazzer/kernels/linux/net/netlink/af_netlink.c:1921
+ sock_sendmsg_nosec home/daeryong/workspace/relrazzer/kernels/linux/net/socket.c:693 [inline]
+ sock_sendmsg home/daeryong/workspace/relrazzer/kernels/linux/net/socket.c:713 [inline]
+ __sys_sendto+0x544/0x770 home/daeryong/workspace/relrazzer/kernels/linux/net/socket.c:2098
+ __do_sys_sendto home/daeryong/workspace/relrazzer/kernels/linux/net/socket.c:2110 [inline]
+ __se_sys_sendto home/daeryong/workspace/relrazzer/kernels/linux/net/socket.c:2106 [inline]
+ __x64_sys_sendto+0x1bb/0x250 home/daeryong/workspace/relrazzer/kernels/linux/net/socket.c:2106
+ do_syscall_x64 home/daeryong/workspace/relrazzer/kernels/linux/arch/x86/entry/common.c:51 [inline]
+ do_syscall_64+0x4e/0xa0 home/daeryong/workspace/relrazzer/kernels/linux/arch/x86/entry/common.c:82
+ entry_SYSCALL_64_after_hwframe+0x46/0xb0
+
+Freed by task 24272:
+ kasan_save_stack home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/common.c:38 [inline]
+ kasan_set_track+0x3d/0x60 home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/common.c:45
+ kasan_set_free_info+0x1f/0x40 home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/generic.c:370
+ ____kasan_slab_free+0xb2/0xf0 home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/common.c:366
+ kasan_slab_free home/daeryong/workspace/relrazzer/kernels/linux/include/linux/kasan.h:200 [inline]
+ slab_free_hook home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:1727 [inline]
+ slab_free_freelist_hook+0x20c/0x540 home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:1753
+ slab_free home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:3507 [inline]
+ kfree+0x117/0x7e0 home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:4555
+ device_release+0xf5/0x390
+ kobject_cleanup+0x340/0x4e0 home/daeryong/workspace/relrazzer/kernels/linux/lib/kobject.c:673
+ netdev_run_todo+0x211c/0x23c0 home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:10358
+ default_device_exit_batch+0x99a/0xa10 home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:11329
+ ops_exit_list home/daeryong/workspace/relrazzer/kernels/linux/net/core/net_namespace.c:167 [inline]
+ cleanup_net+0xd23/0x15a0 home/daeryong/workspace/relrazzer/kernels/linux/net/core/net_namespace.c:594
+ process_one_work+0x909/0x12b0 home/daeryong/workspace/relrazzer/kernels/linux/kernel/workqueue.c:2289
+ worker_thread+0xab1/0x1320 home/daeryong/workspace/relrazzer/kernels/linux/kernel/workqueue.c:2436
+ kthread+0x294/0x330 home/daeryong/workspace/relrazzer/kernels/linux/kernel/kthread.c:376
+ ret_from_fork+0x1f/0x30
+
+The buggy address belongs to the object at ffff888054d54000
+ which belongs to the cache kmalloc-cg-4k of size 4096
+The buggy address is located 1776 bytes inside of
+ 4096-byte region [ffff888054d54000, ffff888054d55000)
+
+The buggy address belongs to the physical page:
+page:ffffea0001535400 refcount:1 mapcount:0 mapping:0000000000000000 index:0x0 pfn:0x54d50
+head:ffffea0001535400 order:3 compound_mapcount:0 compound_pincount:0
+flags: 0xfff00000010200(slab|head|node=0|zone=1|lastcpupid=0x7ff)
+raw: 00fff00000010200 0000000000000000 dead000000000122 ffff88801844c140
+raw: 0000000000000000 0000000000040004 00000001ffffffff 0000000000000000
+page dumped because: kasan: bad access detected
+page_owner tracks the page as allocated
+page last allocated via order 3, migratetype Unmovable, gfp_mask 0xd20c0(__GFP_IO|__GFP_FS|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_NOMEMALLOC), pid 6691, tgid 6691 (syz-executor.0), ts 200376194362, free_ts 0
+ prep_new_page home/daeryong/workspace/relrazzer/kernels/linux/mm/page_alloc.c:2456 [inline]
+ get_page_from_freelist+0xa7c/0xf50 home/daeryong/workspace/relrazzer/kernels/linux/mm/page_alloc.c:4198
+ __alloc_pages+0x30e/0x710 home/daeryong/workspace/relrazzer/kernels/linux/mm/page_alloc.c:5426
+ alloc_slab_page+0x66/0x250 home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:1797
+ allocate_slab+0xc0/0xe40 home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:1942
+ new_slab home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:2002 [inline]
+ ___slab_alloc+0x629/0x17a0 home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:3002
+ __slab_alloc home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:3089 [inline]
+ slab_alloc_node home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:3180 [inline]
+ slab_alloc home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:3222 [inline]
+ __kmalloc_track_caller+0x53a/0x600 home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:4919
+ kmemdup+0x21/0x50 home/daeryong/workspace/relrazzer/kernels/linux/mm/util.c:129
+ _Z7kmemdupPKvU17pass_object_size0mj home/daeryong/workspace/relrazzer/kernels/linux/include/linux/fortify-string.h:456 [inline]
+ __addrconf_sysctl_register+0x97/0x680 home/daeryong/workspace/relrazzer/kernels/linux/net/ipv6/addrconf.c:7061
+ addrconf_sysctl_register+0x1c3/0x2a0 home/daeryong/workspace/relrazzer/kernels/linux/net/ipv6/addrconf.c:7126
+ ipv6_add_dev+0x170e/0x1f80 home/daeryong/workspace/relrazzer/kernels/linux/net/ipv6/addrconf.c:450
+ addrconf_notify+0xa36/0x3730 home/daeryong/workspace/relrazzer/kernels/linux/net/ipv6/addrconf.c:3532
+ notifier_call_chain home/daeryong/workspace/relrazzer/kernels/linux/kernel/notifier.c:87 [inline]
+ raw_notifier_call_chain+0xd4/0x170 home/daeryong/workspace/relrazzer/kernels/linux/kernel/notifier.c:455
+ call_netdevice_notifiers_info home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:1943 [inline]
+ call_netdevice_notifiers_extack home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:1981 [inline]
+ call_netdevice_notifiers home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:1995 [inline]
+ register_netdevice+0x23b1/0x32c0 home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:10078
+ hsr_dev_finalize+0x803/0xd50 home/daeryong/workspace/relrazzer/kernels/linux/net/hsr/hsr_device.c:539
+ hsr_newlink+0xba5/0xcf0 home/daeryong/workspace/relrazzer/kernels/linux/net/hsr/hsr_netlink.c:102
+ rtnl_newlink_create home/daeryong/workspace/relrazzer/kernels/linux/net/core/rtnetlink.c:3363 [inline]
+ __rtnl_newlink home/daeryong/workspace/relrazzer/kernels/linux/net/core/rtnetlink.c:3580 [inline]
+ rtnl_newlink+0x251d/0x2fc0 home/daeryong/workspace/relrazzer/kernels/linux/net/core/rtnetlink.c:3593
+page_owner free stack trace missing
+
+Memory state around the buggy address:
+ ffff888054d54580: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
+ ffff888054d54600: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
+>ffff888054d54680: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
+                                                             ^
+ ffff888054d54700: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
+ ffff888054d54780: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
+==================================================================
