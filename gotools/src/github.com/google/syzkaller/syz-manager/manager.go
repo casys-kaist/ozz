@@ -1443,38 +1443,55 @@ func (mgr *Manager) dumpCoverage() {
 		coverageDir             = "coverage"
 		codeCovFilename         = "code"
 		interleavingCovFilename = "knot"
+		hintCovFilename         = "hint"
 	)
 
-	mgr.serv.mu.Lock()
-	defer mgr.serv.mu.Unlock()
-	code := mgr.serv.corpusCover.Serialize()
-	interleaving := mgr.serv.corpusInterleaving
+	codecov, intcov, hintcov := mgr.serializeCoverage()
 
 	dir := filepath.Join(mgr.cfg.Workdir, coverageDir, hex.EncodeToString(mgr.kernelHash))
 	osutil.MkdirAll(dir)
 
-	var codecov bytes.Buffer
+	mgr.dumpCoverageToFile(dir, codeCovFilename, codecov)
+	mgr.dumpCoverageToFile(dir, interleavingCovFilename, intcov)
+	mgr.dumpCoverageToFile(dir, hintCovFilename, hintcov)
+
+}
+
+func (mgr *Manager) serializeCoverage() (bytes.Buffer, bytes.Buffer, bytes.Buffer) {
+	mgr.serv.mu.Lock()
+	defer mgr.serv.mu.Unlock()
+
+	start := time.Now()
+
+	var codecov, intcov, hintcov bytes.Buffer
+
+	code := mgr.serv.corpusCover.Serialize()
 	for _, cc := range code {
 		codecov.WriteString(fmt.Sprintf("%x\n", cc))
 	}
-	codef, err := os.OpenFile(filepath.Join(dir, codeCovFilename), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, osutil.DefaultFilePerm)
-	if err != nil {
-		log.Fatalf("failed to open code coverage file: %v", err)
-	}
-	if _, err := codef.Write(codecov.Bytes()); err != nil {
-		log.Fatalf("failed to write code coverage: %v", err)
-	}
 
-	var intcov bytes.Buffer
+	interleaving := mgr.serv.corpusInterleaving
 	for k := range interleaving {
 		intcov.WriteString(fmt.Sprintf("%x\n", k))
 	}
-	intf, err := os.OpenFile(filepath.Join(dir, interleavingCovFilename), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, osutil.DefaultFilePerm)
-	if err != nil {
-		log.Fatalf("failed to open read-from coverage file: %v", err)
+
+	hint := mgr.serv.maxInterleaving
+	for k := range hint {
+		hintcov.WriteString(fmt.Sprintf("%x\n", k))
 	}
-	if _, err := intf.Write(intcov.Bytes()); err != nil {
-		log.Fatalf("failed to write read-from coverage: %v", err)
+
+	log.Logf(0, "Serializing coverage takes %v", time.Since(start))
+
+	return codecov, intcov, hintcov
+}
+
+func (mgr *Manager) dumpCoverageToFile(dir, filename string, cov bytes.Buffer) {
+	codef, err := os.OpenFile(filepath.Join(dir, filename), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, osutil.DefaultFilePerm)
+	if err != nil {
+		log.Fatalf("failed to open coverage file (%s): %v", filename, err)
+	}
+	if _, err := codef.Write(cov.Bytes()); err != nil {
+		log.Fatalf("failed to write coverage to file (%s): %v", filename, err)
 	}
 }
 
