@@ -377,7 +377,7 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 	}
 
 	// newly found knots during threading work
-	newKnots := proc.fuzzer.newKnot(knots)
+	newKnots := proc.fuzzer.getNewKnot(knots)
 	// knots that actually occurred among speculated knots
 	speculatedKnots := interleaving.Intersect(knots, item.knots)
 
@@ -507,7 +507,7 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 			if len(knots) == 0 && len(comms) == 0 {
 				continue
 			}
-			if newKnots, newComms := proc.fuzzer.newKnot(knots), proc.fuzzer.newCommunication(comms); len(newKnots) != 0 || len(newComms) != 0 {
+			if newKnots, newComms := proc.fuzzer.getNewKnot(knots), proc.fuzzer.getNewCommunication(comms); len(newKnots) != 0 || len(newComms) != 0 {
 				proc.enqueueThreading(p, cont, newKnots)
 			}
 		}

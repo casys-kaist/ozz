@@ -76,6 +76,7 @@ type Fuzzer struct {
 	newInterleaving    interleaving.Signal
 
 	maxCommunication interleaving.Signal
+	newCommunication interleaving.Signal
 
 	// Mostly for debugging scheduling mutation. If generate is false,
 	// procs do not generate/mutate inputs but schedule.
@@ -319,6 +320,7 @@ func main() {
 		newInterleaving:    make(interleaving.Signal),
 
 		maxCommunication: make(interleaving.Signal),
+		newCommunication: make(interleaving.Signal),
 
 		checkResult: r.CheckResult,
 		generate:    *flagGen,
@@ -499,12 +501,13 @@ func (fuzzer *Fuzzer) pollLoop() {
 
 func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]uint64) bool {
 	a := &rpctype.PollArgs{
-		Name:            fuzzer.name,
-		NeedCandidates:  needCandidates,
-		MaxSignal:       fuzzer.grabNewSignal().Serialize(),
-		MaxInterleaving: fuzzer.grabNewInterleaving().Serialize(),
-		Stats:           stats,
-		Collections:     collections,
+		Name:             fuzzer.name,
+		NeedCandidates:   needCandidates,
+		MaxSignal:        fuzzer.grabNewSignal().Serialize(),
+		MaxInterleaving:  fuzzer.grabNewInterleaving().Serialize(),
+		MaxCommunication: fuzzer.grabNewCommunication().Serialize(),
+		Stats:            stats,
+		Collections:      collections,
 	}
 	r := &rpctype.PollRes{}
 	if err := fuzzer.manager.Call("Manager.Poll", a, r); err != nil {
@@ -738,6 +741,17 @@ func (fuzzer *Fuzzer) grabNewInterleaving() interleaving.Signal {
 	return sign
 }
 
+func (fuzzer *Fuzzer) grabNewCommunication() interleaving.Signal {
+	fuzzer.signalMu.Lock()
+	defer fuzzer.signalMu.Unlock()
+	sign := fuzzer.newCommunication
+	if sign.Empty() {
+		return nil
+	}
+	fuzzer.newCommunication = nil
+	return sign
+}
+
 func (fuzzer *Fuzzer) corpusSignalDiff(sign signal.Signal) signal.Signal {
 	fuzzer.signalMu.RLock()
 	defer fuzzer.signalMu.RUnlock()
@@ -776,7 +790,7 @@ func (fuzzer *Fuzzer) newSegment(base *interleaving.Signal, segs []interleaving.
 	return base.DiffRaw(segs)
 }
 
-func (fuzzer *Fuzzer) newKnot(knots []interleaving.Segment) []interleaving.Segment {
+func (fuzzer *Fuzzer) getNewKnot(knots []interleaving.Segment) []interleaving.Segment {
 	diff := fuzzer.newSegment(&fuzzer.maxInterleaving, knots)
 	if len(diff) == 0 {
 		return nil
@@ -789,7 +803,7 @@ func (fuzzer *Fuzzer) newKnot(knots []interleaving.Segment) []interleaving.Segme
 	return diff
 }
 
-func (fuzzer *Fuzzer) newCommunication(comms []interleaving.Segment) []interleaving.Segment {
+func (fuzzer *Fuzzer) getNewCommunication(comms []interleaving.Segment) []interleaving.Segment {
 	diff := fuzzer.newSegment(&fuzzer.maxCommunication, comms)
 	if len(diff) == 0 {
 		return nil
@@ -797,6 +811,7 @@ func (fuzzer *Fuzzer) newCommunication(comms []interleaving.Segment) []interleav
 	sign := interleaving.FromCoverToSignal(diff)
 	fuzzer.signalMu.Lock()
 	fuzzer.maxCommunication.Merge(sign)
+	fuzzer.newCommunication.Merge(sign)
 	fuzzer.signalMu.Unlock()
 	return diff
 }
