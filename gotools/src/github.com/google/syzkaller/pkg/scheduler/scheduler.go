@@ -42,7 +42,7 @@ type Knotter struct {
 	seqs     [][]interleaving.SerialAccess // Used internally
 	// output
 	knots []interleaving.Segment
-	comms []interleaving.Communication
+	comms []interleaving.Segment
 }
 
 func GetKnotter(having *interleaving.Signal, havingMu *sync.RWMutex) Knotter {
@@ -285,7 +285,7 @@ func (knotter *Knotter) buildAccessMapSerial(serial interleaving.SerialAccess) {
 }
 
 func (knotter *Knotter) formCommunications() {
-	knotter.comms = []interleaving.Communication{}
+	knotter.comms = []interleaving.Segment{}
 	knotter.commHsh = make(map[uint64]struct{})
 	knotter.innerCommCount = make(map[interleaving.Communication]int)
 	for _, accs := range knotter.accessMap {
@@ -444,7 +444,7 @@ func timeDiff(acc0, acc1 interleaving.Access) (dist uint32) {
 	return dist
 }
 
-func (knotter *Knotter) GetCommunications() []interleaving.Communication {
+func (knotter *Knotter) GetCommunications() []interleaving.Segment {
 	return knotter.comms
 }
 
