@@ -35,6 +35,7 @@ type RPCServer struct {
 	checkResult        *rpctype.CheckArgs
 	maxSignal          signal.Signal
 	maxInterleaving    interleaving.Signal
+	maxCommunication   interleaving.Signal
 	corpusSignal       signal.Signal
 	corpusCover        cover.Cover
 	corpusInterleaving interleaving.Signal
@@ -45,13 +46,14 @@ type RPCServer struct {
 }
 
 type Fuzzer struct {
-	name               string
-	rotated            bool
-	inputs             []rpctype.RPCInput
-	newMaxSignal       signal.Signal
-	newMaxInterleaving interleaving.Signal
-	rotatedSignal      signal.Signal
-	machineInfo        []byte
+	name                string
+	rotated             bool
+	inputs              []rpctype.RPCInput
+	newMaxSignal        signal.Signal
+	newMaxInterleaving  interleaving.Signal
+	newMaxCommunication interleaving.Signal
+	rotatedSignal       signal.Signal
+	machineInfo         []byte
 }
 
 type BugFrames struct {
@@ -383,6 +385,17 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 				continue
 			}
 			f1.newMaxInterleaving.Merge(newMaxInterleaving)
+		}
+	}
+	newMaxCommunication := serv.maxCommunication.Diff(a.MaxCommunication.Deserialize())
+	if !newMaxCommunication.Empty() {
+		serv.maxCommunication.Merge(newMaxCommunication)
+		serv.stats.maxCommunication.set(len(serv.maxCommunication))
+		for _, f1 := range serv.fuzzers {
+			if f1 == f || f1.rotated {
+				continue
+			}
+			f1.newMaxCommunication.Merge(newMaxCommunication)
 		}
 	}
 	if f.rotated {
