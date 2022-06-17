@@ -89,10 +89,11 @@ type PollArgs struct {
 }
 
 type PollRes struct {
-	Candidates      []RPCCandidate
-	NewInputs       []RPCInput
-	MaxSignal       signal.Serial
-	MaxInterleaving interleaving.SerialSignal
+	Candidates       []RPCCandidate
+	NewInputs        []RPCInput
+	MaxSignal        signal.Serial
+	MaxInterleaving  interleaving.SerialSignal
+	MaxCommunication interleaving.SerialSignal
 }
 
 type RunnerConnectArgs struct {

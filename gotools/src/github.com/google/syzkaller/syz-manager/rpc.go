@@ -404,6 +404,7 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 	}
 	r.MaxSignal = f.newMaxSignal.Split(2000).Serialize()
 	r.MaxInterleaving = f.newMaxInterleaving.Split(2000).Serialize()
+	r.MaxCommunication = f.newMaxCommunication.Split(2000).Serialize()
 	if a.NeedCandidates {
 		r.Candidates = serv.mgr.candidateBatch(serv.batchSize)
 	}

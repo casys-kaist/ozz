@@ -515,10 +515,12 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 	}
 	maxSignal := r.MaxSignal.Deserialize()
 	maxInterleaving := r.MaxInterleaving.Deserialize()
+	maxCommunication := r.MaxCommunication.Deserialize()
 	log.Logf(1, "poll: candidates=%v inputs=%v signal=%v interleaving=%v",
 		len(r.Candidates), len(r.NewInputs), maxSignal.Len(), maxInterleaving.Len())
 	fuzzer.addMaxSignal(maxSignal)
 	fuzzer.addMaxInterleaving(maxInterleaving)
+	fuzzer.addMaxCommunication(maxCommunication)
 	for _, inp := range r.NewInputs {
 		fuzzer.addInputFromAnotherFuzzer(inp)
 	}
@@ -717,6 +719,15 @@ func (fuzzer *Fuzzer) addMaxInterleaving(sign interleaving.Signal) {
 	fuzzer.signalMu.Lock()
 	defer fuzzer.signalMu.Unlock()
 	fuzzer.maxInterleaving.Merge(sign)
+}
+
+func (fuzzer *Fuzzer) addMaxCommunication(sign interleaving.Signal) {
+	if sign.Len() == 0 {
+		return
+	}
+	fuzzer.signalMu.Lock()
+	defer fuzzer.signalMu.Unlock()
+	fuzzer.maxCommunication.Merge(sign)
 }
 
 func (fuzzer *Fuzzer) grabNewSignal() signal.Signal {
