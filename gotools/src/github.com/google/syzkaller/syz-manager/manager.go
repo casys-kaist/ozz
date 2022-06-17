@@ -1444,9 +1444,10 @@ func (mgr *Manager) dumpCoverage() {
 		codeCovFilename         = "code"
 		interleavingCovFilename = "knot"
 		hintCovFilename         = "hint"
+		commCovFilename         = "communication"
 	)
 
-	codecov, intcov, hintcov := mgr.serializeCoverage()
+	codecov, intcov, hintcov, commcov := mgr.serializeCoverage()
 
 	dir := filepath.Join(mgr.cfg.Workdir, coverageDir, hex.EncodeToString(mgr.kernelHash))
 	osutil.MkdirAll(dir)
@@ -1454,16 +1455,17 @@ func (mgr *Manager) dumpCoverage() {
 	mgr.dumpCoverageToFile(dir, codeCovFilename, codecov)
 	mgr.dumpCoverageToFile(dir, interleavingCovFilename, intcov)
 	mgr.dumpCoverageToFile(dir, hintCovFilename, hintcov)
+	mgr.dumpCoverageToFile(dir, commCovFilename, commcov)
 
 }
 
-func (mgr *Manager) serializeCoverage() (bytes.Buffer, bytes.Buffer, bytes.Buffer) {
+func (mgr *Manager) serializeCoverage() (bytes.Buffer, bytes.Buffer, bytes.Buffer, bytes.Buffer) {
 	mgr.serv.mu.Lock()
 	defer mgr.serv.mu.Unlock()
 
 	start := time.Now()
 
-	var codecov, intcov, hintcov bytes.Buffer
+	var codecov, intcov, hintcov, commcov bytes.Buffer
 
 	code := mgr.serv.corpusCover.Serialize()
 	for _, cc := range code {
@@ -1480,9 +1482,14 @@ func (mgr *Manager) serializeCoverage() (bytes.Buffer, bytes.Buffer, bytes.Buffe
 		hintcov.WriteString(fmt.Sprintf("%x\n", k))
 	}
 
+	comm := mgr.serv.maxCommunication
+	for k := range comm {
+		commcov.WriteString(fmt.Sprintf("%x\n", k))
+	}
+
 	log.Logf(0, "Serializing coverage takes %v", time.Since(start))
 
-	return codecov, intcov, hintcov
+	return codecov, intcov, hintcov, commcov
 }
 
 func (mgr *Manager) dumpCoverageToFile(dir, filename string, cov bytes.Buffer) {
