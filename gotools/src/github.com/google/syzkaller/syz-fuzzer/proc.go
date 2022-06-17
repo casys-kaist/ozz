@@ -503,11 +503,11 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 			}
 
 			cont := prog.Contender{Calls: []int{c1, c2}}
-			knots := proc.extractKnots(info, cont, proc.knotterOptsThreading)
-			if len(knots) == 0 {
+			knots, comms := proc.extractKnotsAndComms(info, cont, proc.knotterOptsThreading)
+			if len(knots) == 0 && len(comms) == 0 {
 				continue
 			}
-			if newKnots := proc.fuzzer.newKnot(knots); len(newKnots) != 0 {
+			if newKnots, newComms := proc.fuzzer.newKnot(knots), proc.fuzzer.newCommunication(comms); len(newKnots) != 0 || len(newComms) != 0 {
 				proc.enqueueThreading(p, cont, newKnots)
 			}
 		}
@@ -546,7 +546,7 @@ type knotterOpts struct {
 	strictTimestamp  bool
 }
 
-func (proc *Proc) extractKnots(info *ipc.ProgInfo, calls prog.Contender, opts knotterOpts) []interleaving.Segment {
+func (proc *Proc) extractKnotsAndComms(info *ipc.ProgInfo, calls prog.Contender, opts knotterOpts) ([]interleaving.Segment, []interleaving.Segment) {
 	knotter := scheduler.GetKnotter(
 		opts.collected,
 		&proc.fuzzer.signalMu,
@@ -560,11 +560,16 @@ func (proc *Proc) extractKnots(info *ipc.ProgInfo, calls prog.Contender, opts kn
 
 	seq := sequentialAccesses(info, calls)
 	if !knotter.AddSequentialTrace(seq) {
-		return nil
+		return nil, nil
 	}
 	knotter.ExcavateKnots()
 
-	return knotter.GetKnots()
+	return knotter.GetKnots(), knotter.GetCommunications()
+}
+
+func (proc *Proc) extractKnots(info *ipc.ProgInfo, calls prog.Contender, opts knotterOpts) []interleaving.Segment {
+	knots, _ := proc.extractKnotsAndComms(info, calls, opts)
+	return knots
 }
 
 func sequentialAccesses(info *ipc.ProgInfo, calls prog.Contender) (seq []interleaving.SerialAccess) {

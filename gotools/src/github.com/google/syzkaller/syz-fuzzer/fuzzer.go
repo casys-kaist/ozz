@@ -75,6 +75,8 @@ type Fuzzer struct {
 	maxInterleaving    interleaving.Signal
 	newInterleaving    interleaving.Signal
 
+	maxCommunication interleaving.Signal
+
 	// Mostly for debugging scheduling mutation. If generate is false,
 	// procs do not generate/mutate inputs but schedule.
 	generate bool
@@ -315,6 +317,8 @@ func main() {
 		corpusInterleaving: make(interleaving.Signal),
 		maxInterleaving:    make(interleaving.Signal),
 		newInterleaving:    make(interleaving.Signal),
+
+		maxCommunication: make(interleaving.Signal),
 
 		checkResult: r.CheckResult,
 		generate:    *flagGen,
@@ -781,6 +785,18 @@ func (fuzzer *Fuzzer) newKnot(knots []interleaving.Segment) []interleaving.Segme
 	fuzzer.signalMu.Lock()
 	fuzzer.newInterleaving.Merge(sign)
 	fuzzer.maxInterleaving.Merge(sign)
+	fuzzer.signalMu.Unlock()
+	return diff
+}
+
+func (fuzzer *Fuzzer) newCommunication(comms []interleaving.Segment) []interleaving.Segment {
+	diff := fuzzer.newSegment(&fuzzer.maxCommunication, comms)
+	if len(diff) == 0 {
+		return nil
+	}
+	sign := interleaving.FromCoverToSignal(diff)
+	fuzzer.signalMu.Lock()
+	fuzzer.maxCommunication.Merge(sign)
 	fuzzer.signalMu.Unlock()
 	return diff
 }
