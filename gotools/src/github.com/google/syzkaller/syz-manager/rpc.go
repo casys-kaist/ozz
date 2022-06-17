@@ -130,6 +130,7 @@ func (serv *RPCServer) Connect(a *rpctype.ConnectArgs, r *rpctype.ConnectRes) er
 		f.inputs = corpus
 		f.newMaxSignal = serv.maxSignal.Copy()
 		f.newMaxInterleaving = serv.maxInterleaving.Copy()
+		f.newMaxCommunication = serv.maxCommunication.Copy()
 	}
 	return nil
 }
