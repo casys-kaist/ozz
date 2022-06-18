@@ -34,21 +34,27 @@ def grab_crashes_from_machine(machine):
     return crashes
 
 
-def filterout(title, fixed):
+def filterout(title, fixed, starvation):
     blacklist = ["SYZFAIL", "lost connection", "no output", "suppressed"]
+    starvation_list = ["rcu detected stall", "task hung"] if not starvation else []
     return (
         len(title) == 0
         or any(title.startswith(b) for b in blacklist)
         or any(f.startswith(title) for f in fixed)
+        or any(title.find(s) != -1 for s in starvation_list)
     )
 
 
-def print_crashes(name, crashes, fixed):
+def print_crashes(name, crashes, fixed, starvation):
     print(name)
     list_crashes = [(k, v) for k, v in crashes.items()]
     list_crashes.sort(key=lambda x: x[1])
     print(
-        *["  " + k + "    " + v for k, v in list_crashes if not filterout(v, fixed)],
+        *[
+            "  " + k + "    " + v
+            for k, v in list_crashes
+            if not filterout(v, fixed, starvation)
+        ],
         sep="\n"
     )
 
@@ -117,6 +123,7 @@ def main():
     parser.add_argument("--machine", action="store", default="machines.json")
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--unfixed-only", action="store_true")
+    parser.add_argument("--no-starvation", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -129,14 +136,16 @@ def main():
         for f in fixed:
             print("  " + f)
 
+    starvation = not args.no_starvation
+
     total = {}
     for machine in machines:
         crashes = grab_crashes_from_machine(machine)
         if args.all:
-            print_crashes(machine["name"], crashes, fixed)
+            print_crashes(machine["name"], crashes, fixed, starvation)
         total = total | crashes
 
-    print_crashes("total", total, fixed)
+    print_crashes("total", total, fixed, starvation)
 
 
 if __name__ == "__main__":
