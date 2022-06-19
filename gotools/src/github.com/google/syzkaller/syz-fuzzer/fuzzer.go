@@ -240,7 +240,7 @@ func main() {
 		log.Fatalf("failed to connect to manager: %v ", err)
 	}
 
-	log.Logf(1, "connecting to manager...")
+	log.Logf(0, "connecting to manager...")
 	a := &rpctype.ConnectArgs{
 		Name:        *flagName,
 		MachineInfo: machineInfo,
@@ -250,6 +250,7 @@ func main() {
 	if err := manager.Call("Manager.Connect", a, r); err != nil {
 		log.Fatalf("failed to connect to manager: %v ", err)
 	}
+	log.Logf(0, "connected to manager...")
 	featureFlags, err := csource.ParseFeaturesFlags("none", "none", true)
 	if err != nil {
 		log.Fatal(err)
@@ -334,6 +335,7 @@ func main() {
 		log.Logf(0, "fetching corpus: %v, signal %v/%v (executing program)",
 			len(fuzzer.corpus), len(fuzzer.corpusSignal), len(fuzzer.maxSignal))
 	}
+	log.Logf(0, "Initial poll done")
 	calls := make(map[*prog.Syscall]bool)
 	for _, id := range r.CheckResult.EnabledCalls[sandbox] {
 		calls[target.Syscalls[id]] = true
@@ -500,6 +502,10 @@ func (fuzzer *Fuzzer) pollLoop() {
 }
 
 func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]uint64) bool {
+	start := time.Now()
+	defer func() {
+		log.Logf(0, "Poll takes %v", time.Since(start))
+	}()
 	a := &rpctype.PollArgs{
 		Name:             fuzzer.name,
 		NeedCandidates:   needCandidates,
