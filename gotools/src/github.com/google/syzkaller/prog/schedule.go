@@ -79,14 +79,14 @@ func (p *Prog) removeDummyPoints() {
 	p.Schedule.points = p.Schedule.points[:i+1]
 }
 
-func (p *Prog) MutateScheduleFromHint(rs rand.Source, hint []interleaving.Segment) (bool, []interleaving.Segment) {
+func (p *Prog) MutateScheduleFromHint(rs rand.Source, hint []interleaving.Segment) (bool, []interleaving.Segment, []interleaving.Segment) {
 	if len(p.Contenders()) != 2 {
-		return false, hint
+		return false, nil, hint
 	}
 
 	if len(hint) == 0 {
 		// TODO: We may want to generate random scheduling points
-		return false, nil
+		return false, nil, nil
 	}
 
 	orch := scheduler.Orchestrator{Segs: hint}
@@ -95,11 +95,11 @@ func (p *Prog) MutateScheduleFromHint(rs rand.Source, hint []interleaving.Segmen
 	scheduler := scheduler.Scheduler{Knots: selected}
 	schedule, ok := scheduler.GenerateSchedPoints()
 	if !ok {
-		return false, hint
+		return false, nil, hint
 	}
 	p.applySchedule(schedule)
 
-	return ok, orch.Segs
+	return ok, orch.Used, orch.Segs
 
 	// TODO: Below code can be used to generate a scheduler if we
 	// don't have more hints. I don't delete the code (even though it

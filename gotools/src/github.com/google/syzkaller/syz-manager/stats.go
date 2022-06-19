@@ -36,6 +36,7 @@ type Stats struct {
 	corpusKnots         Stat
 	maxSignal           Stat
 	maxInterleaving     Stat
+	instBlacklist       Stat
 	maxCommunication    Stat
 
 	mu         sync.Mutex
@@ -67,22 +68,23 @@ func (mgr *Manager) initStats() {
 
 func (stats *Stats) all() map[string]uint64 {
 	m := map[string]uint64{
-		"crashes":              stats.crashes.get(),
-		"crash types":          stats.crashTypes.get(),
-		"suppressed":           stats.crashSuppressed.get(),
-		"vm restarts":          stats.vmRestarts.get(),
-		"new inputs":           stats.newInputs.get(),
-		"new scheduled inputs": stats.newScheduledInputs.get(),
-		"rotated inputs":       stats.rotatedInputs.get(),
-		"exec total":           stats.execTotal.get(),
-		"coverage":             stats.corpusCover.get(),
-		"filtered coverage":    stats.corpusCoverFiltered.get(),
-		"signal":               stats.corpusSignal.get(),
-		"interleaving signal":  stats.corpusInterleaving.get(),
-		"interleaving cover":   stats.corpusKnots.get(),
-		"max signal":           stats.maxSignal.get(),
-		"max interleaving":     stats.maxInterleaving.get(),
-		"max communication":    stats.maxCommunication.get(),
+		"crashes":               stats.crashes.get(),
+		"crash types":           stats.crashTypes.get(),
+		"suppressed":            stats.crashSuppressed.get(),
+		"vm restarts":           stats.vmRestarts.get(),
+		"new inputs":            stats.newInputs.get(),
+		"new scheduled inputs":  stats.newScheduledInputs.get(),
+		"rotated inputs":        stats.rotatedInputs.get(),
+		"exec total":            stats.execTotal.get(),
+		"coverage":              stats.corpusCover.get(),
+		"filtered coverage":     stats.corpusCoverFiltered.get(),
+		"signal":                stats.corpusSignal.get(),
+		"interleaving signal":   stats.corpusInterleaving.get(),
+		"interleaving cover":    stats.corpusKnots.get(),
+		"max signal":            stats.maxSignal.get(),
+		"max interleaving":      stats.maxInterleaving.get(),
+		"instruction blacklist": stats.instBlacklist.get(),
+		"max communication":     stats.maxCommunication.get(),
 	}
 	if stats.haveHub {
 		m["hub: send prog add"] = stats.hubSendProgAdd.get()

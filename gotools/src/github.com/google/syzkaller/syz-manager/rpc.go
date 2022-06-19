@@ -43,6 +43,9 @@ type RPCServer struct {
 	rotator            *prog.Rotator
 	rnd                *rand.Rand
 	checkFailures      int
+
+	instCount     map[uint32]uint32
+	instBlacklist map[uint32]struct{}
 }
 
 type Fuzzer struct {
@@ -54,6 +57,8 @@ type Fuzzer struct {
 	newMaxCommunication interleaving.Signal
 	rotatedSignal       signal.Signal
 	machineInfo         []byte
+
+	instBlacklist map[uint32]struct{}
 }
 
 type BugFrames struct {
@@ -79,6 +84,9 @@ func startRPCServer(mgr *Manager) (*RPCServer, error) {
 		stats:   mgr.stats,
 		fuzzers: make(map[string]*Fuzzer),
 		rnd:     rand.New(rand.NewSource(time.Now().UnixNano())),
+
+		instCount:     make(map[uint32]uint32),
+		instBlacklist: make(map[uint32]struct{}),
 	}
 	serv.batchSize = 5
 	if serv.batchSize < mgr.cfg.Procs {
@@ -136,6 +144,12 @@ func (serv *RPCServer) Connect(a *rpctype.ConnectArgs, r *rpctype.ConnectRes) er
 		f.newMaxSignal = serv.maxSignal.Copy()
 		f.newMaxInterleaving = serv.maxInterleaving.Copy()
 		f.newMaxCommunication = serv.maxCommunication.Copy()
+		for inst := range serv.instBlacklist {
+			if f.instBlacklist == nil {
+				f.instBlacklist = make(map[uint32]struct{})
+			}
+			f.instBlacklist[inst] = struct{}{}
+		}
 	}
 	return nil
 }
@@ -364,6 +378,8 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 	serv.mu.Lock()
 	defer serv.mu.Unlock()
 
+	serv.accumulateInstCount(a)
+
 	f := serv.fuzzers[a.Name]
 	if f == nil {
 		// This is possible if we called shutdownInstance,
@@ -411,6 +427,10 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 	r.MaxSignal = f.newMaxSignal.Split(2000).Serialize()
 	r.MaxInterleaving = f.newMaxInterleaving.Split(2000).Serialize()
 	r.MaxCommunication = f.newMaxCommunication.Split(2000).Serialize()
+	for inst := range f.instBlacklist {
+		r.InstBlacklist = append(r.InstBlacklist, inst)
+	}
+	f.instBlacklist = make(map[uint32]struct{})
 	if a.NeedCandidates {
 		r.Candidates = serv.mgr.candidateBatch(serv.batchSize)
 	}
@@ -437,6 +457,27 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 	log.Logf(4, "poll from %v: candidates=%v inputs=%v maxsignal=%v maxinterleaving=%v",
 		a.Name, len(r.Candidates), len(r.NewInputs), len(r.MaxSignal.Elems), len(r.MaxInterleaving))
 	return nil
+}
+
+func (serv *RPCServer) accumulateInstCount(a *rpctype.PollArgs) {
+	const thold = 100000
+	for i := 0; i < len(a.InstCount); i += 2 {
+		k, v := a.InstCount[i], a.InstCount[i+1]
+		serv.instCount[k] += v
+		if _, ok := serv.instBlacklist[k]; ok {
+			continue
+		}
+		if serv.instCount[k] > thold {
+			serv.instBlacklist[k] = struct{}{}
+			for _, f := range serv.fuzzers {
+				if f.instBlacklist == nil {
+					f.instBlacklist = make(map[uint32]struct{})
+				}
+				f.instBlacklist[k] = struct{}{}
+			}
+		}
+	}
+	serv.stats.instBlacklist.set(len(serv.instBlacklist))
 }
 
 func (serv *RPCServer) shutdownInstance(name string) []byte {

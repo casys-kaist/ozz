@@ -205,13 +205,15 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 		}
 		p, hint := tp.P.Clone(), proc.pruneHint(tp.Hint)
 
-		ok, remaining := p.MutateScheduleFromHint(proc.rnd, hint)
+		ok, used, remaining := p.MutateScheduleFromHint(proc.rnd, hint)
 		proc.setHint(tp, remaining)
 		// We exclude used knots from tp.Hint even if the schedule
 		// mutation fails.
 		if !ok {
 			continue
 		}
+
+		proc.countUsedInstructions(used)
 
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
 		proc.execute(proc.execOpts, p, ProgNormal, StatSchedule)
@@ -239,6 +241,15 @@ func (proc *Proc) setHint(tp *prog.Candidate, remaining []interleaving.Segment) 
 	proc.fuzzer.corpusMu.Lock()
 	defer proc.fuzzer.corpusMu.Unlock()
 	tp.Hint = remaining
+}
+
+func (proc *Proc) countUsedInstructions(used []interleaving.Segment) {
+	proc.fuzzer.signalMu.RLock()
+	defer proc.fuzzer.signalMu.RUnlock()
+	for _, _knot := range used {
+		knot := _knot.(interleaving.Knot)
+		proc.fuzzer.countInstructionInKnot(knot)
+	}
 }
 
 func (proc *Proc) triageInput(item *WorkTriage) {
@@ -394,7 +405,7 @@ func (proc *Proc) executeThreading(p *prog.Prog) []interleaving.Segment {
 	knotter := scheduler.GetKnotter(&proc.fuzzer.maxInterleaving, &proc.fuzzer.signalMu)
 	for i := 0; i < 2; i++ {
 		inf := proc.executeRaw(proc.execOpts, p, StatThreading)
-		seq := sequentialTrace(inf)
+		seq := proc.sequentialAccesses(inf, p.Contender)
 		if !knotter.AddSequentialTrace(seq) {
 			log.Logf(1, "Failed to add sequential traces")
 			return nil
@@ -403,25 +414,6 @@ func (proc *Proc) executeThreading(p *prog.Prog) []interleaving.Segment {
 	}
 	knotter.ExcavateKnots()
 	return knotter.GetKnots()
-}
-
-func sequentialTrace(info *ipc.ProgInfo) []interleaving.SerialAccess {
-	// TODO: This should be called with a threaded Prog
-	res := []interleaving.SerialAccess{}
-	for _, c := range info.Calls {
-		if len(c.Access) != 0 {
-			res = append(res, c.Access)
-		}
-	}
-	if len(res) != 2 {
-		// XXX: This is a current implementation's requirement. We
-		// need exactly two traces. If info does not contain exactly
-		// two traces (e.g., one contender call does not give us its
-		// trace), just return nil to let a caller handle this case as
-		// an error.
-		return nil
-	}
-	return res
 }
 
 func (proc *Proc) failCall(p *prog.Prog, call int) {
@@ -558,7 +550,7 @@ func (proc *Proc) extractKnotsAndComms(info *ipc.ProgInfo, calls prog.Contender,
 		knotter.SetStrictTimestamp()
 	}
 
-	seq := sequentialAccesses(info, calls)
+	seq := proc.sequentialAccesses(info, calls)
 	if !knotter.AddSequentialTrace(seq) {
 		return nil, nil
 	}
@@ -572,9 +564,26 @@ func (proc *Proc) extractKnots(info *ipc.ProgInfo, calls prog.Contender, opts kn
 	return knots
 }
 
-func sequentialAccesses(info *ipc.ProgInfo, calls prog.Contender) (seq []interleaving.SerialAccess) {
+func (proc *Proc) sequentialAccesses(info *ipc.ProgInfo, calls prog.Contender) (seq []interleaving.SerialAccess) {
+	proc.fuzzer.signalMu.RLock()
 	for _, call := range calls.Calls {
-		seq = append(seq, info.Calls[call].Access)
+		serial := interleaving.SerialAccess{}
+		for _, acc := range info.Calls[call].Access {
+			if _, ok := proc.fuzzer.instBlacklist[acc.Inst]; ok {
+				continue
+			}
+			serial = append(serial, acc)
+		}
+		seq = append(seq, serial)
+	}
+	proc.fuzzer.signalMu.RUnlock()
+	if len(seq) != 2 {
+		// XXX: This is a current implementation's requirement. We
+		// need exactly two traces. If info does not contain exactly
+		// two traces (e.g., one contender call does not give us its
+		// trace), just return nil to let a caller handle this case as
+		// an error.
+		return nil
 	}
 	return
 }

@@ -245,13 +245,14 @@ func RunManager(cfg *mgrconfig.Config) {
 			corpusSignal := mgr.stats.corpusSignal.get()
 			corpusInterleaving := mgr.stats.corpusInterleaving.get()
 			maxInterleaving := mgr.stats.maxInterleaving.get()
+			blacklist := mgr.stats.instBlacklist.get()
 			maxSignal := mgr.stats.maxSignal.get()
 			mgr.mu.Unlock()
 			numReproducing := atomic.LoadUint32(&mgr.numReproducing)
 			numFuzzing := atomic.LoadUint32(&mgr.numFuzzing)
 
-			log.Logf(0, "VMs %v, executed %v, cover %v, signal %v/%v, interleaving %v/%v, crashes %v, repro %v",
-				numFuzzing, executed, corpusCover, corpusSignal, maxSignal, corpusInterleaving, maxInterleaving, crashes, numReproducing)
+			log.Logf(0, "VMs %v, executed %v, cover %v, signal %v/%v, interleaving %v/%v, blacklist %v, crashes %v, repro %v",
+				numFuzzing, executed, corpusCover, corpusSignal, maxSignal, corpusInterleaving, maxInterleaving, blacklist, crashes, numReproducing)
 		}
 	}()
 
@@ -1445,9 +1446,13 @@ func (mgr *Manager) dumpCoverage() {
 		interleavingCovFilename = "knot"
 		hintCovFilename         = "hint"
 		commCovFilename         = "communication"
+
+		instCountFilename     = "instCount"
+		instBlacklistFilename = "instBlacklist"
 	)
 
 	codecov, intcov, hintcov, commcov := mgr.serializeCoverage()
+	instCount, instBlacklist := mgr.serializeInstInfo()
 
 	dir := filepath.Join(mgr.cfg.Workdir, coverageDir, hex.EncodeToString(mgr.kernelHash))
 	osutil.MkdirAll(dir)
@@ -1457,6 +1462,8 @@ func (mgr *Manager) dumpCoverage() {
 	mgr.dumpCoverageToFile(dir, hintCovFilename, hintcov)
 	mgr.dumpCoverageToFile(dir, commCovFilename, commcov)
 
+	mgr.dumpCoverageToFile(dir, instCountFilename, instCount)
+	mgr.dumpCoverageToFile(dir, instBlacklistFilename, instBlacklist)
 }
 
 func (mgr *Manager) serializeCoverage() (bytes.Buffer, bytes.Buffer, bytes.Buffer, bytes.Buffer) {
@@ -1490,6 +1497,19 @@ func (mgr *Manager) serializeCoverage() (bytes.Buffer, bytes.Buffer, bytes.Buffe
 	log.Logf(0, "Serializing coverage takes %v", time.Since(start))
 
 	return codecov, intcov, hintcov, commcov
+}
+
+func (mgr *Manager) serializeInstInfo() (bytes.Buffer, bytes.Buffer) {
+	var instCount, instBlacklist bytes.Buffer
+	mgr.serv.mu.Lock()
+	defer mgr.serv.mu.Unlock()
+	for k, v := range mgr.serv.instCount {
+		instCount.WriteString(fmt.Sprintf("%x %d\n", k, v))
+	}
+	for k := range mgr.serv.instBlacklist {
+		instBlacklist.WriteString(fmt.Sprintf("%x\n", k))
+	}
+	return instCount, instBlacklist
 }
 
 func (mgr *Manager) dumpCoverageToFile(dir, filename string, cov bytes.Buffer) {

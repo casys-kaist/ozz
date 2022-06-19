@@ -78,6 +78,9 @@ type Fuzzer struct {
 	maxCommunication interleaving.Signal
 	newCommunication interleaving.Signal
 
+	instCount     map[uint32]uint32
+	instBlacklist map[uint32]struct{}
+
 	// Mostly for debugging scheduling mutation. If generate is false,
 	// procs do not generate/mutate inputs but schedule.
 	generate bool
@@ -323,6 +326,9 @@ func main() {
 		maxCommunication: make(interleaving.Signal),
 		newCommunication: make(interleaving.Signal),
 
+		instCount:     make(map[uint32]uint32),
+		instBlacklist: make(map[uint32]struct{}),
+
 		checkResult: r.CheckResult,
 		generate:    *flagGen,
 	}
@@ -501,6 +507,17 @@ func (fuzzer *Fuzzer) pollLoop() {
 	}
 }
 
+func (fuzzer *Fuzzer) serializeInstCount(instCount *map[uint32]uint32) []uint32 {
+	fuzzer.signalMu.Lock()
+	defer fuzzer.signalMu.Unlock()
+	ret := make([]uint32, 0, len(*instCount)*2)
+	for k, v := range *instCount {
+		ret = append(ret, k, v)
+	}
+	*instCount = make(map[uint32]uint32)
+	return ret
+}
+
 func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]uint64) bool {
 	start := time.Now()
 	defer func() {
@@ -514,7 +531,13 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 		MaxCommunication: fuzzer.grabNewCommunication().Serialize(),
 		Stats:            stats,
 		Collections:      collections,
+
+		InstCount: fuzzer.serializeInstCount(&fuzzer.instCount),
 	}
+	if len(fuzzer.instCount) != 0 {
+		panic("wrong")
+	}
+
 	r := &rpctype.PollRes{}
 	if err := fuzzer.manager.Call("Manager.Poll", a, r); err != nil {
 		log.Fatalf("Manager.Poll call failed: %v", err)
@@ -524,6 +547,13 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 	maxCommunication := r.MaxCommunication.Deserialize()
 	log.Logf(1, "poll: candidates=%v inputs=%v signal=%v interleaving=%v",
 		len(r.Candidates), len(r.NewInputs), maxSignal.Len(), maxInterleaving.Len())
+
+	fuzzer.signalMu.Lock()
+	for _, inst := range r.InstBlacklist {
+		fuzzer.instBlacklist[inst] = struct{}{}
+	}
+	fuzzer.signalMu.Unlock()
+
 	fuzzer.addMaxSignal(maxSignal)
 	fuzzer.addMaxInterleaving(maxInterleaving)
 	fuzzer.addMaxCommunication(maxCommunication)
@@ -536,6 +566,7 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 	if needCandidates && len(r.Candidates) == 0 && atomic.LoadUint32(&fuzzer.triagedCandidates) == 0 {
 		atomic.StoreUint32(&fuzzer.triagedCandidates, 1)
 	}
+
 	return len(r.NewInputs) != 0 || len(r.Candidates) != 0 || maxSignal.Len() != 0
 }
 
@@ -881,6 +912,14 @@ func (fuzzer *Fuzzer) subCollection(collection Collection, num uint64) {
 		num,
 		collectionNames[collection],
 		fuzzer.collection[collection])
+}
+
+func (fuzzer *Fuzzer) countInstructionInKnot(knot interleaving.Knot) {
+	for _, comm := range knot {
+		for _, acc := range comm {
+			fuzzer.instCount[acc.Inst]++
+		}
+	}
 }
 
 func signalPrio(p *prog.Prog, info *ipc.CallInfo, call int) (prio uint8) {

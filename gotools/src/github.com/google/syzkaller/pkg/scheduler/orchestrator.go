@@ -7,6 +7,7 @@ type Orchestrator struct {
 	comms []interleaving.Communication
 	// Input knots
 	Segs []interleaving.Segment
+	Used []interleaving.Segment
 }
 
 // TODO: The time complexity of orchestrator.SelectHarmoniousKnots()
@@ -20,6 +21,7 @@ func (orch *Orchestrator) SelectHarmoniousKnots() []interleaving.Knot {
 		if knot, ok := seg.(interleaving.Knot); ok && orch.harmoniousKnot(knot) {
 			res = append(res, knot)
 			orch.comms = append(orch.comms, knot[0], knot[1])
+			orch.Used = append(orch.Used, knot)
 		} else {
 			cnt++
 			remaining = append(remaining, seg)
