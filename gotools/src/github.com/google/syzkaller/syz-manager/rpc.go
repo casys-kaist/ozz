@@ -98,6 +98,11 @@ func (serv *RPCServer) Connect(a *rpctype.ConnectArgs, r *rpctype.ConnectRes) er
 	log.Logf(1, "fuzzer %v connected", a.Name)
 	serv.stats.vmRestarts.inc()
 
+	start := time.Now()
+	defer func() {
+		log.Logf(0, "fuzzer connection takes %v", time.Since(start))
+	}()
+
 	corpus, bugFrames, coverFilter, coverBitmap, err := serv.mgr.fuzzerConnect(a.Modules)
 	if err != nil {
 		return err
