@@ -1,0 +1,83 @@
+Hi,
+
+We observed a crash "kernel BUG in ntfs_read_block" during fuzzing. 
+
+Unfortunately, we have not found a reproducer for it yet.  We will
+inform you if we have any update on this crash.
+
+Detailed crash information is as follows:
+
+-----------------------------------------
+
+- Kernel commit:
+
+b13baccc3850ca
+
+- Crash report:
+
+loop0: detected capacity change from 0 to 67
+------------[ cut here ]------------
+kernel BUG at fs/ntfs/aops.c:186!
+invalid opcode: 0000 [#1] PREEMPT SMP KASAN
+CPU: 1 PID: 24003 Comm: syz-executor.0 Not tainted 5.19.0-rc2-31838-gef9c98f9637f #14
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
+RIP: 0010:ntfs_read_block+0x23d2/0x2760 fs/ntfs/aops.c:186
+Code: 01 00 00 e8 30 60 59 fe e9 f8 02 00 00 e8 26 60 59 fe 48 8b 7c 24 08 48 c7 c6 00 c0 4e 8e e8 75 a3 9d fe 0f 0b e8 0e 60 59 fe <0f> 0b e8 07 60 59 fe 48 8b 5c 24 08 48 89 df be 08 00 00 00 e8 85
+RSP: 0018:ffffc90007787560 EFLAGS: 00010283
+RAX: ffffffff832c0142 RBX: 0000000000000000 RCX: 0000000000040000
+RDX: ffffc900033c1000 RSI: 00000000000024d9 RDI: 00000000000024da
+RBP: ffffc90007787708 R08: ffffffff832bdf85 R09: ffffed102bde463b
+R10: ffffed102bde463b R11: 0000000000000000 R12: dffffc0000000000
+R13: ffffffff953b7bf0 R14: ffff88815ef234a0 R15: ffff888145505000
+FS:  00007fbf10dd4700(0000) GS:ffff88823bc00000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00007f827b3b5000 CR3: 0000000020368000 CR4: 00000000003506e0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+Call Trace:
+ <TASK>
+ do_read_cache_folio+0x420/0x8e0 mm/filemap.c:3515
+ do_read_cache_page mm/filemap.c:3593 [inline]
+ read_cache_page+0x6b/0x370 mm/filemap.c:3602
+ read_mapping_page include/linux/pagemap.h:759 [inline]
+ ntfs_map_page+0x24/0x460 fs/ntfs3/ntfs_fs.h:897
+ map_mft_record_page fs/ntfs/mft.c:73 [inline]
+ map_mft_record+0x230/0x8f0 fs/ntfs/mft.c:156
+ ntfs_read_locked_inode+0x1f5/0x75b0 fs/ntfs/inode.c:550
+ ntfs_read_inode_mount+0x133e/0x33d0 fs/ntfs/inode.c:2091
+ ntfs_fill_super+0x2c59/0xc540 fs/ntfs/super.c:2854
+ mount_bdev+0x32a/0x520 fs/super.c:1367
+ legacy_get_tree+0x136/0x270 fs/fs_context.c:610
+ vfs_get_tree+0xc2/0x430 fs/super.c:1497
+ do_new_mount fs/namespace.c:3040 [inline]
+ path_mount+0x2217/0x3e50 fs/namespace.c:3370
+ do_mount fs/namespace.c:3383 [inline]
+ __do_sys_mount fs/namespace.c:3591 [inline]
+ __se_sys_mount+0x359/0x430 fs/namespace.c:3568
+ do_syscall_x64 arch/x86/entry/common.c:51 [inline]
+ do_syscall_64+0x4e/0xa0 arch/x86/entry/common.c:82
+ entry_SYSCALL_64_after_hwframe+0x46/0xb0
+RIP: 0033:0x47a6da
+Code: 48 c7 c1 bc ff ff ff f7 d8 64 89 01 48 83 c8 ff c3 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 44 00 00 49 89 ca b8 a5 00 00 00 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 bc ff ff ff f7 d8 64 89 01 48
+RSP: 002b:00007fbf10dd3a08 EFLAGS: 00000202 ORIG_RAX: 00000000000000a5
+RAX: ffffffffffffffda RBX: 0000000020000200 RCX: 000000000047a6da
+RDX: 0000000020000000 RSI: 0000000020000100 RDI: 00007fbf10dd3a60
+RBP: 00007fbf10dd3aa0 R08: 00007fbf10dd3aa0 R09: 0000000020000000
+R10: 0000000000000000 R11: 0000000000000202 R12: 0000000020000000
+R13: 0000000020000100 R14: 00007fbf10dd3a60 R15: 0000000020000040
+ </TASK>
+Modules linked in:
+---[ end trace 0000000000000000 ]---
+RIP: 0010:ntfs_read_block+0x23d2/0x2760 fs/ntfs/aops.c:186
+Code: 01 00 00 e8 30 60 59 fe e9 f8 02 00 00 e8 26 60 59 fe 48 8b 7c 24 08 48 c7 c6 00 c0 4e 8e e8 75 a3 9d fe 0f 0b e8 0e 60 59 fe <0f> 0b e8 07 60 59 fe 48 8b 5c 24 08 48 89 df be 08 00 00 00 e8 85
+RSP: 0018:ffffc90007787560 EFLAGS: 00010283
+RAX: ffffffff832c0142 RBX: 0000000000000000 RCX: 0000000000040000
+RDX: ffffc900033c1000 RSI: 00000000000024d9 RDI: 00000000000024da
+RBP: ffffc90007787708 R08: ffffffff832bdf85 R09: ffffed102bde463b
+R10: ffffed102bde463b R11: 0000000000000000 R12: dffffc0000000000
+R13: ffffffff953b7bf0 R14: ffff88815ef234a0 R15: ffff888145505000
+FS:  00007fbf10dd4700(0000) GS:ffff88823bc00000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00007f827b3b5000 CR3: 0000000020368000 CR4: 00000000003506e0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
