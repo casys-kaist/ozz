@@ -1,0 +1,51 @@
+------------[ cut here ]------------
+WARNING: CPU: 1 PID: 31606 at drivers/block/floppy.c:999 process_fd_request home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/block/floppy.c:2847 [inline]
+WARNING: CPU: 1 PID: 31606 at drivers/block/floppy.c:999 __floppy_read_block_0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/block/floppy.c:4160 [inline]
+WARNING: CPU: 1 PID: 31606 at drivers/block/floppy.c:999 floppy_revalidate+0x13b9/0x1830 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/block/floppy.c:4206
+Modules linked in:
+CPU: 1 PID: 31606 Comm: syz-executor.0 Not tainted 5.19.0-rc1-31595-gdf1bbda1a939 #13
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
+RIP: 0010:schedule_bh home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/block/floppy.c:999 [inline]
+RIP: 0010:process_fd_request home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/block/floppy.c:2847 [inline]
+RIP: 0010:__floppy_read_block_0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/block/floppy.c:4160 [inline]
+RIP: 0010:floppy_revalidate+0x13b9/0x1830 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/block/floppy.c:4206
+Code: 00 00 00 00 00 fc ff df e9 bb f7 ff ff e8 ff eb 4f fb 0f 0b e9 cd f6 ff ff e8 f3 eb 4f fb 0f 0b e9 76 fe ff ff e8 e7 eb 4f fb <0f> 0b e9 76 fa ff ff e8 db eb 4f fb 0f 0b e9 a9 f6 ff ff 89 d9 80
+RSP: 0018:ffffc9000368f4e0 EFLAGS: 00010283
+
+RAX: ffffffff863574f9 RBX: 0000000000000001 RCX: 0000000000040000
+RDX: ffffc90011481000 RSI: 0000000000001253 RDI: 0000000000001254
+RBP: ffffc9000368f6f0 R08: ffffffff86356f68 R09: fffffbfff21df5ad
+R10: fffffbfff21df5ad R11: 0000000000000000 R12: 0000000000000000
+R13: ffffc9000368f618 R14: 1ffff920006d1ea0 R15: 0000000000000000
+FS:  00007fb98d7a2700(0000) GS:ffff88823bc00000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 0000000000000000 CR3: 000000002235a000 CR4: 00000000003506e0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+Call Trace:
+ <TASK>
+ floppy_open+0x614/0x1a60 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/block/floppy.c:4058
+ blkdev_get_whole+0xb6/0x5a0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/block/bdev.c:673
+ blkdev_get_by_dev+0x4f6/0x1540 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/block/bdev.c:823
+ blkdev_open+0x1ce/0x4c0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/block/fops.c:481
+ do_dentry_open+0xc23/0x1ac0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/open.c:848
+ do_open home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/namei.c:3520 [inline]
+ path_openat+0x36a0/0x4bb0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/namei.c:3653
+ do_filp_open+0x299/0x6a0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/namei.c:3680
+ do_sys_openat2+0x131/0x610 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/open.c:1278
+ do_sys_open home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/open.c:1294 [inline]
+ __do_sys_openat home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/open.c:1310 [inline]
+ __se_sys_openat home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/open.c:1305 [inline]
+ __x64_sys_openat+0x26b/0x2f0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/open.c:1305
+ do_syscall_x64 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:51 [inline]
+ do_syscall_64+0x4e/0xa0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:82
+ entry_SYSCALL_64_after_hwframe+0x46/0xb0
+RIP: 0033:0x4190ae
+Code: 89 54 24 08 e8 13 f9 ff ff 8b 74 24 0c 48 8b 3c 24 41 89 c0 44 8b 54 24 08 b8 01 01 00 00 89 f2 48 89 fe bf 9c ff ff ff 0f 05 <48> 3d 00 f0 ff ff 77 30 44 89 c7 89 44 24 08 e8 3e f9 ff ff 8b 44
+RSP: 002b:00007fb98d7a1740 EFLAGS: 00000293 ORIG_RAX: 0000000000000101
+RAX: ffffffffffffffda RBX: 6666666666666667 RCX: 00000000004190ae
+RDX: 0000000000000000 RSI: 00007fb98d7a17d0 RDI: 00000000ffffff9c
+RBP: 0000000000000000 R08: 0000000000000000 R09: 0000000000000000
+R10: 0000000000000000 R11: 0000000000000293 R12: 000000000077bf88
+R13: 000000000077bf8c R14: 000000000077bf80 R15: 00007ffe4e0c7570
+ </TASK>

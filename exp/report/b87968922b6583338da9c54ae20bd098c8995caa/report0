@@ -1,0 +1,102 @@
+==================================================================
+BUG: KASAN: use-after-free in instrument_atomic_read home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/instrumented.h:87 [inline]
+BUG: KASAN: use-after-free in test_bit home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/asm-generic/bitops/instrumented-non-atomic.h:134 [inline]
+BUG: KASAN: use-after-free in netif_running home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/netdevice.h:3500 [inline]
+BUG: KASAN: use-after-free in slcan_receive_buf+0x15c/0x1930 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/net/can/slcan.c:478
+Read of size 8 at addr ffff88814e210038 by task syz-executor.0/14712
+
+CPU: 2 PID: 14712 Comm: syz-executor.0 Not tainted 5.19.0-rc2-31838-gef9c98f9637f #14
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
+Call Trace:
+ <TASK>
+ __dump_stack home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/lib/dump_stack.c:88 [inline]
+ dump_stack_lvl+0x20a/0x302 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/lib/dump_stack.c:106
+ print_address_description+0x65/0x4f0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/kasan/report.c:313
+ print_report+0xf4/0x1e0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/kasan/report.c:429
+ kasan_report+0xe5/0x110 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/kasan/report.c:491
+ kasan_check_range+0x2b5/0x2f0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/kasan/generic.c:189
+ instrument_atomic_read home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/instrumented.h:87 [inline]
+ test_bit home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/asm-generic/bitops/instrumented-non-atomic.h:134 [inline]
+ netif_running home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/netdevice.h:3500 [inline]
+ slcan_receive_buf+0x15c/0x1930 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/net/can/slcan.c:478
+ tiocsti home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/tty/tty_io.c:2293 [inline]
+ tty_ioctl+0x16be/0x2040 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/tty/tty_io.c:2692
+ vfs_ioctl home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/ioctl.c:51 [inline]
+ __do_sys_ioctl home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/ioctl.c:870 [inline]
+ __se_sys_ioctl+0x129/0x1c0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/ioctl.c:856
+ do_syscall_x64 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:51 [inline]
+ do_syscall_64+0x4e/0xa0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:82
+ entry_SYSCALL_64_after_hwframe+0x46/0xb0
+RIP: 0033:0x478dc9
+Code: f7 d8 64 89 02 b8 ff ff ff ff c3 66 0f 1f 44 00 00 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 bc ff ff ff f7 d8 64 89 01 48
+RSP: 002b:00007f85b09d4be8 EFLAGS: 00000246 ORIG_RAX: 0000000000000010
+RAX: ffffffffffffffda RBX: 0000000000781408 RCX: 0000000000478dc9
+RDX: 0000000020000000 RSI: 0000000000005412 RDI: 0000000000000003
+RBP: 00000000f477909a R08: 0000000000000000 R09: 0000000000000000
+R10: 0000000000000000 R11: 0000000000000246 R12: 00000000007815c0
+R13: 0000000000781414 R14: 0000000000781408 R15: 00007ffdd432f550
+ </TASK>
+
+The buggy address belongs to the physical page:
+page:ffffea0005388400 refcount:0 mapcount:0 mapping:0000000000000000 index:0x0 pfn:0x14e210
+flags: 0x57ff00000000000(node=1|zone=2|lastcpupid=0x7ff)
+raw: 057ff00000000000 ffffea000527d008 ffff88823bc42348 0000000000000000
+raw: 0000000000000000 0000000000000000 00000000ffffffff 0000000000000000
+page dumped because: kasan: bad access detected
+page_owner tracks the page as freed
+page last allocated via order 3, migratetype Unmovable, gfp_mask 0x446dc0(GFP_KERNEL_ACCOUNT|__GFP_NOWARN|__GFP_RETRY_MAYFAIL|__GFP_COMP|__GFP_ZERO), pid 14709, tgid 14708 (syz-executor.0), ts 893919786834, free_ts 894271548507
+ prep_new_page home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/page_alloc.c:2456 [inline]
+ get_page_from_freelist+0xa7c/0xf50 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/page_alloc.c:4198
+ __alloc_pages+0x30e/0x710 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/page_alloc.c:5426
+ __alloc_pages_node home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/gfp.h:587 [inline]
+ alloc_pages_node home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/gfp.h:610 [inline]
+ kmalloc_large_node+0x98/0x1c0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/slub.c:4431
+ __kmalloc_node+0x655/0x780 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/slub.c:4447
+ kmalloc_node home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/slab.h:623 [inline]
+ kvmalloc_node+0x6e/0x190 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/util.c:613
+ kvmalloc home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/slab.h:750 [inline][CPU #1-5013/13/5] waking cpu #1
+ kvzalloc home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/slab.h:758 [inline][CPU #1-5013/13/5] waking cpu #1
+ alloc_netdev_mqs+0x94/0x1 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/net/core/dev.c:10576[CPU #1-5013/13/5] waking cpu #1
+ slc_alloc home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/net/can/slcan.c:540 [inline]
+ slcan_open+0x4eb/0xfc0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/net/can/slcan.c:598
+ tty_ldisc_open+0xc6/0x150 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/tty/tty_ldisc.c:433
+ tty_set_ldisc+0x39f/0xa70 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/tty/tty_ldisc.c:558
+ tiocsetd home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/tty/tty_io.c:2433 [inline]
+ tty_ioctl+0x1bd0/0x2040 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/tty/tty_io.c:2714
+ vfs_ioctl home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/ioctl.c:51 [inline]
+ __do_sys_ioctl home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/ioctl.c:870 [inline]
+ __se_sys_ioctl+0x129/0x1c0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/ioctl.c:856
+ do_syscall_x64 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:51 [inline]
+ do_syscall_64+0x4e/0xa0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:82
+ entry_SYSCALL_64_after_hwframe+0x46/0xb0
+page last free stack trace:
+ reset_page_owner home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/page_owner.h:24 [inline]
+ free_pages_prepare home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/page_alloc.c:1371 [inline]
+ free_pcp_prepare+0xa65/0xc90 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/page_alloc.c:1421
+ free_unref_page_prepare home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/page_alloc.c:3343 [inline]
+ free_unref_page+0x7e/0x740 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/page_alloc.c:3438
+ free_large_kmalloc home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/slub.c:3546 [inline]
+ kfree+0x51f/0x7e0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/slub.c:4551
+ device_release+0xb4/0x2a0
+ kobject_cleanup+0x202/0x3f0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/lib/kobject.c:673
+ netdev_run_todo+0x19c4/0x1c00 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/net/core/dev.c:10358
+ unregister_netdev+0x1e1/0x2d0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/net/core/dev.c:10894
+ tty_ldisc_hangup+0x24b/0x910 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/tty/tty_ldisc.c:700
+ __tty_hangup+0x744/0xab0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/tty/tty_io.c:637
+ tty_vhangup home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/tty/tty_io.c:707 [inline]
+ tty_ioctl+0xbf1/0x2040 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/tty/tty_io.c:2718
+ vfs_ioctl home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/ioctl.c:51 [inline]
+ __do_sys_ioctl home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/ioctl.c:870 [inline]
+ __se_sys_ioctl+0x129/0x1c0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/ioctl.c:856
+ do_syscall_x64 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:51 [inline]
+ do_syscall_64+0x4e/0xa0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:82
+ entry_SYSCALL_64_after_hwframe+0x46/0xb0
+
+Memory state around the buggy address:
+ ffff88814e20ff00: fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc
+ ffff88814e20ff80: fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc
+>ffff88814e210000: ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+                                        ^
+ ffff88814e210080: ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+ ffff88814e210100: ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff
+==================================================================
