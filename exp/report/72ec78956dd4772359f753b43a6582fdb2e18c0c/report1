@@ -1,0 +1,139 @@
+==================================================================
+BUG: KASAN: stack-out-of-bounds in user_mode home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/include/asm/ptrace.h:136 [inline]
+BUG: KASAN: stack-out-of-bounds in unwind_next_frame+0x108/0x2580 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/kernel/unwind_orc.c:431
+Read of size 8 at addr ffffc90004c8f950 by task syz-executor.0/21959
+
+CPU: 2 PID: 21959 Comm: syz-executor.0 Not tainted 5.19.0-rc3-32288-g0f3b08299494 #15
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
+Call Trace:
+ <IRQ>
+ __dump_stack home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/lib/dump_stack.c:88 [inline]
+ dump_stack_lvl+0x20a/0x302 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/lib/dump_stack.c:106
+ print_address_description+0x65/0x4f0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/kasan/report.c:313
+ print_report+0xf4/0x1e0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/kasan/report.c:429
+ kasan_report+0xe5/0x110 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/kasan/report.c:491
+ user_mode home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/include/asm/ptrace.h:136 [inline]
+ unwind_next_frame+0x108/0x2580 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/kernel/unwind_orc.c:431
+ arch_stack_walk+0xb2/0xe0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/kernel/stacktrace.c:25
+ stack_trace_save+0x104/0x1e0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/stacktrace.c:122
+ kasan_save_stack+0x2b/0x50 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/kasan/common.c:38
+ __kasan_record_aux_stack home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/kasan/generic.c:348 [inline]
+ kasan_record_aux_stack_noalloc+0x82/0x90 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/kasan/generic.c:358
+ insert_work+0x54/0x410 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/workqueue.c:1358
+ __queue_work+0xa44/0xdd0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/workqueue.c:1517
+ call_timer_fn+0xfb/0x230 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/time/timer.c:1474
+ expire_timers home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/time/timer.c:1514 [inline]
+ __run_timers+0x7c2/0x9a0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/time/timer.c:1790
+ run_timer_softirq+0x63/0xf0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/time/timer.c:1803
+ __do_softirq+0x372/0x783 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/softirq.c:571
+ __irq_exit_rcu+0xcf/0x160 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/softirq.c:650
+ irq_exit_rcu+0x5/0x20 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/softirq.c:662
+ sysvec_apic_timer_interrupt+0x91/0xb0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/kernel/apic/apic.c:1106
+ </IRQ>
+ <TASK>
+ asm_sysvec_apic_timer_interrupt+0x1b/0x20
+RIP: 0010:__sanitizer_cov_trace_pc+0x38/0x60 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/kcov.c:203
+Code: 8b 15 e4 0c 7d 7e f7 c2 00 01 ff 00 74 11 f7 c2 00 01 00 00 74 35 83 b9 a4 15 00 00 00 74 2c 8b 91 80 15 00 00 83 fa 02 75 21 <48> 8b 91 88 15 00 00 48 8b 32 48 8d 7e 01 8b 89 84 15 00 00 48 39
+RSP: 0018:ffffc90004c8f8b0 EFLAGS: 00000246
+RAX: ffffffff8172ca15 RBX: 0000000000000000 RCX: ffff888078148000
+RDX: 0000000000000002 RSI: 000000000003ffff RDI: 0000000000040000
+RBP: ffffc90004c8f9b0 R08: dffffc0000000000 R09: ffffed102aa83e7a
+R10: ffffed102aa83e7a R11: 0000000000000000 R12: 0000000000000000
+R13: ffff88815541f3a0 R14: dffffc0000000000 R15: ffff88815541f000
+ __trampoline+0x5/0x10 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/relrazzer/trampoline/trampoline.c:17
+ trampoline+0xa/0x10 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/relrazzer/trampoline/trampoline.c:32
+ asm_sysvec_apic_timer_interrupt+0x1b/0x20
+RIP: 0010:__sanitizer_cov_trace_pc+0x46/0x60 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/kcov.c:206
+Code: f7 c2 00 01 00 00 74 35 83 b9 a4 15 00 00 00 74 2c 8b 91 80 15 00 00 83 fa 02 75 21 48 8b 91 88 15 00 00 48 8b 32 48 8d 7e 01 <8b> 89 84 15 00 00 48 39 cf 73 08 48 89 3a 48 89 44 f2 08 c3 66 0f
+RSP: 0018:09e1959c2bbebb00 EFLAGS: 00000246
+RAX: 170f12001a131100 RBX: ffffffff85ca3810 RCX: 0000960000000016
+RDX: ffffc90000009600 RSI: 000000000003ffff RDI: 0000000000040000
+RBP: ffffffff9004e6ae R08: 010004157f1c0300 R09: 00008a3b000004bf
+R10: 0000000500004500 R11: 0000000000000000 R12: 0000000041b58ab3
+R13: 1ffff92000991f1c R14: ffff88815541f278 R15: dffffc0000000000
+ </TASK>
+
+The buggy address belongs to stack of task syz-executor.0/21959
+ and is located at offset 112 in frame:
+ tty_set_termios+0x0/0x2820 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/tty/tty_ioctl.c:323
+
+This frame has 1 object:
+ [32, 76) 'old_termios'
+
+The buggy address belongs to the virtual mapping at
+ [ffffc90004c88000, ffffc90004c91000) created by:
+ dup_task_struct home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/fork.c:978 [inline]
+ copy_process+0x722/0x6510 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/fork.c:2073
+
+The buggy address belongs to the physical page:
+page:ffffea000081fa40 refcount:1 mapcount:0 mapping:0000000000000000 index:0x0 pfn:0x207e9
+flags: 0xfff00000000000(node=0|zone=1|lastcpupid=0x7ff)
+raw: 00fff00000000000 0000000000000000 dead000000000122 0000000000000000
+raw: 0000000000000000 0000000000000000 00000001ffffffff 0000000000000000
+page dumped because: kasan: bad access detected
+page_owner tracks the page as allocated
+page last allocated via order 0, migratetype Unmovable, gfp_mask 0x2dc2(GFP_KERNEL|__GFP_HIGHMEM|__GFP_NOWARN|__GFP_ZERO), pid 18186, tgid 18186 (kworker/u9:0), ts 2362010960256, free_ts 2357466120426
+ prep_new_page home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/page_alloc.c:2456 [inline]
+ get_page_from_freelist+0xa7c/0xf50 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/page_alloc.c:4198
+ __alloc_pages+0x30e/0x710 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/page_alloc.c:5426
+ vm_area_alloc_pages home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/vmalloc.c:2927 [inline]
+ __vmalloc_area_node home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/vmalloc.c:2995 [inline]
+ __vmalloc_node_range+0x973/0x1820 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/vmalloc.c:3165
+ alloc_thread_stack_node+0x30b/0x510 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/fork.c:313
+ dup_task_struct home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/fork.c:978 [inline]
+ copy_process+0x722/0x6510 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/fork.c:2073
+ kernel_clone+0x22a/0x810 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/fork.c:2657
+ user_mode_thread+0x12d/0x190 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/fork.c:2726
+ call_usermodehelper_exec_work+0x5b/0x260 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/umh.c:174
+ process_one_work+0x909/0x12b0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/workqueue.c:2289
+ worker_thread+0xab1/0x1320 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/workqueue.c:2436
+ kthread+0x294/0x330 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/kthread.c:376
+ ret_from_fork+0x1f/0x30
+page last free stack trace:
+ reset_page_owner home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/page_owner.h:24 [inline]
+ free_pages_prepare home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/page_alloc.c:1371 [inline]
+ free_pcp_prepare+0xa65/0xc90 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/page_alloc.c:1421
+ free_unref_page_prepare home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/page_alloc.c:3343 [inline]
+ free_unref_page+0x7e/0x740 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/page_alloc.c:3438
+ tlb_batch_list_free home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/mmu_gather.c:74 [inline]
+ tlb_finish_mmu+0x173/0x300 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/mmu_gather.c:356
+ exit_mmap+0x230/0x720 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/mmap.c:3164
+ __mmput+0x13d/0x400 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/fork.c:1189
+ exit_mm+0x209/0x2f0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/exit.c:511
+ do_exit+0x570/0x20a0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/exit.c:784
+ do_group_exit+0x24f/0x300 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/exit.c:927
+ get_signal+0x2425/0x2480 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/signal.c:2857
+ arch_do_signal_or_restart+0x7b/0x740 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/kernel/signal.c:869
+ exit_to_user_mode_loop home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/entry/common.c:166 [inline]
+ exit_to_user_mode_prepare+0x154/0x220 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/entry/common.c:201
+ __syscall_exit_to_user_mode_work home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/entry/common.c:283 [inline]
+ syscall_exit_to_user_mode+0x26/0x60 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/entry/common.c:294
+ do_syscall_64+0x5f/0xa0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:89
+ entry_SYSCALL_64_after_hwframe+0x46/0xb0
+
+Memory state around the buggy address:
+ ffffc90004c8f800: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+ ffffc90004c8f880: 00 00 00 00 00 00 00 00 00 00 00 00 f1 f1 f1 f1
+>ffffc90004c8f900: 00 00 00 00 00 04 f3 f3 f3 f3 f3 f3 00 00 00 00
+                                                 ^
+ ffffc90004c8f980: 00 00 00 00 00 00 00 00 00 00 00 00 f1 f1 f1 f1
+ ffffc90004c8fa00: 00 00 00 00 00 04 f3 f3 f3 f3 f3 f3 00 00 00 00
+==================================================================
+----------------
+Code disassembly (best guess):
+   0:	8b 15 e4 0c 7d 7e    	mov    0x7e7d0ce4(%rip),%edx        # 0x7e7d0cea
+   6:	f7 c2 00 01 ff 00    	test   $0xff0100,%edx
+   c:	74 11                	je     0x1f
+   e:	f7 c2 00 01 00 00    	test   $0x100,%edx
+  14:	74 35                	je     0x4b
+  16:	83 b9 a4 15 00 00 00 	cmpl   $0x0,0x15a4(%rcx)
+  1d:	74 2c                	je     0x4b
+  1f:	8b 91 80 15 00 00    	mov    0x1580(%rcx),%edx
+  25:	83 fa 02             	cmp    $0x2,%edx
+  28:	75 21                	jne    0x4b
+* 2a:	48 8b 91 88 15 00 00 	mov    0x1588(%rcx),%rdx <-- trapping instruction
+  31:	48 8b 32             	mov    (%rdx),%rsi
+  34:	48 8d 7e 01          	lea    0x1(%rsi),%rdi
+  38:	8b 89 84 15 00 00    	mov    0x1584(%rcx),%ecx
+  3e:	48                   	rex.W
+  3f:	39                   	.byte 0x39
