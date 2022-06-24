@@ -17,9 +17,9 @@ b13baccc3850ca
 
 - Crash report: 
 BUG: KASAN: use-after-free in cfusbl_device_notify+0x155/0xf40 net/caif/caif_usb.c:138
-Read of size 8 at addr ffff8880247126f0 by task kworker/u8:2/18867
+Read of size 8 at addr ffff88804bc4c6f0 by task kworker/u8:0/18109
 
-CPU: 3 PID: 18867 Comm: kworker/u8:2 Not tainted 5.19.0-rc1-31595-gdf1bbda1a939 #1
+CPU: 1 PID: 18109 Comm: kworker/u8:0 Not tainted 5.19.0-rc2-31838-gef9c98f9637f #2
 Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
 Workqueue: netns cleanup_net
 Call Trace:
@@ -46,28 +46,40 @@ Call Trace:
  ret_from_fork+0x1f/0x30
  </TASK>
 
-Allocated by task 20382:
+Allocated by task 6688:
  kasan_save_stack mm/kasan/common.c:38 [inline]
  kasan_set_track mm/kasan/common.c:45 [inline]
  set_alloc_info mm/kasan/common.c:436 [inline]
- __kasan_slab_alloc+0x80/0xb0 mm/kasan/common.c:469
- kasan_slab_alloc include/linux/kasan.h:224 [inline]
- slab_post_alloc_hook mm/slab.h:750 [inline]
- slab_alloc_node mm/slub.c:3214 [inline]
- slab_alloc mm/slub.c:3222 [inline]
- __kmem_cache_alloc_lru mm/slub.c:3229 [inline]
- kmem_cache_alloc+0x422/0x5a0 mm/slub.c:3239
- getname_flags+0x132/0xb10 fs/namei.c:139
- do_sys_openat2+0xb9/0x750 fs/open.c:1272
- do_sys_open fs/open.c:1294 [inline]
- __do_sys_open fs/open.c:1302 [inline]
- __se_sys_open fs/open.c:1298 [inline]
- __x64_sys_open+0x2af/0x340 fs/open.c:1298
+ ____kasan_kmalloc mm/kasan/common.c:515 [inline]
+ __kasan_kmalloc+0xac/0xe0 mm/kasan/common.c:524
+ kasan_kmalloc include/linux/kasan.h:234 [inline]
+ __kmalloc_node+0xed/0x780 mm/slub.c:4465
+ kmalloc_node include/linux/slab.h:623 [inline]
+ kvmalloc_node+0x6e/0x1a0 mm/util.c:613
+ kvmalloc include/linux/slab.h:750 [inline]
+ kvzalloc include/linux/slab.h:758 [inline]
+ alloc_netdev_mqs+0x94/0x1da0 net/core/dev.c:10576
+ rtnl_create_link+0x4ec/0x1360 net/core/rtnetlink.c:3241
+ veth_newlink+0x4a9/0x1810 drivers/net/veth.c:1749
+ rtnl_newlink_create net/core/rtnetlink.c:3363 [inline]
+ __rtnl_newlink net/core/rtnetlink.c:3580 [inline]
+ rtnl_newlink+0x251d/0x2fc0 net/core/rtnetlink.c:3593
+ rtnetlink_rcv_msg+0x1103/0x1a60 net/core/rtnetlink.c:6089
+ netlink_rcv_skb+0x2b6/0x670 net/netlink/af_netlink.c:2501
+ netlink_unicast_kernel net/netlink/af_netlink.c:1319 [inline]
+ netlink_unicast+0xc68/0xff0 net/netlink/af_netlink.c:1345
+ netlink_sendmsg+0x11a0/0x1680 net/netlink/af_netlink.c:1921
+ sock_sendmsg_nosec net/socket.c:693 [inline]
+ sock_sendmsg net/socket.c:713 [inline]
+ __sys_sendto+0x544/0x770 net/socket.c:2098
+ __do_sys_sendto net/socket.c:2110 [inline]
+ __se_sys_sendto net/socket.c:2106 [inline]
+ __x64_sys_sendto+0x1bb/0x250 net/socket.c:2106
  do_syscall_x64 arch/x86/entry/common.c:51 [inline]
  do_syscall_64+0x4e/0xa0 arch/x86/entry/common.c:82
  entry_SYSCALL_64_after_hwframe+0x46/0xb0
 
-Freed by task 20382:
+Freed by task 18109:
  kasan_save_stack mm/kasan/common.c:38 [inline]
  kasan_set_track+0x3d/0x60 mm/kasan/common.c:45
  kasan_set_free_info+0x1f/0x40 mm/kasan/generic.c:370
@@ -76,30 +88,32 @@ Freed by task 20382:
  slab_free_hook mm/slub.c:1727 [inline]
  slab_free_freelist_hook+0x20c/0x540 mm/slub.c:1753
  slab_free mm/slub.c:3507 [inline]
- kmem_cache_free+0x98/0x400 mm/slub.c:3524
- do_sys_openat2+0x5de/0x750 fs/open.c:1287
- do_sys_open fs/open.c:1294 [inline]
- __do_sys_open fs/open.c:1302 [inline]
- __se_sys_open fs/open.c:1298 [inline]
- __x64_sys_open+0x2af/0x340 fs/open.c:1298
- do_syscall_x64 arch/x86/entry/common.c:51 [inline]
- do_syscall_64+0x4e/0xa0 arch/x86/entry/common.c:82
- entry_SYSCALL_64_after_hwframe+0x46/0xb0
+ kfree+0x117/0x7e0 mm/slub.c:4555
+ device_release+0xf5/0x390
+ kobject_cleanup+0x340/0x4e0 lib/kobject.c:673
+ netdev_run_todo+0x211c/0x23c0 net/core/dev.c:10358
+ default_device_exit_batch+0x99a/0xa10 net/core/dev.c:11329
+ ops_exit_list net/core/net_namespace.c:167 [inline]
+ cleanup_net+0xd23/0x15a0 net/core/net_namespace.c:594
+ process_one_work+0x909/0x12b0 kernel/workqueue.c:2289
+ worker_thread+0xab1/0x1320 kernel/workqueue.c:2436
+ kthread+0x294/0x330 kernel/kthread.c:376
+ ret_from_fork+0x1f/0x30
 
-The buggy address belongs to the object at ffff888024712200
- which belongs to the cache names_cache of size 4096
-The buggy address is located 1264 bytes inside of
- 4096-byte region [ffff888024712200, ffff888024713200)
+The buggy address belongs to the object at ffff88804bc4c000
+ which belongs to the cache kmalloc-cg-4k of size 4096
+The buggy address is located 1776 bytes inside of
+ 4096-byte region [ffff88804bc4c000, ffff88804bc4d000)
 
 The buggy address belongs to the physical page:
-page:ffffea000091c400 refcount:1 mapcount:0 mapping:0000000000000000 index:0x0 pfn:0x24710
-head:ffffea000091c400 order:3 compound_mapcount:0 compound_pincount:0
+page:ffffea00012f1200 refcount:1 mapcount:0 mapping:0000000000000000 index:0x0 pfn:0x4bc48
+head:ffffea00012f1200 order:3 compound_mapcount:0 compound_pincount:0
 flags: 0xfff00000010200(slab|head|node=0|zone=1|lastcpupid=0x7ff)
-raw: 00fff00000010200 0000000000000000 dead000000000001 ffff888018613040
-raw: 0000000000000000 0000000000070007 00000001ffffffff 0000000000000000
+raw: 00fff00000010200 0000000000000000 dead000000000122 ffff88801844c140
+raw: 0000000000000000 0000000000040004 00000001ffffffff 0000000000000000
 page dumped because: kasan: bad access detected
 page_owner tracks the page as allocated
-page last allocated via order 3, migratetype Unmovable, gfp_mask 0xd20c0(__GFP_IO|__GFP_FS|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_NOMEMALLOC), pid 1, tgid 1 (systemd), ts 2072380709733, free_ts 2071657522194
+page last allocated via order 3, migratetype Unmovable, gfp_mask 0xd20c0(__GFP_IO|__GFP_FS|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_NOMEMALLOC), pid 6688, tgid 6688 (syz-executor.0), ts 297836664488, free_ts 31867390869
  prep_new_page mm/page_alloc.c:2456 [inline]
  get_page_from_freelist+0xa7c/0xf50 mm/page_alloc.c:4198
  __alloc_pages+0x30e/0x710 mm/page_alloc.c:5426
@@ -110,53 +124,45 @@ page last allocated via order 3, migratetype Unmovable, gfp_mask 0xd20c0(__GFP_I
  __slab_alloc mm/slub.c:3089 [inline]
  slab_alloc_node mm/slub.c:3180 [inline]
  slab_alloc mm/slub.c:3222 [inline]
- __kmem_cache_alloc_lru mm/slub.c:3229 [inline]
- kmem_cache_alloc+0x4e6/0x5a0 mm/slub.c:3239
- getname_flags+0x132/0xb10 fs/namei.c:139
- do_sys_openat2+0xb9/0x750 fs/open.c:1272
- do_sys_open fs/open.c:1294 [inline]
- __do_sys_open fs/open.c:1302 [inline]
- __se_sys_open fs/open.c:1298 [inline]
- __x64_sys_open+0x2af/0x340 fs/open.c:1298
- do_syscall_x64 arch/x86/entry/common.c:51 [inline]
- do_syscall_64+0x4e/0xa0 arch/x86/entry/common.c:82
- entry_SYSCALL_64_after_hwframe+0x46/0xb0
+ __kmalloc_track_caller+0x53a/0x600 mm/slub.c:4919
+ kmemdup+0x21/0x50 mm/util.c:129
+ _Z7kmemdupPKvU17pass_object_size0mj include/linux/fortify-string.h:456 [inline]
+ __addrconf_sysctl_register+0x97/0x680 net/ipv6/addrconf.c:7061
+ addrconf_sysctl_register+0x1c3/0x2a0 net/ipv6/addrconf.c:7126
+ ipv6_add_dev+0x170e/0x1f80 net/ipv6/addrconf.c:450
+ addrconf_notify+0xa36/0x3730 net/ipv6/addrconf.c:3532
+ notifier_call_chain kernel/notifier.c:87 [inline]
+ raw_notifier_call_chain+0xd4/0x170 kernel/notifier.c:455
+ call_netdevice_notifiers_info net/core/dev.c:1943 [inline]
+ call_netdevice_notifiers_extack net/core/dev.c:1981 [inline]
+ call_netdevice_notifiers net/core/dev.c:1995 [inline]
+ register_netdevice+0x23b1/0x32c0 net/core/dev.c:10078
+ hsr_dev_finalize+0x803/0xd50 net/hsr/hsr_device.c:539
+ hsr_newlink+0xba5/0xcf0 net/hsr/hsr_netlink.c:102
+ rtnl_newlink_create net/core/rtnetlink.c:3363 [inline]
+ __rtnl_newlink net/core/rtnetlink.c:3580 [inline]
+ rtnl_newlink+0x251d/0x2fc0 net/core/rtnetlink.c:3593
 page last free stack trace:
  reset_page_owner include/linux/page_owner.h:24 [inline]
  free_pages_prepare mm/page_alloc.c:1371 [inline]
  free_pcp_prepare+0xa65/0xc90 mm/page_alloc.c:1421
  free_unref_page_prepare mm/page_alloc.c:3343 [inline]
  free_unref_page+0x7e/0x740 mm/page_alloc.c:3438
- __unfreeze_partials+0x3ba/0x3f0 mm/slub.c:2521
- put_cpu_partial+0x20e/0x2e0 mm/slub.c:2597
- do_slab_free mm/slub.c:3495 [inline]
- ___cache_free+0x20d/0x240 mm/slub.c:3514
- qlist_free_all mm/kasan/quarantine.c:187 [inline]
- kasan_quarantine_reduce+0x150/0x1c0 mm/kasan/quarantine.c:294
- __kasan_slab_alloc+0x2f/0xb0 mm/kasan/common.c:446
- kasan_slab_alloc include/linux/kasan.h:224 [inline]
- slab_post_alloc_hook mm/slab.h:750 [inline]
- slab_alloc_node mm/slub.c:3214 [inline]
- slab_alloc mm/slub.c:3222 [inline]
- __kmalloc+0x4bc/0x6a0 mm/slub.c:4413
- kmalloc include/linux/slab.h:605 [inline]
- tomoyo_realpath_from_path+0xe8/0x650 security/tomoyo/realpath.c:254
- tomoyo_get_realpath security/tomoyo/file.c:151 [inline]
- tomoyo_path_perm+0x22c/0x680 security/tomoyo/file.c:822
- security_inode_getattr+0xd0/0x150 security/security.c:1344
- vfs_getattr fs/stat.c:157 [inline]
- vfs_fstat fs/stat.c:182 [inline]
- __do_sys_newfstat fs/stat.c:435 [inline]
- __se_sys_newfstat+0xcc/0x910 fs/stat.c:432
- do_syscall_x64 arch/x86/entry/common.c:51 [inline]
- do_syscall_64+0x4e/0xa0 arch/x86/entry/common.c:82
- entry_SYSCALL_64_after_hwframe+0x46/0xb0
+ free_contig_range+0xd9/0x240 mm/page_alloc.c:9314
+ destroy_args+0x153/0xee4 mm/debug_vm_pgtable.c:1031
+ debug_vm_pgtable+0x4bd/0x553 mm/debug_vm_pgtable.c:1354
+ do_one_initcall+0x1a8/0x410 init/main.c:1295
+ do_initcall_level+0x168/0x21d init/main.c:1368
+ do_initcalls+0x50/0x91 init/main.c:1384
+ kernel_init_freeable+0x40d/0x59a init/main.c:1610
+ kernel_init+0x19/0x2c0 init/main.c:1499
+ ret_from_fork+0x1f/0x30
 
 Memory state around the buggy address:
- ffff888024712580: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
- ffff888024712600: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
->ffff888024712680: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
+ ffff88804bc4c580: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
+ ffff88804bc4c600: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
+>ffff88804bc4c680: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
                                                              ^
- ffff888024712700: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
- ffff888024712780: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
+ ffff88804bc4c700: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
+ ffff88804bc4c780: fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
 ==================================================================
