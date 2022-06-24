@@ -11,8 +11,10 @@ import sys
 from bs4 import BeautifulSoup
 
 
-def grab_crashes_from_machine(machine):
-    path = os.path.join(machine["workdir"])
+def grab_crashes_from_machine(machine, old_crashes):
+    path = machine["workdir"]
+    if not old_crashes:
+        path = os.path.join(path, "crashes")
     find_cmd = 'find {} -name description -printf "%h " -exec cat {{}} \;'.format(path)
 
     cmd = ["ssh", machine["addr"]]
@@ -124,6 +126,7 @@ def main():
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--unfixed-only", action="store_true")
     parser.add_argument("--no-starvation", action="store_true")
+    parser.add_argument("--old_crashes", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -140,7 +143,7 @@ def main():
 
     total = {}
     for machine in machines:
-        crashes = grab_crashes_from_machine(machine)
+        crashes = grab_crashes_from_machine(machine, args.old_crashes)
         if args.all:
             print_crashes(machine["name"], crashes, fixed, starvation)
         total = total | crashes
