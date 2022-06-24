@@ -96,15 +96,34 @@ def retrieve_titles_from_soup(soup, desires):
     return titles
 
 
-def crawl_fixed_titles():
+def crawl_syzkaller_crash_titles(args):
     import requests
 
     url_open = "https://syzkaller.appspot.com/upstream"
     url_fixed = "https://syzkaller.appspot.com/upstream/fixed"
-    urls = [("open", ["open", "moderation"], url_open), ("fixed", [], url_fixed)]
+    urls = []
+
+    check_open, check_fixed = False, False
+    if args.unknown_only:
+        check_open, check_fixed, = (
+            True,
+            True,
+        )
+    elif args.unfixed_only:
+        check_open, check_fixed, = (
+            False,
+            True,
+        )
+
+    urls = [
+        ("open", ["open", "moderation"], url_open, check_open),
+        ("fixed", [], url_fixed, check_fixed),
+    ]
 
     titles = set()
-    for name, captions, url in urls:
+    for name, captions, url, check in urls:
+        if not check:
+            continue
         response = requests.get(url)
         if response.status_code == 200:
             html = response.text
@@ -125,6 +144,7 @@ def main():
     parser.add_argument("--machine", action="store", default="machines.json")
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--unfixed-only", action="store_true")
+    parser.add_argument("--unknown-only", action="store_true")
     parser.add_argument("--no-starvation", action="store_true")
     parser.add_argument("--old_crashes", action="store_true")
     parser.add_argument("--verbose", action="store_true")
@@ -133,7 +153,7 @@ def main():
     with open(args.machine) as f:
         machines = json.load(f)
 
-    fixed = crawl_fixed_titles() if args.unfixed_only else []
+    fixed = crawl_syzkaller_crash_titles(args)
     if args.verbose:
         print("fixed")
         for f in fixed:
