@@ -1,0 +1,8 @@
+Marc Kleine-Budde <mkl@pengutronix.de> (maintainer:CAN NETWORK DRIVERS)
+"David S. Miller" <davem@davemloft.net> (maintainer:NETWORKING DRIVERS)
+Eric Dumazet <edumazet@google.com> (maintainer:NETWORKING DRIVERS)
+Jakub Kicinski <kuba@kernel.org> (maintainer:NETWORKING DRIVERS)
+Paolo Abeni <pabeni@redhat.com> (maintainer:NETWORKING DRIVERS)
+linux-can@vger.kernel.org (open list:CAN NETWORK DRIVERS)
+netdev@vger.kernel.org (open list:NETWORKING DRIVERS)
+linux-kernel@vger.kernel.org (open list)

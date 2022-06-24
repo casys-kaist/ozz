@@ -1,0 +1,6 @@
+"David S. Miller" <davem@davemloft.net> (maintainer:NETWORKING [GENERAL],commit_signer:1/1=100%)
+Eric Dumazet <edumazet@google.com> (maintainer:NETWORKING [GENERAL])
+Jakub Kicinski <kuba@kernel.org> (maintainer:NETWORKING [GENERAL],commit_signer:1/1=100%,authored:1/1=100%,added_lines:1/1=100%,removed_lines:1/1=100%)
+Paolo Abeni <pabeni@redhat.com> (maintainer:NETWORKING [GENERAL])
+netdev@vger.kernel.org (open list:CAIF NETWORK LAYER)
+linux-kernel@vger.kernel.org (open list)
