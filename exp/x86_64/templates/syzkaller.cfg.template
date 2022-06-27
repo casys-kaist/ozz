@@ -16,5 +16,5 @@
 		"cpu": 4,
 		"mem": 4096
 	},
-	"disable_syscalls": ["execveat", "fork", "clone", "exit", "execve"]
+	"disable_syscalls": ["execveat", "fork", "clone", "exit", "execve", "ssb_sbitmap_func1", "ssb_sbitmap_func2", "ssb_sbitmap_clear"]
 }
