@@ -1,0 +1,195 @@
+INFO: task kworker/1:0:9420 blocked for more than 143 seconds.
+      Not tainted 5.19.0-rc3-32288-g0f3b08299494 #15
+"echo 0 > /proc/sys/kernel/hung_task_timeout_secs" disables this message.
+task:kworker/1:0     state:D stack:23896 pid: 9420 ppid:     2 flags:0x00004000
+Workqueue: usb_hub_wq hub_event
+Call Trace:
+ <TASK>
+ context_switch home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/sched/core.c:5146 [inline]
+ __schedule+0x96c/0x10f0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/sched/core.c:6458
+ schedule+0xea/0x1b0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/sched/core.c:6530
+ usb_kill_urb+0x255/0x400 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/usb/core/urb.c:726
+ usb_start_wait_urb+0x2fa/0x6b0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/usb/core/message.c:64
+ usb_internal_control_msg home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/usb/core/message.c:102 [inline]
+ usb_control_msg+0x393/0x6c0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/usb/core/message.c:153
+ usb_get_descriptor+0xc2/0x4c0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/usb/core/message.c:793
+ usb_get_device_descriptor+0xa4/0x110 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/usb/core/message.c:1071
+ hub_port_init+0x1809/0x4180 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/usb/core/hub.c:4931
+ hub_port_connect+0x101e/0x3a00 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/usb/core/hub.c:5292
+ hub_port_connect_change+0x754/0xf20 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/usb/core/hub.c:5507
+ port_event+0xe87/0x16c0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/usb/core/hub.c:5663
+ hub_event+0x54c/0x1140 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/usb/core/hub.c:5745
+ process_one_work+0x909/0x12b0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/workqueue.c:2289
+ worker_thread+0xab1/0x1320 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/workqueue.c:2436
+ kthread+0x294/0x330 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/kthread.c:376
+ ret_from_fork+0x1f/0x30
+ </TASK>
+
+Showing all locks held in the system:
+1 lock held by khungtaskd/39:
+ #0: ffffffff9071a3e0 (rcu_read_lock){....}-{1:2}, at: rcu_lock_acquire+0x0/0x30
+1 lock held by in:imklog/6589:
+ #0: ffff888148616668 (&f->f_pos_lock){+.+.}-{3:3}, at: __fdget_pos+0x2f3/0x430 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/file.c:1036
+5 locks held by kworker/1:0/9420:
+ #0: ffff8881459c2d38 ((wq_completion)usb_hub_wq){+.+.}-{0:0}, at: process_one_work+0x87a/0x12b0
+ #1: ffffc900084bfd20 ((work_completion)(&hub->events)){+.+.}-{0:0}, at: process_one_work+0x8be/0x12b0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/workqueue.c:2264
+ #2: ffff88814acfd190 (&dev->mutex){....}-{3:3}, at: device_lock home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/device.h:835 [inline]
+ #2: ffff88814acfd190 (&dev->mutex){....}-{3:3}, at: hub_event+0x190/0x1140 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/usb/core/hub.c:5691
+ #3: ffff8880243e04f8 (&port_dev->status_lock){+.+.}-{3:3}, at: usb_lock_port home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/usb/core/hub.c:3095 [inline]
+ #3: ffff8880243e04f8 (&port_dev->status_lock){+.+.}-{3:3}, at: hub_port_connect+0x659/0x3a00 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/usb/core/hub.c:5259
+ #4: ffff8880241ba768 (hcd->address0_mutex){+.+.}-{3:3}, at: hub_port_connect+0x690/0x3a00 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/usb/core/hub.c:5260
+
+=============================================
+
+NMI backtrace for cpu 1
+CPU: 1 PID: 39 Comm: khungtaskd Not tainted 5.19.0-rc3-32288-g0f3b08299494 #15
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
+Call Trace:
+ <TASK>
+ __dump_stack home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/lib/dump_stack.c:88 [inline]
+ dump_stack_lvl+0x20a/0x302 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/lib/dump_stack.c:106
+ nmi_cpu_backtrace+0x517/0x560 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/lib/nmi_backtrace.c:111
+ nmi_trigger_cpumask_backtrace+0x1fe/0x3e0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/lib/nmi_backtrace.c:62
+ trigger_all_cpu_backtrace home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/nmi.h:146 [inline]
+ check_hung_uninterruptible_tasks home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/hung_task.c:220 [inline]
+ watchdog+0xe0d/0xe70 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/hung_task.c:378
+ kthread+0x294/0x330 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/kthread.c:376
+ ret_from_fork+0x1f/0x30
+ </TASK>
+Sending NMI from CPU 1 to CPUs 0,2-3:
+NMI backtrace for cpu 2
+CPU: 2 PID: 6590 Comm: rs:main Q:Reg Not tainted 5.19.0-rc3-32288-g0f3b08299494 #15
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
+RIP: 0010:unwind_get_return_address+0x0/0x80 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/kernel/unwind_orc.c:314
+Code: 0f 8c fb fe ff ff 48 89 df 89 74 24 14 e8 18 c1 b2 00 48 8d 7c 24 40 8b 74 24 14 e9 e1 fe ff ff e8 c5 62 7c 0c 0f 1f 44 00 00 <41> 57 41 56 53 48 89 fb 49 be 00 00 00 00 00 fc ff df 48 89 f8 48
+RSP: 0018:ffffc900112b71f8 EFLAGS: 00000202
+RAX: 0000000080000001 RBX: ffffc900112b7200 RCX: 0000000080000000
+RDX: ffffc900112b78a0 RSI: 0000000000000001 RDI: ffffc900112b7200
+RBP: ffffc900112b7290 R08: dffffc0000000000 R09: ffffc900112b7250
+R10: fffff52002256e4c R11: 0000000000000000 R12: ffff88814853bb00
+R13: ffffffff81731cc0 R14: ffffc900112b72c0 R15: 0000000000000000
+FS:  00007f17d67fd700(0000) GS:ffff8880b9300000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00005596a7a37000 CR3: 000000014a01d000 CR4: 00000000003506e0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+Call Trace:
+ <TASK>
+ arch_stack_walk+0x98/0xe0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/kernel/stacktrace.c:26
+ stack_trace_save+0x104/0x1e0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/stacktrace.c:122
+ kasan_save_stack home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/kasan/common.c:38 [inline]
+ kasan_set_track+0x3d/0x60 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/kasan/common.c:45
+ kasan_set_free_info+0x1f/0x40 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/kasan/generic.c:370
+ ____kasan_slab_free+0xb2/0xf0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/kasan/common.c:366
+ kasan_slab_free home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/kasan.h:200 [inline]
+ slab_free_hook home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/slub.c:1754 [inline]
+ slab_free_freelist_hook+0x20c/0x540 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/slub.c:1780
+ slab_free home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/slub.c:3536 [inline]
+ kmem_cache_free+0x98/0x400 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/slub.c:3553
+ jbd2_free_handle home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/jbd2.h:1602 [inline]
+ jbd2_journal_stop+0xc3b/0x11e0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/jbd2/transaction.c:1946
+ __ext4_journal_stop+0x148/0x240 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/ext4/ext4_jbd2.c:127
+ __mark_inode_dirty+0xe2/0x8f0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/fs-writeback.c:2381
+ mark_inode_dirty home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/fs.h:2332 [inline]
+ generic_write_end+0x17d/0x1d0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/buffer.c:2199
+ ext4_da_write_end+0xa29/0xc80 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/ext4/inode.c:3078
+ generic_perform_write+0x4a0/0x7a0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/filemap.c:3790
+ ext4_buffered_write_iter+0x4d6/0x7f0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/ext4/file.c:270
+ ext4_file_write_iter+0xdf6/0x27b0
+ call_write_iter home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/fs.h:2058 [inline]
+ new_sync_write home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/read_write.c:504 [inline]
+ vfs_write+0xbbc/0x11c0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/read_write.c:591
+ ksys_write+0x1a3/0x340 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/read_write.c:644
+ do_syscall_x64 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:51 [inline]
+ do_syscall_64+0x4e/0xa0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:82
+ entry_SYSCALL_64_after_hwframe+0x46/0xb0
+RIP: 0033:0x7f17db0101cd
+Code: c2 20 00 00 75 10 b8 01 00 00 00 0f 05 48 3d 01 f0 ff ff 73 31 c3 48 83 ec 08 e8 ae fc ff ff 48 89 04 24 b8 01 00 00 00 0f 05 <48> 8b 3c 24 48 89 c2 e8 f7 fc ff ff 48 89 d0 48 83 c4 08 48 3d 01
+RSP: 002b:00007f17d67fc590 EFLAGS: 00000293 ORIG_RAX: 0000000000000001
+RAX: ffffffffffffffda RBX: 00007f17cc0085d0 RCX: 00007f17db0101cd
+RDX: 0000000000000ac5 RSI: 00007f17cc0085d0 RDI: 0000000000000006
+RBP: 0000000000000000 R08: 0000000000000000 R09: 0000000000000000
+R10: 0000000000000000 R11: 0000000000000293 R12: 00007f17cc008350
+R13: 00007f17d67fc5b0 R14: 000055ed3e212360 R15: 0000000000000ac5
+ </TASK>
+NMI backtrace for cpu 3
+CPU: 3 PID: 3016 Comm: systemd-journal Not tainted 5.19.0-rc3-32288-g0f3b08299494 #15
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
+RIP: 0010:native_save_fl home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/include/asm/irqflags.h:35 [inline]
+RIP: 0010:arch_local_save_flags home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/include/asm/irqflags.h:70 [inline]
+RIP: 0010:arch_local_irq_save home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/include/asm/irqflags.h:106 [inline]
+RIP: 0010:__flush_callback_pso home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/kssb/kssb_pso.c:413 [inline]
+RIP: 0010:__ssb_pso_flush+0x17/0x70 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/kssb/callback.h:103
+Code: 85 59 ff ff ff e9 55 ff ff ff e8 14 0b 0b 0c 0f 1f 40 00 53 48 83 ec 10 65 48 8b 04 25 28 00 00 00 48 89 44 24 08 9c 8f 04 24 <48> 8b 1c 24 fa 31 ff e8 bd 00 00 00 9c 8f 04 24 f7 04 24 00 02 00
+RSP: 0018:ffffc9000320f9c0 EFLAGS: 00000086
+RAX: d32eb54d18694700 RBX: dffffc0000000000 RCX: 000000000320fa03
+RDX: dffffc0000000000 RSI: 1ffff92000641f48 RDI: 0000000000000000
+RBP: ffffc9000320fad0 R08: dffffc0000000000 R09: fffffbfff276d981
+R10: fffffbfff276d981 R11: 0000000000000000 R12: ffffc9000320fa60
+R13: ffffffff95599758 R14: 1ffff92000641f4c R15: 1ffffffff2ab32ec
+FS:  00007fe33b5aa8c0(0000) GS:ffff88823bd00000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00007fe336bc7000 CR3: 00000000282b7000 CR4: 00000000003506e0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+Call Trace:
+ <TASK>
+ atomic_try_cmpxchg_acquire home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/atomic/atomic-instrumented.h:599 [inline]
+ queued_spin_lock home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/asm-generic/qspinlock.h:111 [inline]
+ do_raw_spin_lock+0x13d/0x900 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/locking/spinlock_debug.c:115
+ __raw_spin_lock_irqsave home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/spinlock_api_smp.h:111 [inline]
+ _raw_spin_lock_irqsave+0xbf/0x100 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/locking/spinlock.c:162
+ __debug_check_no_obj_freed home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/lib/debugobjects.c:977 [inline]
+ debug_check_no_obj_freed+0xc0/0xb00 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/lib/debugobjects.c:1020
+ slab_free_hook home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/slub.c:1729 [inline]
+ slab_free_freelist_hook+0x15a/0x540 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/slub.c:1780
+ slab_free home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/slub.c:3536 [inline]
+ kmem_cache_free+0x98/0x400 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/slub.c:3553
+ do_sys_openat2+0x4d8/0x610 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/open.c:1287
+ do_sys_open home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/open.c:1294 [inline]
+ __do_sys_open home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/open.c:1302 [inline]
+ __se_sys_open home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/open.c:1298 [inline]
+ __x64_sys_open+0x245/0x2c0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/open.c:1298
+ do_syscall_x64 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:51 [inline]
+ do_syscall_64+0x4e/0xa0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:82
+ entry_SYSCALL_64_after_hwframe+0x46/0xb0
+RIP: 0033:0x7fe33a210840
+Code: 73 01 c3 48 8b 0d 68 77 20 00 f7 d8 64 89 01 48 83 c8 ff c3 66 0f 1f 44 00 00 83 3d 89 bb 20 00 00 75 10 b8 02 00 00 00 0f 05 <48> 3d 01 f0 ff ff 73 31 c3 48 83 ec 08 e8 1e f6 ff ff 48 89 04 24
+RSP: 002b:00007ffcb07f30b8 EFLAGS: 00000246 ORIG_RAX: 0000000000000002
+RAX: ffffffffffffffda RBX: 00007ffcb07f33c0 RCX: 00007fe33a210840
+RDX: 00000000000001a0 RSI: 0000000000080042 RDI: 000055b83e19fc20
+RBP: 000000000000000d R08: 000000000000ffc0 R09: 00000000ffffffff
+R10: 0000000000000069 R11: 0000000000000246 R12: 00000000ffffffff
+R13: 000055b83e193040 R14: 00007ffcb07f3380 R15: 000055b83e19fa40
+ </TASK>
+NMI backtrace for cpu 0
+CPU: 0 PID: 7852 Comm: syz-fuzzer Not tainted 5.19.0-rc3-32288-g0f3b08299494 #15
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
+RIP: 0033:0x44fba5
+Code: 48 8b 44 24 50 48 89 44 24 48 48 89 04 24 48 8b 4c 24 70 48 89 4c 24 08 48 8b 4c 24 30 48 89 4c 24 10 0f 1f 00 e8 fb f4 01 00 <48> 8b 44 24 48 48 89 84 24 90 00 00 00 48 8b 44 24 78 48 89 84 24
+RSP: 002b:000000c00189eb68 EFLAGS: 00000246
+RAX: 000000c014318ae0 RBX: 0000000000000000 RCX: 0000000000000000
+RDX: 0000000000000000 RSI: 0000000001456ab0 RDI: 000000c014318ae0
+RBP: 000000c00189ebc0 R08: 0000000000000000 R09: 0000000000000001
+R10: 000000c014318ae0 R11: 000000c014318ae0 R12: ffffffffffffffff
+R13: 000000000000001e R14: 000000000000001d R15: 0000000000000055
+FS:  00007f787d7ee700 GS:  0000000000000000
+----------------
+Code disassembly (best guess):
+   0:	0f 8c fb fe ff ff    	jl     0xffffff01
+   6:	48 89 df             	mov    %rbx,%rdi
+   9:	89 74 24 14          	mov    %esi,0x14(%rsp)
+   d:	e8 18 c1 b2 00       	callq  0xb2c12a
+  12:	48 8d 7c 24 40       	lea    0x40(%rsp),%rdi
+  17:	8b 74 24 14          	mov    0x14(%rsp),%esi
+  1b:	e9 e1 fe ff ff       	jmpq   0xffffff01
+  20:	e8 c5 62 7c 0c       	callq  0xc7c62ea
+  25:	0f 1f 44 00 00       	nopl   0x0(%rax,%rax,1)
+* 2a:	41 57                	push   %r15 <-- trapping instruction
+  2c:	41 56                	push   %r14
+  2e:	53                   	push   %rbx
+  2f:	48 89 fb             	mov    %rdi,%rbx
+  32:	49 be 00 00 00 00 00 	movabs $0xdffffc0000000000,%r14
+  39:	fc ff df
+  3c:	48 89 f8             	mov    %rdi,%rax
+  3f:	48                   	rex.W
