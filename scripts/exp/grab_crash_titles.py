@@ -36,9 +36,11 @@ def grab_crashes_from_machine(machine, old_crashes):
     return crashes
 
 
-def filterout(title, fixed, starvation):
+def filterout(title, fixed, print_starvation):
     blacklist = ["SYZFAIL", "lost connection", "no output", "suppressed"]
-    starvation_list = ["rcu detected stall", "task hung"] if not starvation else []
+    starvation_list = ["rcu detected stall", "unregister_netdevice"]
+    if not print_starvation:
+        starvation_list.append("hung")
     return (
         len(title) == 0
         or any(title.startswith(b) for b in blacklist)
@@ -47,15 +49,28 @@ def filterout(title, fixed, starvation):
     )
 
 
-def print_crashes(name, crashes, fixed, starvation):
+def print_crashes(name, crashes, open_titles, fixed_titles, print_starvation):
     print(name)
     list_crashes = [(k, v) for k, v in crashes.items()]
     list_crashes.sort(key=lambda x: x[1])
+
+    def may_incomplete_fix(v, fixed_titles):
+        return (
+            "(incomplete fix?)"
+            if any(v.strip() == title.strip() for title in fixed_titles)
+            else ""
+        )
+
     print(
         *[
-            "  " + k + "    " + v
+            "  "
+            + k
+            + "    "
+            + v
+            + " " * (90 - len(v))
+            + may_incomplete_fix(v, fixed_titles)
             for k, v in list_crashes
-            if not filterout(v, fixed, starvation)
+            if not filterout(v, open_titles, print_starvation)
         ],
         sep="\n"
     )
@@ -104,23 +119,24 @@ def crawl_syzkaller_crash_titles(args):
     urls = []
 
     check_open, check_fixed = False, False
-    if args.unknown_only:
-        check_open, check_fixed, = (
-            True,
-            True,
-        )
-    elif args.unfixed_only:
+    if args.unfixed:
         check_open, check_fixed, = (
             False,
             True,
         )
+    else:
+        check_open, check_fixed, = (
+            True,
+            True,
+        )
+
+    open_titles, fixed_titles = set(), set()
 
     urls = [
         ("open", ["open", "moderation"], url_open, check_open),
         ("fixed", [], url_fixed, check_fixed),
     ]
 
-    titles = set()
     for name, captions, url, check in urls:
         if not check:
             continue
@@ -128,7 +144,10 @@ def crawl_syzkaller_crash_titles(args):
         if response.status_code == 200:
             html = response.text
             soup = BeautifulSoup(html, "html.parser")
-            titles = titles | retrieve_titles_from_soup(soup, captions)
+            if name == "open":
+                open_titles = open_titles | retrieve_titles_from_soup(soup, captions)
+            else:
+                fixed_titles = fixed_titles | retrieve_titles_from_soup(soup, captions)
         else:
             print(
                 "Error during crawling {} (code={}). Skipping".format(
@@ -136,15 +155,18 @@ def crawl_syzkaller_crash_titles(args):
                 ),
                 file=sys.stderr,
             )
-    return titles
+
+    if args.unfixed:
+        open_titles = fixed_titles
+
+    return open_titles, fixed_titles
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--machine", action="store", default="machines.json")
     parser.add_argument("--all", action="store_true")
-    parser.add_argument("--unfixed-only", action="store_true")
-    parser.add_argument("--unknown-only", action="store_true")
+    parser.add_argument("--unfixed", action="store_true")
     parser.add_argument("--no-starvation", action="store_true")
     parser.add_argument("--old_crashes", action="store_true")
     parser.add_argument("--verbose", action="store_true")
@@ -153,22 +175,27 @@ def main():
     with open(args.machine) as f:
         machines = json.load(f)
 
-    fixed = crawl_syzkaller_crash_titles(args)
+    open_titles, fixed_titles = crawl_syzkaller_crash_titles(args)
     if args.verbose:
+        print("open")
+        for f in open_titles:
+            print("  " + f)
         print("fixed")
-        for f in fixed:
+        for f in fixed_titles:
             print("  " + f)
 
-    starvation = not args.no_starvation
+    print_starvation = not args.no_starvation
 
     total = {}
     for machine in machines:
         crashes = grab_crashes_from_machine(machine, args.old_crashes)
         if args.all:
-            print_crashes(machine["name"], crashes, fixed, starvation)
+            print_crashes(
+                machine["name"], crashes, open_titles, fixed_titles, print_starvation
+            )
         total = total | crashes
 
-    print_crashes("total", total, fixed, starvation)
+    print_crashes("total", total, open_titles, fixed_titles, print_starvation)
 
 
 if __name__ == "__main__":
