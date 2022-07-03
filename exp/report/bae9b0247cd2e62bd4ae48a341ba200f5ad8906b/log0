@@ -1,3 +1,4 @@
+<<<<<<< HEAD
  #2-132/2/0] Window#2 after shrink: [59, 61)
 [CPU #2-132/2/0] Next scheduling point: 2, ffffffff821ab6bb
 [CPU #2-132/2/0] kidnapping
@@ -19415,17 +19416,385 @@ RSI=0000000000000001 RDI=ffffffff903c066b RBP=ffffffff92c07ed0 RSP=ffffffff92c07
 R8 =dffffc0000000000 R9 =ffffed101718796b R10=ffffed101718796b R11=0000000000000000
 R12=ffffffff944a6ae8 R13=dffffc0000000000 R14=1ffffffff2597738 R15=1ffffffff2580fca
 RIP=ffffffff903c031b RFL=000002c2 [--SZ---] CPL=0 II=0 A20=1 SMM=0 HLT=1
+=======
+[[0;32m  OK  [0m] Started Getty on tty6.
+[[0;32m  OK  [0m] Started Getty on tty5.
+[[0;32m  OK  [0m] Listening on Load/Save RF Kill Switch Status /dev/rfkill Watch.
+[[0;32m  OK  [0m] Started Getty on tty4.
+[[0;32m  OK  [0m] Started Getty on tty3.
+[[0;32m  OK  [0m] Started Getty on tty2.
+[[0;32m  OK  [0m] Reached target Network is Online.
+         Starting Daily apt download activities...
+[[0;32m  OK  [0m] Started Serial Getty on ttyS0.
+[[0;32m  OK  [0m] Started Getty on tty1.
+[[0;32m  OK  [0m] Reached target Login Prompts.
+         Starting Load/Save RF Kill Switch Status...
+[[0;32m  OK  [0m] Started Load/Save RF Kill Switch Status.
+[[0;32m  OK  [0m] Started System Logging Service.
+[[0;32m  OK  [0m] Reached target Multi-User System.
+[[0;32m  OK  [0m] Reached target Graphical Interface.
+         Starting Update UTMP about System Runlevel Changes...
+[[0;32m  OK  [0m] Started Update UTMP about System Runlevel Changes.
+Warning: Permanently added '[localhost]:48416' (ECDSA) to the list of known hosts.
+[FUZZER] 2022/07/03 04:37:33 fuzzer started
+[[0;32m  OK  [0m] Started Daily apt download activities.
+         Starting Daily apt upgrade and clean activities...
+[FUZZER] 2022/07/03 04:37:34 dialing manager at localhost:46769
+[FUZZER] 2022/07/03 04:37:34 connecting to manager...
+[   64.670743][ T6599] systemd-rfkill (6599) used greatest stack depth: 17600 bytes left
+
+Debian GNU/Linux 9 syzkaller ttyS0
+
+[FUZZER] 2022/07/03 04:37:42 connected to manager...
+[FUZZER] 2022/07/03 04:37:42 syscalls: 3567
+[FUZZER] 2022/07/03 04:37:42 code coverage: enabled
+[FUZZER] 2022/07/03 04:37:42 comparison tracing: enabled
+[FUZZER] 2022/07/03 04:37:42 extra coverage: enabled
+[FUZZER] 2022/07/03 04:37:42 setuid sandbox: enabled
+[FUZZER] 2022/07/03 04:37:42 namespace sandbox: enabled
+[FUZZER] 2022/07/03 04:37:42 Android sandbox: /sys/fs/selinux/policy does not exist
+[FUZZER] 2022/07/03 04:37:42 fault injection: enabled
+[FUZZER] 2022/07/03 04:37:42 leak checking: CONFIG_DEBUG_KMEMLEAK is not enabled
+[FUZZER] 2022/07/03 04:37:42 net packet injection: enabled
+[FUZZER] 2022/07/03 04:37:42 net device setup: enabled
+[FUZZER] 2022/07/03 04:37:42 concurrency sanitizer: /sys/kernel/debug/kcsan does not exist
+[FUZZER] 2022/07/03 04:37:42 devlink PCI setup: PCI device 0000:00:10.0 is not available
+[FUZZER] 2022/07/03 04:37:42 USB emulation: enabled
+[FUZZER] 2022/07/03 04:37:42 hci packet injection: enabled
+[FUZZER] 2022/07/03 04:37:42 wifi device emulation: enabled
+[FUZZER] 2022/07/03 04:37:42 802.15.4 emulation: enabled
+[FUZZER] 2022/07/03 04:37:48 Poll takes 6.005153538s
+[FUZZER] 2022/07/03 04:37:48 fetching corpus: 0, signal 0/2000 (executing program)
+syzkaller login: [   85.768625][ T1288] ieee802154 phy0 wpan0: encryption failed: -22
+[   85.768810][ T1288] ieee802154 phy1 wpan1: encryption failed: -22
+[FUZZER] 2022/07/03 04:37:56 Poll takes 7.891954633s
+[FUZZER] 2022/07/03 04:37:56 fetching corpus: 50, signal 16807/19549 (executing program)
+[FUZZER] 2022/07/03 04:38:04 Poll takes 8.439158776s
+[FUZZER] 2022/07/03 04:38:04 fetching corpus: 100, signal 25108/28217 (executing program)
+[FUZZER] 2022/07/03 04:38:12 Poll takes 7.914302164s
+[FUZZER] 2022/07/03 04:38:12 fetching corpus: 129, signal 27151/30986 (executing program)
+[FUZZER] 2022/07/03 04:38:14 Poll takes 2.117284791s
+[FUZZER] 2022/07/03 04:38:14 fetching corpus: 135, signal 27478/32231 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 393.460789ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/33215 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 56.931629ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/34203 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 16.594082ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/35231 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 16.241262ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/36241 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 22.832064ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/37244 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 18.302144ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/38242 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 19.649669ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/39269 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 23.111991ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/40310 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 52.301205ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/41293 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 28.674282ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/42316 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 14.903572ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/43280 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 22.508244ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/44275 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 15.267429ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/45272 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 20.775727ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/46259 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 12.616675ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/47265 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 20.00576ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/48236 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 22.182029ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/49253 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 13.601854ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/50254 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 21.723876ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/51248 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 14.337182ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/52247 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 18.013373ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/53227 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 60.84885ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/54255 (executing program)
+[FUZZER] 2022/07/03 04:38:15 Poll takes 106.239768ms
+[FUZZER] 2022/07/03 04:38:15 fetching corpus: 135, signal 27478/54778 (executing program)
+[FUZZER] 2022/07/03 04:38:16 Poll takes 385.979616ms
+[FUZZER] 2022/07/03 04:38:16 fetching corpus: 135, signal 27478/54860 (executing program)
+[FUZZER] 2022/07/03 04:38:23 Poll takes 7.439294965s
+[FUZZER] 2022/07/03 04:38:23 fetching corpus: 135, signal 27478/54860 (executing program)
+[FUZZER] 2022/07/03 04:38:23 Initial poll done
+[FUZZER] 2022/07/03 04:38:28 starting 1 fuzzer processes
+04:38:28 executing program (12 calls) 0:
+r0 = socket$inet_udp(0x2, 0x2, 0x0) <0x0, 0x0>
+r1 = socket$key(0xf, 0x3, 0x2) <0x0, 0x1>
+sendmsg$key(r1, &(0x7f0000000000)={0x40000000, 0x0, &(0x7f0000000040)={&(0x7f0000000240)=ANY=[@ANYBLOB="0207a20902"], 0x10}}, 0x0) <0x0, 0x2>
+bind$inet(r0, &(0x7f00000001c0)={0x2, 0x0, @local}, 0x10) <0x0, 0x3>
+connect$inet(r0, &(0x7f0000000480)={0x2, 0x0, @multicast1}, 0x10) <0x0, 0x4>
+setsockopt$inet_IP_XFRM_POLICY(r0, 0x0, 0x11, &(0x7f0000000080)={{{@in6=@ipv4={'\x00', '\xff\xff', @dev}, @in6=@private0, 0x0, 0x0, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0xee00}, {}, {}, 0x0, 0x0, 0x1}, {{@in=@rand_addr=0x64010101, 0x10000, 0x32}, 0x0, @in6=@loopback, 0x0, 0x0, 0x0, 0xb7, 0x1fb, 0xffffffff}}, 0xe8) <0x0, 0x5>
+sendmmsg(r0, &(0x7f0000000180), 0x400000000000354, 0x2873dedf99c) <0x0, 0x6>
+sendmsg$nl_route_sched(0xffffffffffffffff, &(0x7f0000000080)={0x0, 0x0, &(0x7f0000001c40)={&(0x7f0000000240)=ANY=[], 0x3c}}, 0x0) <0x0, 0x7>
+setsockopt$inet_mreqn(r0, 0x0, 0x24, &(0x7f0000000180)={@broadcast, @empty}, 0xc) <0x0, 0x8>
+ioctl$sock_ipv6_tunnel_SIOCADDTUNNEL(0xffffffffffffffff, 0x89f1, &(0x7f00000004c0)={'syztnl1\x00', 0x0}) <0x0, 0x9>
+socket(0x0, 0x0, 0x0) <0x0, 0xa>
+socket$netlink(0x10, 0x3, 0x0) <0x0, 0xb>
+
+[  120.338553][ T6794] Bluetooth: hci0: unexpected cc 0x0c03 length: 249 > 1
+[  120.339292][ T6794] Bluetooth: hci0: unexpected cc 0x1003 length: 249 > 9
+[  120.339955][ T6794] Bluetooth: hci0: unexpected cc 0x1001 length: 249 > 9
+[  120.341634][ T6794] Bluetooth: hci0: unexpected cc 0x0c23 length: 249 > 4
+[  120.342580][ T6794] Bluetooth: hci0: unexpected cc 0x0c25 length: 249 > 3
+[  120.343067][ T6794] Bluetooth: hci0: unexpected cc 0x0c38 length: 249 > 2
+[  120.560245][ T6793] chnl_net:caif_netlink_parms(): no params data found
+[  120.728113][ T6793] bridge0: port 1(bridge_slave_0) entered blocking state
+[  120.728648][ T6793] bridge0: port 1(bridge_slave_0) entered disabled state
+[  120.730272][ T6793] device bridge_slave_0 entered promiscuous mode
+[  120.735905][ T6793] bridge0: port 2(bridge_slave_1) entered blocking state
+[  120.736014][ T6793] bridge0: port 2(bridge_slave_1) entered disabled state
+[  120.737288][ T6793] device bridge_slave_1 entered promiscuous mode
+[  120.817080][ T6793] bond0: (slave bond_slave_0): Enslaving as an active interface with an up link
+[  120.819809][ T6793] bond0: (slave bond_slave_1): Enslaving as an active interface with an up link
+[  120.896929][ T6793] team0: Port device team_slave_0 added
+[  120.902502][ T6793] team0: Port device team_slave_1 added
+[  120.979327][ T6793] batman_adv: batadv0: Adding interface: batadv_slave_0
+[  120.979351][ T6793] batman_adv: batadv0: The MTU of interface batadv_slave_0 is too small (1500) to handle the transport of batman-adv packets. Packets going over this interface will be fragmented on layer2 which could impact the performance. Setting the MTU to 1560 would solve the problem.
+[  120.979377][ T6793] batman_adv: batadv0: Not using interface batadv_slave_0 (retrying later): interface not active
+[  120.981578][ T6793] batman_adv: batadv0: Adding interface: batadv_slave_1
+[  120.981597][ T6793] batman_adv: batadv0: The MTU of interface batadv_slave_1 is too small (1500) to handle the transport of batman-adv packets. Packets going over this interface will be fragmented on layer2 which could impact the performance. Setting the MTU to 1560 would solve the problem.
+[  120.981633][ T6793] batman_adv: batadv0: Not using interface batadv_slave_1 (retrying later): interface not active
+[  121.060860][ T6793] device hsr_slave_0 entered promiscuous mode
+[  121.065451][ T6793] device hsr_slave_1 entered promiscuous mode
+[  121.297304][ T6793] netdevsim netdevsim0 netdevsim0: renamed from eth0
+[  121.304614][ T6793] netdevsim netdevsim0 netdevsim1: renamed from eth1
+[  121.309098][ T6793] netdevsim netdevsim0 netdevsim2: renamed from eth2
+[  121.311897][ T6793] netdevsim netdevsim0 netdevsim3: renamed from eth3
+[  121.341241][ T6793] bridge0: port 2(bridge_slave_1) entered blocking state
+[  121.341372][ T6793] bridge0: port 2(bridge_slave_1) entered forwarding state
+[  121.342110][ T6793] bridge0: port 1(bridge_slave_0) entered blocking state
+[  121.342249][ T6793] bridge0: port 1(bridge_slave_0) entered forwarding state
+[  121.418646][ T6793] 8021q: adding VLAN 0 to HW filter on device bond0
+[  121.428268][ T7348] IPv6: ADDRCONF(NETDEV_CHANGE): veth0: link becomes ready
+[  121.431995][ T7348] bridge0: port 1(bridge_slave_0) entered disabled state
+[  121.434086][ T7348] bridge0: port 2(bridge_slave_1) entered disabled state
+[  121.435257][ T7348] IPv6: ADDRCONF(NETDEV_CHANGE): bond0: link becomes ready
+[  121.449667][ T6793] 8021q: adding VLAN 0 to HW filter on device team0
+[  121.459959][   T14] IPv6: ADDRCONF(NETDEV_CHANGE): bridge_slave_0: link becomes ready
+[  121.460591][   T14] bridge0: port 1(bridge_slave_0) entered blocking state
+[  121.460656][   T14] bridge0: port 1(bridge_slave_0) entered forwarding state
+[  121.468363][   T14] IPv6: ADDRCONF(NETDEV_CHANGE): bridge_slave_1: link becomes ready
+[  121.468845][   T14] bridge0: port 2(bridge_slave_1) entered blocking state
+[  121.468895][   T14] bridge0: port 2(bridge_slave_1) entered forwarding state
+[  121.497770][ T7349] IPv6: ADDRCONF(NETDEV_CHANGE): team_slave_0: link becomes ready
+[  121.498396][ T7349] IPv6: ADDRCONF(NETDEV_CHANGE): team0: link becomes ready
+[  121.503946][ T7348] IPv6: ADDRCONF(NETDEV_CHANGE): team_slave_1: link becomes ready
+[  121.513514][   T14] IPv6: ADDRCONF(NETDEV_CHANGE): hsr_slave_0: link becomes ready
+[  121.519382][ T7348] IPv6: ADDRCONF(NETDEV_CHANGE): hsr_slave_1: link becomes ready
+[  121.522961][ T6793] IPv6: ADDRCONF(NETDEV_CHANGE): hsr0: link becomes ready
+[  121.541029][   T14] IPv6: ADDRCONF(NETDEV_CHANGE): vxcan1: link becomes ready
+[  121.541171][   T14] IPv6: ADDRCONF(NETDEV_CHANGE): vxcan0: link becomes ready
+[  121.550810][ T6793] 8021q: adding VLAN 0 to HW filter on device batadv0
+[  121.736542][   T14] IPv6: ADDRCONF(NETDEV_CHANGE): veth1_virt_wifi: link becomes ready
+[  121.737513][   T14] IPv6: ADDRCONF(NETDEV_CHANGE): veth0_virt_wifi: link becomes ready
+[  121.744892][ T6793] device veth0_vlan entered promiscuous mode
+[  121.746639][   T14] IPv6: ADDRCONF(NETDEV_CHANGE): veth1_vlan: link becomes ready
+[  121.747715][   T14] IPv6: ADDRCONF(NETDEV_CHANGE): veth0_vlan: link becomes ready
+[  121.749046][   T14] IPv6: ADDRCONF(NETDEV_CHANGE): vlan0: link becomes ready
+[  121.749789][   T14] IPv6: ADDRCONF(NETDEV_CHANGE): vlan1: link becomes ready
+[  121.756992][ T6793] device veth1_vlan entered promiscuous mode
+[  121.779953][ T7348] IPv6: ADDRCONF(NETDEV_CHANGE): macvlan0: link becomes ready
+[  121.781443][ T7348] IPv6: ADDRCONF(NETDEV_CHANGE): macvlan1: link becomes ready
+[  121.782094][ T7348] IPv6: ADDRCONF(NETDEV_CHANGE): veth1_macvtap: link becomes ready
+[  121.782791][ T7348] IPv6: ADDRCONF(NETDEV_CHANGE): veth0_macvtap: link becomes ready
+[  121.788268][ T6793] device veth0_macvtap entered promiscuous mode
+[  121.792078][ T6793] device veth1_macvtap entered promiscuous mode
+[  121.820295][ T6793] batman_adv: batadv0: Interface activated: batadv_slave_0
+[  121.820754][ T7348] IPv6: ADDRCONF(NETDEV_CHANGE): macvtap0: link becomes ready
+[  121.821952][ T7348] IPv6: ADDRCONF(NETDEV_CHANGE): macsec0: link becomes ready
+[  121.823020][ T7348] IPv6: ADDRCONF(NETDEV_CHANGE): batadv_slave_0: link becomes ready
+[  121.824081][ T7348] IPv6: ADDRCONF(NETDEV_CHANGE): veth0_to_batadv: link becomes ready
+[  121.833283][ T6793] batman_adv: batadv0: Interface activated: batadv_slave_1
+[  121.833507][ T7348] IPv6: ADDRCONF(NETDEV_CHANGE): batadv_slave_1: link becomes ready
+[  121.834574][ T7348] IPv6: ADDRCONF(NETDEV_CHANGE): veth1_to_batadv: link becomes ready
+[  121.842905][ T6793] netdevsim netdevsim0 netdevsim0: set [1, 0] type 2 family 0 port 6081 - 0
+[  121.842966][ T6793] netdevsim netdevsim0 netdevsim1: set [1, 0] type 2 family 0 port 6081 - 0
+[  121.843016][ T6793] netdevsim netdevsim0 netdevsim2: set [1, 0] type 2 family 0 port 6081 - 0
+[  121.843063][ T6793] netdevsim netdevsim0 netdevsim3: set [1, 0] type 2 family 0 port 6081 - 0
+[  121.943108][ T7132] wlan0: Created IBSS using preconfigured BSSID 50:50:50:50:50:50
+[  121.943159][ T7132] wlan0: Creating new IBSS network, BSSID 50:50:50:50:50:50
+[  121.949448][   T39] IPv6: ADDRCONF(NETDEV_CHANGE): wlan0: link becomes ready
+[  121.979391][ T7132] wlan1: Created IBSS using preconfigured BSSID 50:50:50:50:50:50
+[  121.979414][ T7132] wlan1: Creating new IBSS network, BSSID 50:50:50:50:50:50
+[  121.981749][ T2994] IPv6: ADDRCONF(NETDEV_CHANGE): wlan1: link becomes ready
+[CPU #0-12/0/1] qcsched_reset
+[CPU #0-13/0/1] Enabling kssb
+[  122.407845][  T107] Bluetooth: hci0: command 0x0409 tx timeout
+[  124.495751][  T107] Bluetooth: hci0: command 0x041b tx timeout
+[FUZZER] 2022/07/03 04:38:35 Poll takes 3.899550267s
+[  126.565924][ T2994] Bluetooth: hci0: command 0x040f tx timeout
+04:38:37 executing program (12 calls) 0:
+r0 = socket$inet_udp(0x2, 0x2, 0x0) <0x0, 0x0>
+r1 = socket$key(0xf, 0x3, 0x2) <0x0, 0x1>
+sendmsg$key(r1, &(0x7f0000000000)={0x40000000, 0x0, &(0x7f0000000040)={&(0x7f0000000240)=ANY=[@ANYBLOB="0207a20902"], 0x10}}, 0x0) <0x0, 0x2>
+bind$inet(r0, &(0x7f00000001c0)={0x2, 0x0, @local}, 0x10) <0x0, 0x3>
+connect$inet(r0, &(0x7f0000000480)={0x2, 0x0, @multicast1}, 0x10) <0x0, 0x4>
+setsockopt$inet_IP_XFRM_POLICY(r0, 0x0, 0x11, &(0x7f0000000080)={{{@in6=@ipv4={'\x00', '\xff\xff', @dev}, @in6=@private0, 0x0, 0x0, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0xee00}, {}, {}, 0x0, 0x0, 0x1}, {{@in=@rand_addr=0x64010101, 0x10000, 0x32}, 0x0, @in6=@loopback, 0x0, 0x0, 0x0, 0xb7, 0x1fb, 0xffffffff}}, 0xe8) <0x0, 0x5>
+sendmmsg(r0, &(0x7f0000000180), 0x400000000000354, 0x2873dedf99c) <0x0, 0x6>
+sendmsg$nl_route_sched(0xffffffffffffffff, &(0x7f0000000080)={0x0, 0x0, &(0x7f0000001c40)={&(0x7f0000000240)=ANY=[], 0x3c}}, 0x0) <0x0, 0x7>
+setsockopt$inet_mreqn(r0, 0x0, 0x24, &(0x7f0000000180)={@broadcast, @empty}, 0xc) <0x0, 0x8>
+ioctl$sock_ipv6_tunnel_SIOCADDTUNNEL(0xffffffffffffffff, 0x89f1, &(0x7f00000004c0)={'syztnl1\x00', 0x0}) <0x0, 0x9>
+socket(0x0, 0x0, 0x0) <0x0, 0xa>
+socket$netlink(0x10, 0x3, 0x0) <0x0, 0xb>
+
+[CPU #0-14/0/1] qcsched_reset
+[CPU #0-15/0/1] Enabling kssb
+[  128.655930][ T2994] Bluetooth: hci0: command 0x0419 tx timeout
+04:38:40 executing program (12 calls) 0:
+r0 = socket$inet_udp(0x2, 0x2, 0x0) <0x0, 0x0>
+r1 = socket$key(0xf, 0x3, 0x2) <0x0, 0x1>
+sendmsg$key(r1, &(0x7f0000000000)={0x40000000, 0x0, &(0x7f0000000040)={&(0x7f0000000240)=ANY=[@ANYBLOB="0207a20902"], 0x10}}, 0x0) <0x0, 0x2>
+bind$inet(r0, &(0x7f00000001c0)={0x2, 0x0, @local}, 0x10) <0x0, 0x3>
+connect$inet(r0, &(0x7f0000000480)={0x2, 0x0, @multicast1}, 0x10) <0x0, 0x4>
+setsockopt$inet_IP_XFRM_POLICY(r0, 0x0, 0x11, &(0x7f0000000080)={{{@in6=@ipv4={'\x00', '\xff\xff', @dev}, @in6=@private0, 0x0, 0x0, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0xee00}, {}, {}, 0x0, 0x0, 0x1}, {{@in=@rand_addr=0x64010101, 0x10000, 0x32}, 0x0, @in6=@loopback, 0x0, 0x0, 0x0, 0xb7, 0x1fb, 0xffffffff}}, 0xe8) <0x0, 0x5>
+sendmmsg(r0, &(0x7f0000000180), 0x400000000000354, 0x2873dedf99c) <0x0, 0x6>
+sendmsg$nl_route_sched(0xffffffffffffffff, &(0x7f0000000080)={0x0, 0x0, &(0x7f0000001c40)={&(0x7f0000000240)=ANY=[], 0x3c}}, 0x0) <0x0, 0x7>
+setsockopt$inet_mreqn(r0, 0x0, 0x24, &(0x7f0000000180)={@broadcast, @empty}, 0xc) <0x0, 0x8>
+ioctl$sock_ipv6_tunnel_SIOCADDTUNNEL(0xffffffffffffffff, 0x89f1, &(0x7f00000004c0)={'syztnl1\x00', 0x0}) <0x0, 0x9>
+socket(0x0, 0x0, 0x0) <0x0, 0xa>
+socket$netlink(0x10, 0x3, 0x0) <0x0, 0xb>
+
+[CPU #0-16/0/1] qcsched_reset
+[CPU #0-17/0/1] Enabling kssb
+[  130.571490][ T7518] skbuff: skb_over_panic: text:ffffffff8c2e65a2 len:1744 put:72 head:ffff88815af25000 data:ffff88815af25000 tail:0x6d0 end:0x6c0 dev:<NULL>
+[  130.574435][ T7518] ------------[ cut here ]------------
+[  130.574689][ T7518] kernel BUG at net/core/skbuff.c:113!
+[  130.575143][ T7518] invalid opcode: 0000 [#1] PREEMPT SMP KASAN
+[  130.582470][ T7518] CPU: 1 PID: 7518 Comm: syz-executor.0 Not tainted 5.19.0-rc3-32288-g0f3b08299494 #15
+[  130.586388][ T7518] Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
+[  130.590864][ T7518] RIP: 0010:skb_panic+0x1e0/0x1f0
+[  130.592433][ T7518] Code: c0 48 c7 c5 a0 d5 48 8f 48 0f 45 e8 44 89 e3 41 89 fa 48 c7 c7 20 d5 48 8f 31 c0 55 53 41 52 41 57 e8 c3 6a da 02 48 83 c4 20 <0f> 0b 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 40 00 55 41 57 41 56 41
+[  130.596565][ T7518] RSP: 0018:ffffc900032cedc8 EFLAGS: 00010282
+[  130.598801][ T7518] RAX: 0000000000000089 RBX: 00000000000006c0 RCX: d6f5bd12cd397400
+[  130.601522][ T7518] RDX: ffffc90012b1b000 RSI: 0000000000002e58 RDI: 0000000000002e59
+[  130.603559][ T7518] RBP: ffffffff8f48d5a0 R08: ffffffff816927a4 R09: ffffed10477867e9
+[  130.605785][ T7518] R10: ffffed10477867e9 R11: 0000000000000000 R12: 00000000000006c0
+[  130.608553][ T7518] R13: ffffffff953b9c30 R14: dffffc0000000000 R15: ffff88815af25000
+[  130.610627][ T7518] FS:  00007fa9115ae700(0000) GS:ffff88823bc00000(0000) knlGS:0000000000000000
+[  130.613580][ T7518] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[  130.615871][ T7518] CR2: 00007f7eabb957c8 CR3: 0000000021546000 CR4: 00000000003506e0
+[  130.618308][ T7518] DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+[  130.620761][ T7518] DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+[  130.623371][ T7518] Call Trace:
+[  130.624769][ T7518]  <TASK>
+[  130.626167][ T7518]  ? pfkey_send_acquire+0x22a2/0x4070
+[  130.628367][ T7518]  ? pfkey_send_acquire+0x22a2/0x4070
+[  130.629932][ T7518]  skb_over_panic+0x25/0x30
+[  130.631430][ T7518]  ? pfkey_send_acquire+0x22a2/0x4070
+[  130.633153][ T7518]  skb_put+0x237/0x2f0
+[  130.634551][ T7518]  pfkey_send_acquire+0x22a2/0x4070
+[  130.636157][ T7518]  km_query+0x144/0x2c0
+[  130.637610][ T7518]  xfrm_state_find+0x4145/0x6870
+[  130.639264][ T7518]  ? xfrm_sad_getinfo+0x1f0/0x1f0
+[  130.640891][ T7518]  ? lock_release+0x658/0x880
+[  130.642388][ T7518]  ? __sanitize_memcov_trace_load+0xa5/0xd0
+[  130.644190][ T7518]  ? xfrm_resolve_and_create_bundle+0xb19/0x3d80
+[  130.645995][ T7518]  xfrm_resolve_and_create_bundle+0x810/0x3d80
+[  130.647852][ T7518]  ? xfrm_expand_policies+0xb40/0xb40
+[  130.649489][ T7518]  ? lock_release+0x658/0x880
+[  130.651146][ T7518]  ? __sanitize_memcov_trace_load+0xa5/0xd0
+[  130.652810][ T7518]  ? xfrm_expand_policies+0x2fa/0xb40
+[  130.654386][ T7518]  ? xfrm_expand_policies+0x2fa/0xb40
+[  130.655959][ T7518]  ? xfrm_expand_policies+0x728/0xb40
+[  130.657523][ T7518]  xfrm_lookup_with_ifid+0x343/0x2ee0
+[  130.659088][ T7518]  ? __xfrm_sk_clone_policy+0xfa0/0xfa0
+[  130.660678][ T7518]  ? do_buffer_flush+0xf/0x130
+[  130.662163][ T7518]  ? ip_route_output_flow+0x184/0x1e0
+[  130.663733][ T7518]  xfrm_lookup_route+0x38/0x250
+[  130.665208][ T7518]  udp_sendmsg+0x2867/0x4380
+[  130.666666][ T7518]  ? ip_skb_dst_mtu+0xe80/0xe80
+[  130.668142][ T7518]  ? udp_cmsg_send+0x540/0x540
+[  130.669606][ T7518]  ? __import_iovec+0x6ba/0x7f0
+[  130.671178][ T7518]  ? tomoyo_socket_sendmsg_permission+0x298/0x420
+[  130.673000][ T7518]  ? aa_sk_perm+0x956/0xa90
+[  130.674591][ T7518]  ? __sanitize_memcov_trace_load+0xa5/0xd0
+[  130.676374][ T7518]  ? inet_sendmsg+0x228/0x420
+[  130.677913][ T7518]  ? inet_sendmsg+0x228/0x420
+[  130.679533][ T7518]  ? inet_sendmsg+0x228/0x420
+[  130.681036][ T7518]  ? inet_send_prepare+0x340/0x340
+[  130.682635][ T7518]  ____sys_sendmsg+0x8dc/0xd80
+[  130.684256][ T7518]  ? __sys_sendmsg_sock+0x30/0x30
+[  130.685964][ T7518]  __sys_sendmmsg+0x3b0/0x7a0
+[  130.687611][ T7518]  ? __ia32_sys_sendmsg+0xd0/0xd0
+[  130.689193][ T7518]  ? rcu_read_lock_sched_held+0x87/0x110
+[  130.690961][ T7518]  ? __bpf_trace_rcu_stall_warning+0x10/0x10
+[  130.692888][ T7518]  ? rcu_read_lock_sched_held+0x87/0x110
+[  130.694601][ T7518]  ? __bpf_trace_rcu_stall_warning+0x10/0x10
+[  130.696442][ T7518]  ? rcu_read_lock_sched_held+0x87/0x110
+[  130.698120][ T7518]  ? lock_release+0x658/0x880
+[  130.699727][ T7518]  ? __lock_acquire+0x5e00/0x5e00
+[  130.701367][ T7518]  ? __x64_sys_sendmmsg+0x111/0x120
+[  130.703076][ T7518]  ? __x64_sys_sendmmsg+0x111/0x120
+[  130.704785][ T7518]  __x64_sys_sendmmsg+0xce/0x120
+[  130.706342][ T7518]  do_syscall_64+0x4e/0xa0
+[  130.707912][ T7518]  entry_SYSCALL_64_after_hwframe+0x46/0xb0
+[  130.709648][ T7518] RIP: 0033:0x478dc9
+[  130.711162][ T7518] Code: f7 d8 64 89 02 b8 ff ff ff ff c3 66 0f 1f 44 00 00 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 bc ff ff ff f7 d8 64 89 01 48
+[  130.715939][ T7518] RSP: 002b:00007fa9115adbe8 EFLAGS: 00000246 ORIG_RAX: 0000000000000133
+[  130.718126][ T7518] RAX: ffffffffffffffda RBX: 000000000077d4a0 RCX: 0000000000478dc9
+[  130.720152][ T7518] RDX: 0400000000000354 RSI: 0000000020000180 RDI: 0000000000000003
+[  130.722281][ T7518] RBP: 0000000000000000 R08: 0000000000000000 R09: 0000000000000000
+[  130.724336][ T7518] R10: 000002873dedf99c R11: 0000000000000246 R12: 000000000077d4a8
+[  130.726445][ T7518] R13: 000000000077d4ac R14: 000000000077d4a0 R15: 00007ffc65af5140
+[  130.728526][ T7518]  </TASK>
+[  130.729495][ T7518] Modules linked in:
+[  130.732108][ T7518] ---[ end trace 0000000000000000 ]---
+[  130.732289][ T7518] RIP: 0010:skb_panic+0x1e0/0x1f0
+[  130.732645][ T7518] Code: c0 48 c7 c5 a0 d5 48 8f 48 0f 45 e8 44 89 e3 41 89 fa 48 c7 c7 20 d5 48 8f 31 c0 55 53 41 52 41 57 e8 c3 6a da 02 48 83 c4 20 <0f> 0b 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 40 00 55 41 57 41 56 41
+[  130.733268][ T7518] RSP: 0018:ffffc900032cedc8 EFLAGS: 00010282
+[  130.733591][ T7518] RAX: 0000000000000089 RBX: 00000000000006c0 RCX: d6f5bd12cd397400
+[  130.733936][ T7518] RDX: ffffc90012b1b000 RSI: 0000000000002e58 RDI: 0000000000002e59
+[  130.734371][ T7518] RBP: ffffffff8f48d5a0 R08: ffffffff816927a4 R09: ffffed10477867e9
+[  130.734760][ T7518] R10: ffffed10477867e9 R11: 0000000000000000 R12: 00000000000006c0
+[  130.735111][ T7518] R13: ffffffff953b9c30 R14: dffffc0000000000 R15: ffff88815af25000
+[  130.735487][ T7518] FS:  00007fa9115ae700(0000) GS:ffff88823bc00000(0000) knlGS:0000000000000000
+[  130.737935][ T7518] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[  130.738519][ T7518] CR2: 00007f7eabb957c8 CR3: 0000000021546000 CR4: 00000000003506e0
+[  130.738870][ T7518] DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+[  130.739223][ T7518] DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+[  130.739600][ T7518] Kernel panic - not syncing: Fatal exception
+[  130.762619][ T7518] Kernel Offset: disabled
+[  130.763807][ T7518] Rebooting in 86400 seconds..
+
+VM DIAGNOSIS:
+04:38:41  Registers:
+info registers vcpu 0
+RAX=0000000000000000 RBX=ffff888063f9acf8 RCX=0000000080010003 RDX=0000000000000004
+RSI=0000000000010003 RDI=0000000000000000 RBP=0000000000000002 RSP=ffffc90000007c08
+R8 =dffffc0000000000 R9 =0000000000000003 R10=fffff52000000f79 R11=0000000000000004
+R12=0000000000000000 R13=0000000000000086 R14=ffff8880b92345d8 R15=00000000000001d1
+RIP=ffffffff81a983c0 RFL=00000046 [---Z-P-] CPL=0 II=0 A20=1 SMM=0 HLT=0
+>>>>>>> exp/report: add a report for "kernel BUG in pfkey_send_acquire"
 ES =0000 0000000000000000 000fffff 00000000
 CS =0010 0000000000000000 ffffffff 00a09b00 DPL=0 CS64 [-RA]
 SS =0018 0000000000000000 ffffffff 00c09300 DPL=0 DS   [-WA]
 DS =0000 0000000000000000 000fffff 00000000
+<<<<<<< HEAD
 FS =0000 0000000000000000 ffffffff 00000000
 GS =0000 ffff8880b8c00000 ffffffff 00000000
+=======
+FS =0000 0000000000000000 ffffffff 00c00000
+GS =0000 ffff8880b9200000 ffffffff 00c00000
+>>>>>>> exp/report: add a report for "kernel BUG in pfkey_send_acquire"
 LDT=0000 0000000000000000 000fffff 00000000
 TR =0040 fffffe0000003000 00004087 00008b00 DPL=0 TSS64-busy
 GDT=     fffffe0000001000 0000007f
 IDT=     fffffe0000000000 00000fff
+<<<<<<< HEAD
 CR0=80050033 CR2=0000001b2eaf7000 CR3=0000000057d15000 CR4=00350ef0
+=======
+CR0=80050033 CR2=000000000050dd50 CR3=0000000064213000 CR4=003506f0
+>>>>>>> exp/report: add a report for "kernel BUG in pfkey_send_acquire"
 DR0=0000000000000000 DR1=0000000000000000 DR2=0000000000000000 DR3=0000000000000000 
 DR6=00000000fffe0ff0 DR7=0000000000000400
 EFER=0000000000000d01
@@ -19434,15 +19803,24 @@ FPR0=0000000000000000 0000 FPR1=0000000000000000 0000
 FPR2=0000000000000000 0000 FPR3=0000000000000000 0000
 FPR4=0000000000000000 0000 FPR5=0000000000000000 0000
 FPR6=0000000000000000 0000 FPR7=0000000000000000 0000
+<<<<<<< HEAD
 XMM00=00000000000f42400000000000000000 XMM01=000000000000000000000000000f4240
 XMM02=ffffffffffffffffffffffffffffffff XMM03=ffffffffffffffffffffffffffffffff
 XMM04=ffffffffffffffffffffffffffffffff XMM05=ffffffffffffffffffffffffffffffff
 XMM06=ffffffffffffffffffffffffffffffff XMM07=000000000000000000e800a800000000
 XMM08=696e61703d73726f72726500756c6c25 XMM09=00000000000000000000000000000000
+=======
+XMM00=00000000000f42400000000000000000 XMM01=ffffffffffffffffffffffffffffffff
+XMM02=ffffffffffffffffffffffffffffffff XMM03=ffffffffffffffffffffffffffffffff
+XMM04=ffffffffffffffffffffffffffffffff XMM05=ffffffffffffffffffffffffffffffff
+XMM06=ffffffffffffffffffffffffffffffff XMM07=000000000000000000e800a800000000
+XMM08=72650063696e61703d73726f72726500 XMM09=00000000000000000000000000000000
+>>>>>>> exp/report: add a report for "kernel BUG in pfkey_send_acquire"
 XMM10=00000000000000000000000000000000 XMM11=00000000000000000000000000000000
 XMM12=00000000000000000000000000000000 XMM13=00000000000000000000000000000000
 XMM14=00000000000000000000000000000000 XMM15=00000000000000000000000000000000
 info registers vcpu 1
+<<<<<<< HEAD
 RAX=1ffffffff2ff4e60 RBX=0000000000000000 RCX=0000000000040000 RDX=00000000000003fd
 RSI=000000000003ffff RDI=0000000000040000 RBP=0000000000000000 RSP=ffffc90003fae4c8
 R8 =ffffffff86a4afba R9 =ffffed1004732047 R10=ffffed1004732047 R11=0000000000000000
@@ -19459,6 +19837,24 @@ TR =0040 fffffe000004a000 00004087 00008b00 DPL=0 TSS64-busy
 GDT=     fffffe0000048000 0000007f
 IDT=     fffffe0000000000 00000fff
 CR0=80050033 CR2=00007f4116c20050 CR3=00000000258d5000 CR4=00350ee0
+=======
+RAX=0000000000000001 RBX=ffffc900032ce620 RCX=ffffc900032d0000 RDX=0000000000000008
+RSI=0000000000000000 RDI=0000000000000000 RBP=0000000000000082 RSP=ffffc900032ce4f8
+R8 =ffffffff856c862f R9 =ffffffff9356e048 R10=ffffffff9356e058 R11=ffffffff9356e050
+R12=0000000000000000 R13=ffffc900032ce910 R14=ffff88823bc345d8 R15=00000000000002aa
+RIP=ffffffff81a983d4 RFL=00000087 [--S--PC] CPL=0 II=0 A20=1 SMM=0 HLT=0
+ES =0000 0000000000000000 000fffff 00000000
+CS =0010 0000000000000000 ffffffff 00a09b00 DPL=0 CS64 [-RA]
+SS =0018 0000000000000000 ffffffff 00c09300 DPL=0 DS   [-WA]
+DS =0000 0000000000000000 000fffff 00000000
+FS =0000 00007fa9115ae700 000fffff 00000000
+GS =0000 ffff88823bc00000 000fffff 00000000
+LDT=0000 0000000000000000 000fffff 00000000
+TR =0040 fffffe000004a000 00004087 00008b00 DPL=0 TSS64-busy
+GDT=     fffffe0000048000 0000007f
+IDT=     fffffe0000000000 00000fff
+CR0=80050033 CR2=00007f7eabb957c8 CR3=0000000021546000 CR4=003506e0
+>>>>>>> exp/report: add a report for "kernel BUG in pfkey_send_acquire"
 DR0=0000000000000000 DR1=0000000000000000 DR2=0000000000000000 DR3=0000000000000000 
 DR6=00000000fffe0ff0 DR7=0000000000000400
 EFER=0000000000000d01
@@ -19467,15 +19863,24 @@ FPR0=0000000000000000 0000 FPR1=0000000000000000 0000
 FPR2=0000000000000000 0000 FPR3=0000000000000000 0000
 FPR4=0000000000000000 0000 FPR5=0000000000000000 0000
 FPR6=0000000000000000 0000 FPR7=0000000000000000 0000
+<<<<<<< HEAD
 XMM00=00000000ff0000000000000000000000 XMM01=ffffffff00ffffffffffffffffffffff
 XMM02=42494c4700352e322e325f4342494c47 XMM03=000000000000000000000000665f5f00
 XMM04=7469726f697270746567006574696e69 XMM05=00000000000000000000000000000000
 XMM06=00000000000000000000000000000000 XMM07=00000000000000000000000000000000
 XMM08=00000000000000000000000000000000 XMM09=00000000000000000000000000000000
+=======
+XMM00=00000000000000000000000000000000 XMM01=00000000007578a00000000000757880
+XMM02=7463656a6e695f31313230385f7a7973 XMM03=ffffffffffffffffffffffffffffffff
+XMM04=ffffffffffffffffffffffffffffffff XMM05=ffffffffffffffffffffffffffffffff
+XMM06=ffffffffffffffffffffffffffffffff XMM07=000000000000000000e800a800000000
+XMM08=646863206f742064656c696166006465 XMM09=00000000000000000000000000000000
+>>>>>>> exp/report: add a report for "kernel BUG in pfkey_send_acquire"
 XMM10=00000000000000000000000000000000 XMM11=00000000000000000000000000000000
 XMM12=00000000000000000000000000000000 XMM13=00000000000000000000000000000000
 XMM14=00000000000000000000000000000000 XMM15=00000000000000000000000000000000
 info registers vcpu 2
+<<<<<<< HEAD
 RAX=b5cb31fa67ee8200 RBX=ffff888123ee3b00 RCX=00000000000a66e4 RDX=0000000000000000
 RSI=0000000000000001 RDI=ffffffff903c066b RBP=ffffc90000197f28 RSP=ffffc90000197e08
 R8 =dffffc0000000000 R9 =ffffed10171a796b R10=ffffed10171a796b R11=0000000000000000
@@ -19492,6 +19897,24 @@ TR =0040 fffffe0000091000 00004087 00008b00 DPL=0 TSS64-busy
 GDT=     fffffe000008f000 0000007f
 IDT=     fffffe0000000000 00000fff
 CR0=80050033 CR2=00007f2ef4a14b68 CR3=000000007968d000 CR4=00350ee0
+=======
+RAX=571b259a36968400 RBX=ffff888015edbb00 RCX=000000000000dd42 RDX=0000000000000000
+RSI=0000000000000001 RDI=ffffffff8db7c2ab RBP=ffffc90000197f28 RSP=ffffc90000197e08
+R8 =dffffc0000000000 R9 =ffffed101726796b R10=ffffed101726796b R11=0000000000000000
+R12=ffffffff91ca6ae8 R13=dffffc0000000000 R14=1ffff11002bdb760 R15=1ffff92000032fd6
+RIP=ffffffff8db7bf5b RFL=000002c2 [--SZ---] CPL=0 II=0 A20=1 SMM=0 HLT=1
+ES =0000 0000000000000000 ffffffff 00c00000
+CS =0010 0000000000000000 ffffffff 00a09b00 DPL=0 CS64 [-RA]
+SS =0018 0000000000000000 ffffffff 00c09300 DPL=0 DS   [-WA]
+DS =0000 0000000000000000 ffffffff 00c00000
+FS =0000 0000000000000000 ffffffff 00c00000
+GS =0000 ffff8880b9300000 ffffffff 00c00000
+LDT=0000 0000000000000000 ffffffff 00c00000
+TR =0040 fffffe0000091000 00004087 00008b00 DPL=0 TSS64-busy
+GDT=     fffffe000008f000 0000007f
+IDT=     fffffe0000000000 00000fff
+CR0=80050033 CR2=0000563f0f04bc40 CR3=0000000026b46000 CR4=003506e0
+>>>>>>> exp/report: add a report for "kernel BUG in pfkey_send_acquire"
 DR0=0000000000000000 DR1=0000000000000000 DR2=0000000000000000 DR3=0000000000000000 
 DR6=00000000fffe0ff0 DR7=0000000000000400
 EFER=0000000000000d01
@@ -19500,6 +19923,7 @@ FPR0=0000000000000000 0000 FPR1=0000000000000000 0000
 FPR2=0000000000000000 0000 FPR3=0000000000000000 0000
 FPR4=0000000000000000 0000 FPR5=0000000000000000 0000
 FPR6=0000000000000000 0000 FPR7=0000000000000000 0000
+<<<<<<< HEAD
 XMM00=b6640972f77e07154e3958c06a27c212 XMM01=6116aef92999d51e2c213aae46def515
 XMM02=38ad0ce6ce764fcf09925f1ab1430b0f XMM03=b31176d9de2daeed985874e1de7e5d2a
 XMM04=00000000000000000000000000000000 XMM05=0000000000000000aaa26b1b01368943
@@ -19525,6 +19949,33 @@ TR =0040 fffffe00000d8000 00004087 00008b00 DPL=0 TSS64-busy
 GDT=     fffffe00000d6000 0000007f
 IDT=     fffffe0000000000 00000fff
 CR0=80050033 CR2=00007f44b5e66da0 CR3=0000000149cc6000 CR4=00350ee0
+=======
+XMM00=1433de21ad4136427877f0ea5e11874d XMM01=afba16573683a05f8ac9262aa59af954
+XMM02=b7eb0cd5d2d2e2492bb05b0c0bed8561 XMM03=e5ed8c3fee517f31bdf9bbd6d53305b3
+XMM04=00000000000000000000000040e4315c XMM05=00000000000000002d000000a6000000
+XMM06=0000000000000000000000002d000000 XMM07=2d000000a600000040e4315c72000000
+XMM08=e0000000be00000012000000ee000000 XMM09=64646464646464556464325b6b606453
+XMM10=80a441b1fe3bae4243d4f1bbbb7f315d XMM11=aa41d0ab66d0303024651ec19e477192
+XMM12=0d0c0f0e09080b0a0504070601000302 XMM13=0c0f0e0d080b0a090407060500030201
+XMM14=000000000000000000000000000037c0 XMM15=00000000000000000000000000000040
+info registers vcpu 3
+RAX=0000000000000003 RBX=0000000000000282 RCX=dffffc0000000000 RDX=0000000000000000
+RSI=0000000000000000 RDI=0000000000000000 RBP=ffffc900032afb30 RSP=ffffc900032afa58
+R8 =dffffc0000000000 R9 =fffffbfff2394d5e R10=fffffbfff2394d5e R11=0000000000000000
+R12=0000000000000000 R13=1ffff92000655f58 R14=ffff88823bd345d8 R15=000000000000007d
+RIP=ffffffff81a983d4 RFL=00000087 [--S--PC] CPL=0 II=0 A20=1 SMM=0 HLT=0
+ES =0000 0000000000000000 000fffff 00000000
+CS =0010 0000000000000000 ffffffff 00a09b00 DPL=0 CS64 [-RA]
+SS =0018 0000000000000000 ffffffff 00c09300 DPL=0 DS   [-WA]
+DS =0000 0000000000000000 000fffff 00000000
+FS =0000 00007fdfea0354c0 000fffff 00000000
+GS =0000 ffff88823bd00000 000fffff 00000000
+LDT=0000 0000000000000000 000fffff 00000000
+TR =0040 fffffe00000d8000 00004087 00008b00 DPL=0 TSS64-busy
+GDT=     fffffe00000d6000 0000007f
+IDT=     fffffe0000000000 00000fff
+CR0=80050033 CR2=00007fdfe9d9e4f8 CR3=000000014c392000 CR4=003506e0
+>>>>>>> exp/report: add a report for "kernel BUG in pfkey_send_acquire"
 DR0=0000000000000000 DR1=0000000000000000 DR2=0000000000000000 DR3=0000000000000000 
 DR6=00000000fffe0ff0 DR7=0000000000000400
 EFER=0000000000000d01
@@ -19533,9 +19984,15 @@ FPR0=0000000000000000 0000 FPR1=0000000000000000 0000
 FPR2=0000000000000000 0000 FPR3=0000000000000000 0000
 FPR4=0000000000000000 0000 FPR5=0000000000000000 0000
 FPR6=0000000000000000 0000 FPR7=0000000000000000 0000
+<<<<<<< HEAD
 XMM00=00000000000000000000ffffffffffff XMM01=25252525252525252525252525252525
 XMM02=00000000000000000000000000000000 XMM03=00000000000000000000000000000000
 XMM04=00000000000000000000ffffffffffff XMM05=00000000000000000000000000000000
+=======
+XMM00=00000000ff0000000000000000000000 XMM01=ffffffff00ffffffffffffffffffffff
+XMM02=42494c4700352e322e325f4342494c47 XMM03=000000000000000000000000665f5f00
+XMM04=7469726f697270746567006574696e69 XMM05=00000000000000000000000000000000
+>>>>>>> exp/report: add a report for "kernel BUG in pfkey_send_acquire"
 XMM06=00000000000000000000000000000000 XMM07=00000000000000000000000000000000
 XMM08=00000000000000000000000000000000 XMM09=00000000000000000000000000000000
 XMM10=00000000000000000000000000000000 XMM11=00000000000000000000000000000000
