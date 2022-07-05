@@ -1,0 +1,69 @@
+skbuff: skb_over_panic: text:ffffffff8e5ddc75 len:736 put:72 head:ffff888159d0c000 data:ffff888159d0c000 tail:0x2e0 end:0x2c0 dev:<NULL>
+------------[ cut here ]------------
+kernel BUG at net/core/skbuff.c:113!
+invalid opcode: 0000 [#1] PREEMPT SMP KASAN
+CPU: 1 PID: 20026 Comm: syz-executor.0 Not tainted 5.19.0-rc3-32288-g0f3b08299494 #3
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
+RIP: 0010:skb_panic+0x277/0x280 home/daeryong/workspace/relrazzer/kernels/linux/net/core/skbuff.c:113
+Code: c0 48 c7 c5 c0 69 c7 91 48 0f 45 e8 44 89 e3 45 89 fa 48 c7 c7 40 69 c7 91 31 c0 55 53 41 52 41 53 e8 0c ed 77 03 48 83 c4 20 <0f> 0b 0f 1f 80 00 00 00 00 55 41 57 41 56 41 55 41 54 53 48 83 ec
+RSP: 0000:ffffc90009596de8 EFLAGS: 00010286
+RAX: 0000000000000088 RBX: 00000000000002c0 RCX: 777473599dfff200
+RDX: ffffc900129fb000 RSI: 000000000000ff2d RDI: 000000000000ff2e
+RBP: ffffffff91c769c0 R08: ffffffff816927a4 R09: ffffed10477867e9
+R10: ffffed10477867e9 R11: 0000000000000000 R12: 00000000000002c0
+R13: ffff88814b5cd050 R14: dffffc0000000000 R15: 00000000000002e0
+FS:  00007f102dcfc700(0000) GS:ffff88823bc00000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 000055a592ebe008 CR3: 0000000024133000 CR4: 0000000000350ee0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+Call Trace:
+ <TASK>
+ skb_over_panic+0x25/0x30 home/daeryong/workspace/relrazzer/kernels/linux/net/core/skbuff.c:118
+ skb_put+0x2f7/0x3b0 home/daeryong/workspace/relrazzer/kernels/linux/net/core/skbuff.c:2015
+ dump_esp_combs home/daeryong/workspace/relrazzer/kernels/linux/net/key/af_key.c:3006 [inline]
+ pfkey_send_acquire+0x2aa5/0x4b00 home/daeryong/workspace/relrazzer/kernels/linux/net/key/af_key.c:3227
+ km_query+0x18e/0x380 home/daeryong/workspace/relrazzer/kernels/linux/net/xfrm/xfrm_state.c:2247
+ xfrm_state_find+0x5459/0x8180 home/daeryong/workspace/relrazzer/kernels/linux/net/xfrm/xfrm_state.c:1165
+ xfrm_tmpl_resolve_one home/daeryong/workspace/relrazzer/kernels/linux/net/xfrm/xfrm_policy.c:2393 [inline]
+ xfrm_tmpl_resolve home/daeryong/workspace/relrazzer/kernels/linux/net/xfrm/xfrm_policy.c:2438 [inline]
+ xfrm_resolve_and_create_bundle+0x945/0x48c0 home/daeryong/workspace/relrazzer/kernels/linux/net/xfrm/xfrm_policy.c:2728
+ xfrm_lookup_with_ifid+0x3cc/0x35b0 home/daeryong/workspace/relrazzer/kernels/linux/net/xfrm/xfrm_policy.c:3062
+ xfrm_lookup home/daeryong/workspace/relrazzer/kernels/linux/net/xfrm/xfrm_policy.c:3191 [inline]
+ xfrm_lookup_route+0x38/0x2d0 home/daeryong/workspace/relrazzer/kernels/linux/net/xfrm/xfrm_policy.c:3202
+ udp_sendmsg+0x30f2/0x4e00 home/daeryong/workspace/relrazzer/kernels/linux/net/ipv4/udp.c:1220
+ sock_sendmsg_nosec home/daeryong/workspace/relrazzer/kernels/linux/net/socket.c:693 [inline]
+ sock_sendmsg home/daeryong/workspace/relrazzer/kernels/linux/net/socket.c:713 [inline]
+ ____sys_sendmsg+0xaba/0x1010 home/daeryong/workspace/relrazzer/kernels/linux/net/socket.c:2471
+ ___sys_sendmsg home/daeryong/workspace/relrazzer/kernels/linux/net/socket.c:2525 [inline]
+ __sys_sendmmsg+0x406/0x850 home/daeryong/workspace/relrazzer/kernels/linux/net/socket.c:2611
+ __do_sys_sendmmsg home/daeryong/workspace/relrazzer/kernels/linux/net/socket.c:2640 [inline]
+ __se_sys_sendmmsg home/daeryong/workspace/relrazzer/kernels/linux/net/socket.c:2637 [inline]
+ __x64_sys_sendmmsg+0x12c/0x190 home/daeryong/workspace/relrazzer/kernels/linux/net/socket.c:2637
+ do_syscall_x64 home/daeryong/workspace/relrazzer/kernels/linux/arch/x86/entry/common.c:51 [inline]
+ do_syscall_64+0x4e/0xa0 home/daeryong/workspace/relrazzer/kernels/linux/arch/x86/entry/common.c:82
+ entry_SYSCALL_64_after_hwframe+0x46/0xb0
+RIP: 0033:0x47268d
+Code: 02 b8 ff ff ff ff c3 66 0f 1f 44 00 00 f3 0f 1e fa 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 bc ff ff ff f7 d8 64 89 01 48
+RSP: 002b:00007f102dcfbbe8 EFLAGS: 00000246 ORIG_RAX: 0000000000000133
+RAX: ffffffffffffffda RBX: 000000000057d4a0 RCX: 000000000047268d
+RDX: 0400000000000354 RSI: 0000000020000180 RDI: 0000000000000003
+RBP: 0000000000000000 R08: 0000000000000000 R09: 0000000000000000
+R10: 000002873dedf99c R11: 0000000000000246 R12: 000000000057d4a8
+R13: 000000000057d4ac R14: 00007ffcaa189060 R15: 00007f102dcfbd80
+ </TASK>
+Modules linked in:
+---[ end trace 0000000000000000 ]---
+RIP: 0010:skb_panic+0x277/0x280 home/daeryong/workspace/relrazzer/kernels/linux/net/core/skbuff.c:113
+Code: c0 48 c7 c5 c0 69 c7 91 48 0f 45 e8 44 89 e3 45 89 fa 48 c7 c7 40 69 c7 91 31 c0 55 53 41 52 41 53 e8 0c ed 77 03 48 83 c4 20 <0f> 0b 0f 1f 80 00 00 00 00 55 41 57 41 56 41 55 41 54 53 48 83 ec
+RSP: 0000:ffffc90009596de8 EFLAGS: 00010286
+RAX: 0000000000000088 RBX: 00000000000002c0 RCX: 777473599dfff200
+RDX: ffffc900129fb000 RSI: 000000000000ff2d RDI: 000000000000ff2e
+RBP: ffffffff91c769c0 R08: ffffffff816927a4 R09: ffffed10477867e9
+R10: ffffed10477867e9 R11: 0000000000000000 R12: 00000000000002c0
+R13: ffff88814b5cd050 R14: dffffc0000000000 R15: 00000000000002e0
+FS:  00007f102dcfc700(0000) GS:ffff88823bc00000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00007fffd209df78 CR3: 0000000024133000 CR4: 0000000000350ee0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
