@@ -1,0 +1,45 @@
+rxrpc: Assertion failed
+------------[ cut here ]------------
+kernel BUG at net/rxrpc/conn_object.c:480!
+invalid opcode: 0000 [#1] PREEMPT SMP KASAN
+CPU: 3 PID: 15011 Comm: kworker/u8:0 Not tainted 5.19.0-rc3-32288-g0f3b08299494 #3
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
+Workqueue: netns cleanup_net
+RIP: 0010:rxrpc_destroy_all_connections+0x5e3/0x660 home/daeryong/workspace/relrazzer/kernels/linux/net/rxrpc/conn_object.c:480
+Code: 73 f1 c5 f2 49 bd 00 00 00 00 00 fc ff df 4c 39 f0 0f 84 42 fc ff ff e8 ab d2 a1 f2 48 c7 c7 00 bf e6 91 31 c0 e8 1c e4 51 01 <0f> 0b e8 96 d2 a1 f2 4c 89 e7 e8 8e ec c5 f2 41 89 c6 e9 88 fc ff
+RSP: 0018:ffffc90008f3fa40 EFLAGS: 00010246
+RAX: 0000000000000017 RBX: 0000000000000001 RCX: 4247f67f89222400
+RDX: 0000000000000000 RSI: 0000000080000000 RDI: 0000000000000000
+RBP: ffffc90008f3fb40 R08: ffffffff816927a4 R09: ffffed10477a67e9
+R10: ffffed10477a67e9 R11: 0000000000000000 R12: ffff88802007c064
+R13: dffffc0000000000 R14: ffff88802007c068 R15: ffff88802007c078
+FS:  0000000000000000(0000) GS:ffff88823bd00000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00007feca2aab018 CR3: 000000015209e000 CR4: 0000000000350ee0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+Call Trace:
+ <TASK>
+ rxrpc_exit_net+0x9c/0x130 home/daeryong/workspace/relrazzer/kernels/linux/net/rxrpc/net_ns.c:124
+ ops_exit_list home/daeryong/workspace/relrazzer/kernels/linux/net/core/net_namespace.c:162 [inline]
+ cleanup_net+0xbf5/0x15a0 home/daeryong/workspace/relrazzer/kernels/linux/net/core/net_namespace.c:594
+ process_one_work+0x909/0x12b0 home/daeryong/workspace/relrazzer/kernels/linux/kernel/workqueue.c:2289
+ worker_thread+0xab1/0x1320 home/daeryong/workspace/relrazzer/kernels/linux/kernel/workqueue.c:2436
+ kthread+0x294/0x330 home/daeryong/workspace/relrazzer/kernels/linux/kernel/kthread.c:376
+ ret_from_fork+0x1f/0x30
+ </TASK>
+Modules linked in:
+---[ end trace 0000000000000000 ]---
+RIP: 0010:rxrpc_destroy_all_connections+0x5e3/0x660 home/daeryong/workspace/relrazzer/kernels/linux/net/rxrpc/conn_object.c:480
+Code: 73 f1 c5 f2 49 bd 00 00 00 00 00 fc ff df 4c 39 f0 0f 84 42 fc ff ff e8 ab d2 a1 f2 48 c7 c7 00 bf e6 91 31 c0 e8 1c e4 51 01 <0f> 0b e8 96 d2 a1 f2 4c 89 e7 e8 8e ec c5 f2 41 89 c6 e9 88 fc ff
+RSP: 0018:ffffc90008f3fa40 EFLAGS: 00010246
+RAX: 0000000000000017 RBX: 0000000000000001 RCX: 4247f67f89222400
+RDX: 0000000000000000 RSI: 0000000080000000 RDI: 0000000000000000
+RBP: ffffc90008f3fb40 R08: ffffffff816927a4 R09: ffffed10477a67e9
+R10: ffffed10477a67e9 R11: 0000000000000000 R12: ffff88802007c064
+R13: dffffc0000000000 R14: ffff88802007c068 R15: ffff88802007c078
+FS:  0000000000000000(0000) GS:ffff88823bd00000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00007feca2aac008 CR3: 000000015209e000 CR4: 0000000000350ee0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
