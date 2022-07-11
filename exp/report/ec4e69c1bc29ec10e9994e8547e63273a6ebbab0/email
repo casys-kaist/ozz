@@ -6,8 +6,6 @@ add_wait_queue_exclusive" during fuzzing.
 Unfortunately, we have not found a reproducer for the crash yet. We
 will inform you if we have any update on this crash.
 
-It seems this is a similar issue with "general protection fault in
-add_wait_queue" in the previous email, but we are not sure.
 
 Detailed crash information is attached at the end of this email.
 

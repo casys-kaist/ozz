@@ -1,0 +1,7 @@
+Bryan Tan <bryantan@vmware.com> (maintainer:VMWARE VMCI DRIVER)
+Rajesh Jalisatgi <rjalisatgi@vmware.com> (maintainer:VMWARE VMCI DRIVER)
+Vishnu Dasa <vdasa@vmware.com> (maintainer:VMWARE VMCI DRIVER)
+VMware PV-Drivers Reviewers <pv-drivers@vmware.com> (reviewer:VMWARE VMCI DRIVER)
+Arnd Bergmann <arnd@arndb.de> (supporter:CHAR and MISC DRIVERS)
+Greg Kroah-Hartman <gregkh@linuxfoundation.org> (supporter:CHAR and MISC DRIVERS)
+linux-kernel@vger.kernel.org (open list:VMWARE VMCI DRIVER)
