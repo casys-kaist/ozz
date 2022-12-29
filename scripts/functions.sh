@@ -12,6 +12,9 @@ __git_clone() {
 		REV=$3
 		_OPT="--branch $REV"
 	fi
+	if [ -z "$FULL_HISTORY_CLONE" ] ; then
+		_OPT="$_OPT --depth 1"
+	fi
 	# git clone fails if we already cloned it. Suppress the error
 	"$GIT" clone "$SRC" "$DST" $_OPT || echo "[WARN] Failed to clone $SRC"
 }
