@@ -1,1 +1,0 @@
-KASAN: use-after-free Read in slcan_receive_buf
