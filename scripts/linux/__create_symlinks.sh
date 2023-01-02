@@ -39,7 +39,7 @@ create_builddir_symlink() {
 
 create_to_be_instrumented_functions_symlink() {
 	FILENAME="$TMP_DIR/to-be-instrumented-functions.lst"
-	SRC="$(__append_suffix $FILENAME)"
+	SRC="$KERNELS_DIR/guest/instrument.lst"
 
 	if [ -f "$TMP_DIR/kssb_rebuild" -a -n "$_FIRSTPASS" ]; then
 		mv "$SRC" "$SRC".old || true

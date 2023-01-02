@@ -26,7 +26,7 @@ __check_symlink() {
 }
 
 check_to_be_instrumented_functions() {
-	ORIG="$TMP_DIR/to-be-instrumented-functions.lst-$_SUFFIX"
+	ORIG="$KERNELS_DIR/guest/instrument.lst"
 	LINK="$TMP_DIR/to-be-instrumented-functions.lst"
 	__check_symlink $ORIG $LINK
 }
