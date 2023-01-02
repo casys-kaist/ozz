@@ -11,11 +11,8 @@ export SYZKALLER_BASELINE_BUILD=$SYZKALLER_BASELINE_PATH/bin
 export SYZKALLER_BASELINE_INSTALL=$SYZKALLER_BASELINE_BUILD
 
 GUEST_DIR="$KERNELS_DIR/guest/"
+KERNEL_X86_64="$GUEST_DIR/builds/x86_64"
 
 # Used in the syzkaller config
 export IMAGE_X86_64="$GUEST_DIR/images/x86_64"
-export KERNEL_X86_64="$GUEST_DIR/builds/x86_64"
 export NR_VMS=`expr $(nproc) / 2`
-
-# Used for the baseline
-export KERNEL_X86_64_BASELINE="$GUEST_DIR/builds/x86_64-baseline"
