@@ -6,7 +6,7 @@
 
 _download() {
 	# Now qemu resides in tools/qemu
-	(cd "$QEMU_PATH"; git submodule update --init --recursive)
+	git submodule update --init --recursive -- "$QEMU_PATH"
 }
 
 _build() {
