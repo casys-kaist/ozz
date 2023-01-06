@@ -44,11 +44,7 @@ static cl::opt<bool>
 
 static cl::opt<bool> ClInstrumentFlush("instrument-flush",
                                        cl::desc("instrument flush callbacks"),
-                                       cl::init(false));
-
-static cl::opt<bool> ClBuileKernel("ssb-kernel",
-                                   cl::desc("Build a Linux kernel"),
-                                   cl::init(false));
+                                       cl::init(true));
 
 static cl::opt<std::string>
     ClMemoryModel("memorymodel", cl::desc("Memory model being emulated"),
