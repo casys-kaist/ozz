@@ -280,6 +280,8 @@ func escapingFilename(file string) bool {
 
 var specialFiles = []string{"", "."}
 
+const specialFileLenPad = "a"
+
 func (r *randGen) filenameImpl(s *state) string {
 	if r.oneOf(100) {
 		return specialFiles[r.Intn(len(specialFiles))]
@@ -298,12 +300,34 @@ func (r *randGen) filenameImpl(s *state) string {
 		}
 		for i := 0; ; i++ {
 			f := fmt.Sprintf("%v/file%v", dir, i)
+			if r.oneOf(100) {
+				// Make file name very long using target.SpecialFileLenghts consts.
+				// Add/subtract some small const to account for our file name prefix
+				// and potential kernel off-by-one's.
+				fileLen := r.randFilenameLength()
+				if add := fileLen - len(f); add > 0 {
+					f += strings.Repeat(specialFileLenPad, add)
+				}
+			}
 			if !s.files[f] {
 				return f
 			}
 		}
 	}
 	return r.randFromMap(s.files)
+}
+
+func (r *randGen) randFilenameLength() int {
+	off := r.biasedRand(10, 5)
+	if r.bin() {
+		off = -off
+	}
+	lens := r.target.SpecialFileLenghts
+	res := lens[r.Intn(len(lens))] + off
+	if res < 0 {
+		res = 0
+	}
+	return res
 }
 
 func (r *randGen) randFromMap(m map[string]bool) string {
@@ -372,7 +396,7 @@ func (r *randGen) createResource(s *state, res *ResourceType, dir Dir) (arg Arg,
 	// TODO: reduce priority of less specialized ctors.
 	var metas []*Syscall
 	for _, meta := range metas0 {
-		if s.ct.Enabled(meta.ID) {
+		if s.ct.Generatable(meta.ID) {
 			metas = append(metas, meta)
 		}
 	}
@@ -544,7 +568,11 @@ func (r *randGen) generateCall(s *state, p *Prog, insertionPoint int) []*Call {
 	biasCall := -1
 	if insertionPoint > 0 {
 		// Choosing the base call is based on the insertion point of the new calls sequence.
-		biasCall = p.Calls[r.Intn(insertionPoint)].Meta.ID
+		insertionCall := p.Calls[r.Intn(insertionPoint)].Meta
+		if !insertionCall.Attrs.NoGenerate {
+			// We must be careful not to bias towards a non-generatable call.
+			biasCall = insertionCall.ID
+		}
 	}
 	idx := s.ct.choose(r.Rand, biasCall)
 	meta := r.target.Syscalls[idx]
@@ -554,6 +582,9 @@ func (r *randGen) generateCall(s *state, p *Prog, insertionPoint int) []*Call {
 func (r *randGen) generateParticularCall(s *state, meta *Syscall) (calls []*Call) {
 	if meta.Attrs.Disabled {
 		panic(fmt.Sprintf("generating disabled call %v", meta.Name))
+	}
+	if meta.Attrs.NoGenerate {
+		panic(fmt.Sprintf("generating no_generate call: %v", meta.Name))
 	}
 	c := &Call{
 		Meta:   meta,
@@ -575,7 +606,10 @@ func (target *Target) GenerateAllSyzProg(rs rand.Source) *Prog {
 	s := newState(target, target.DefaultChoiceTable(), nil)
 	handled := make(map[string]bool)
 	for _, meta := range target.Syscalls {
-		if !strings.HasPrefix(meta.CallName, "syz_") || handled[meta.CallName] || meta.Attrs.Disabled {
+		if !strings.HasPrefix(meta.CallName, "syz_") ||
+			handled[meta.CallName] ||
+			meta.Attrs.Disabled ||
+			meta.Attrs.NoGenerate {
 			continue
 		}
 		handled[meta.CallName] = true
@@ -732,10 +766,8 @@ func (a *BufferType) generate(r *randGen, s *state, dir Dir) (arg Arg, calls []*
 				sz = a.Size()
 			case r.nOutOf(1, 3):
 				sz = r.rand(100)
-			case r.nOutOf(1, 2):
-				sz = 108 // UNIX_PATH_MAX
 			default:
-				sz = 4096 // PATH_MAX
+				sz = uint64(r.randFilenameLength())
 			}
 			return MakeOutDataArg(a, dir, sz), nil
 		}
@@ -747,6 +779,8 @@ func (a *BufferType) generate(r *randGen, s *state, dir Dir) (arg Arg, calls []*
 			return MakeOutDataArg(a, dir, uint64(r.Intn(100))), nil
 		}
 		return MakeDataArg(a, dir, r.generateText(a.Text)), nil
+	case BufferCompressed:
+		panic(fmt.Sprintf("can't generate compressed type %v", a))
 	default:
 		panic("unknown buffer kind")
 	}

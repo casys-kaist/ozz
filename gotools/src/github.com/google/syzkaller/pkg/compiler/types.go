@@ -16,13 +16,15 @@ import (
 
 // typeDesc is arg/field type descriptor.
 type typeDesc struct {
-	Names        []string
-	CanBeTypedef bool       // can be type alias target?
-	CantBeOpt    bool       // can't be marked as opt?
-	NeedBase     bool       // needs base type when used as field?
-	MaxColon     int        // max number of colons (int8:2) on fields
-	OptArgs      int        // number of optional arguments in Args array
-	Args         []namedArg // type arguments
+	Names             []string
+	CanBeTypedef      bool            // can be type alias target?
+	CantBeOpt         bool            // can't be marked as opt?
+	CantBeOut         bool            // can't be used as an explicitly output argument?
+	NeedBase          bool            // needs base type when used as field?
+	MaxColon          int             // max number of colons (int8:2) on fields
+	OptArgs           int             // number of optional arguments in Args array
+	Args              []namedArg      // type arguments
+	RequiresCallAttrs map[string]bool // calls using this type must have these attrs.
 	// CanBeArgRet returns if this type can be syscall argument/return (false if nil).
 	CanBeArgRet func(comp *compiler, t *ast.Type) (bool, bool)
 	// CanBeResourceBase returns if this type can be a resource base type (false if nil.
@@ -164,6 +166,7 @@ func getIntAlignment(comp *compiler, base prog.IntTypeCommon) uint64 {
 var typePtr = &typeDesc{
 	Names:        []string{"ptr", "ptr64"},
 	CanBeArgRet:  canBeArg,
+	CantBeOut:    true,
 	CanBeTypedef: true,
 	Args:         []namedArg{{Name: "direction", Type: typeArgDir}, {Name: "type", Type: typeArgType}},
 	Gen: func(comp *compiler, t *ast.Type, args []*ast.Type, base prog.IntTypeCommon) prog.Type {
@@ -289,6 +292,7 @@ var typeLen = &typeDesc{
 	Names:       []string{"len", "bytesize", "bytesize2", "bytesize4", "bytesize8", "bitsize", "offsetof"},
 	CanBeArgRet: canBeArg,
 	CantBeOpt:   true,
+	CantBeOut:   true,
 	NeedBase:    true,
 	Args:        []namedArg{{Name: "len target", Type: typeArgLenTarget}},
 	Gen: func(comp *compiler, t *ast.Type, args []*ast.Type, base prog.IntTypeCommon) prog.Type {
@@ -325,6 +329,7 @@ var typeConst = &typeDesc{
 	CanBeArgRet:  canBeArg,
 	CanBeTypedef: true,
 	CantBeOpt:    true,
+	CantBeOut:    true,
 	NeedBase:     true,
 	Args:         []namedArg{{Name: "value", Type: typeArgInt}},
 	CheckConsts: func(comp *compiler, t *ast.Type, args []*ast.Type, base prog.IntTypeCommon) {
@@ -367,6 +372,7 @@ var typeFlags = &typeDesc{
 	CanBeArgRet:  canBeArg,
 	CanBeTypedef: true,
 	CantBeOpt:    true,
+	CantBeOut:    true,
 	NeedBase:     true,
 	Args:         []namedArg{{Name: "flags", Type: typeArgFlags}},
 	CheckConsts: func(comp *compiler, t *ast.Type, args []*ast.Type, base prog.IntTypeCommon) {
@@ -469,6 +475,7 @@ var typeCsum = &typeDesc{
 	Names:     []string{"csum"},
 	NeedBase:  true,
 	CantBeOpt: true,
+	CantBeOut: true,
 	OptArgs:   1,
 	Args: []namedArg{
 		{Name: "csum target", Type: typeArgLenTarget},
@@ -517,6 +524,7 @@ func genCsumKind(t *ast.Type) prog.CsumKind {
 var typeProc = &typeDesc{
 	Names:        []string{"proc"},
 	CanBeArgRet:  canBeArg,
+	CantBeOut:    true,
 	CanBeTypedef: true,
 	NeedBase:     true,
 	Args: []namedArg{
@@ -555,6 +563,7 @@ var typeProc = &typeDesc{
 var typeText = &typeDesc{
 	Names:     []string{"text"},
 	CantBeOpt: true,
+	CantBeOut: true,
 	Args:      []namedArg{{Name: "kind", Type: typeArgTextType}},
 	Varlen: func(comp *compiler, t *ast.Type, args []*ast.Type) bool {
 		return true
@@ -754,6 +763,7 @@ var typeFmt = &typeDesc{
 	Names:        []string{"fmt"},
 	CanBeTypedef: true,
 	CantBeOpt:    true,
+	CantBeOut:    true,
 	Args: []namedArg{
 		{Name: "format", Type: typeFmtFormat},
 		{Name: "value", Type: typeArgType, IsArg: true},
@@ -819,6 +829,31 @@ var typeFmt = &typeDesc{
 var typeFmtFormat = &typeArg{
 	Names: []string{"dec", "hex", "oct"},
 	Kind:  kindIdent,
+}
+
+// typeCompressedImage is used for compressed disk images.
+var typeCompressedImage = &typeDesc{
+	Names:     []string{"compressed_image"},
+	CantBeOpt: true,
+	CantBeOut: true,
+	RequiresCallAttrs: map[string]bool{
+		"no_generate": true,
+		"no_minimize": true,
+	},
+	CanBeArgRet: func(comp *compiler, t *ast.Type) (bool, bool) {
+		return true, false
+	},
+	Varlen: func(comp *compiler, t *ast.Type, args []*ast.Type) bool {
+		return true
+	},
+	Gen: func(comp *compiler, t *ast.Type, args []*ast.Type, base prog.IntTypeCommon) prog.Type {
+		base.TypeSize = 0
+		base.TypeAlign = 1
+		return &prog.BufferType{
+			TypeCommon: base.TypeCommon,
+			Kind:       prog.BufferCompressed,
+		}
+	},
 }
 
 // typeArgType is used as placeholder for any type (e.g. ptr target type).
@@ -908,26 +943,30 @@ func init() {
 		}
 		// Need to cache type in structTypes before generating fields to break recursion.
 		comp.structTypes[t.Ident] = typ
-		fields := comp.genFieldArray(s.Fields, make([]uint64, len(s.Fields)))
-		if s.IsUnion {
-			typ.(*prog.UnionType).Fields = fields
+		fields, overlayField := comp.genFieldArray(s.Fields, make([]uint64, len(s.Fields)))
+		switch typ1 := typ.(type) {
+		case *prog.UnionType:
+			typ1.Fields = fields
 			for _, f := range fields {
-				if a := f.Type.Alignment(); typ.(*prog.UnionType).TypeAlign < a {
-					typ.(*prog.UnionType).TypeAlign = a
+				if a := f.Type.Alignment(); typ1.TypeAlign < a {
+					typ1.TypeAlign = a
 				}
 			}
-		} else {
-			typ.(*prog.StructType).Fields = fields
+		case *prog.StructType:
+			typ1.Fields = fields
+			if overlayField >= 0 {
+				typ1.OverlayField = overlayField
+			}
 			attrs := comp.parseAttrs(structAttrs, s, s.Attrs)
 			if align := attrs[attrAlign]; align != 0 {
-				typ.(*prog.StructType).TypeAlign = align
+				typ1.TypeAlign = align
 			} else if attrs[attrPacked] != 0 {
-				typ.(*prog.StructType).TypeAlign = 1
+				typ1.TypeAlign = 1
 			} else {
 				for _, f := range fields {
 					a := f.Type.Alignment()
-					if typ.(*prog.StructType).TypeAlign < a {
-						typ.(*prog.StructType).TypeAlign = a
+					if typ1.TypeAlign < a {
+						typ1.TypeAlign = a
 					}
 				}
 			}
@@ -1097,6 +1136,7 @@ func init() {
 		typeText,
 		typeString,
 		typeFmt,
+		typeCompressedImage,
 	}
 	for _, desc := range builtins {
 		for _, name := range desc.Names {

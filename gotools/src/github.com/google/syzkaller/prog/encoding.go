@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/google/syzkaller/pkg/image"
 )
 
 // String generates a very compact program description (mostly for debug output).
@@ -635,6 +637,14 @@ func (p *parser) parseArgString(t Type, dir Dir) (Arg, error) {
 	data, err := p.deserializeData()
 	if err != nil {
 		return nil, err
+	}
+	// Check compressed data for validity.
+	if typ.IsCompressed() {
+		if err := image.DecompressCheck(data); err != nil {
+			p.strictFailf("invalid compressed data in arg: %v", err)
+			// In non-strict mode, empty the data slice.
+			data = image.Compress([]byte{})
+		}
 	}
 	size := ^uint64(0)
 	if p.Char() == '/' {
