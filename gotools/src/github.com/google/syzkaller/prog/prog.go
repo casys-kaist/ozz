@@ -5,6 +5,8 @@ package prog
 
 import (
 	"fmt"
+
+	"github.com/google/syzkaller/pkg/ssb"
 )
 
 type Prog struct {
@@ -17,6 +19,7 @@ type Prog struct {
 	Threaded bool
 	Contender
 	Schedule
+	ssb.FlushVector
 }
 
 type Call struct {
