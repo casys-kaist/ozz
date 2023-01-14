@@ -695,10 +695,6 @@ static void loop(void)
 			continue;
 		}
 #endif
-			// NOTE: worker threads are hanged. disbale
-			// kssb since enabling kssb incurs a large
-			// overhead without making a progress.
-			hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
 			debug("killing hanging pid %d, executed=%d\n", pid, executed_calls);
 			kill_and_wait(pid, &status);
 			break;

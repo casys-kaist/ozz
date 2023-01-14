@@ -12,7 +12,11 @@ import (
 )
 
 func TestNotEscaping(t *testing.T) {
-	r := newRand(nil, rand.NewSource(0))
+	target, err := GetTarget("test", "64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newRand(target, rand.NewSource(0))
 	s := &state{
 		files: map[string]bool{"./file0": true},
 	}
@@ -197,5 +201,36 @@ func TestTruncateToBitSize(t *testing.T) {
 				t.Fatalf("truncateToBitSize(0x%x, %v)=0x%x, want 0x%x", test.v, test.bits, res, test.res)
 			}
 		})
+	}
+}
+
+// Checks that a generated program does not contain any "no_generate" syscalls.
+func TestNoGenerate(t *testing.T) {
+	target, rs, iters := initTest(t)
+
+	// Enable all "no_generate" syscalls and ~10% of all others.
+	enabled := make(map[*Syscall]bool)
+	rnd := newRand(target, rs)
+	for i := 0; i < len(target.Syscalls); i++ {
+		syscall := target.Syscalls[rnd.Intn(len(target.Syscalls))]
+		if syscall.Attrs.NoGenerate || rnd.oneOf(10) {
+			enabled[syscall] = true
+		}
+	}
+	c := target.SyscallMap["clock_gettime"]
+	enabled[c] = true
+	ct := target.BuildChoiceTable(nil, enabled)
+
+	const tries = 10
+	for i := 0; i < tries; i++ {
+		p := target.Generate(rs, 50, ct)
+		for it := 0; it < iters/tries; it++ {
+			p.Mutate(rs, 50, ct, nil)
+		}
+		for _, c := range p.Calls {
+			if c.Meta.Attrs.NoGenerate {
+				t.Fatalf("program contains a no_generate syscall: %v\n", c.Meta.Name)
+			}
+		}
 	}
 }

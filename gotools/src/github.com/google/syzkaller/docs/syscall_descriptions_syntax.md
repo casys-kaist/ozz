@@ -10,7 +10,8 @@ argname = identifier
 type = typename [ "[" type-options "]" ]
 typename = "const" | "intN" | "intptr" | "flags" | "array" | "ptr" |
 	   "string" | "strconst" | "filename" | "glob" | "len" |
-	   "bytesize" | "bytesizeN" | "bitsize" | "vma" | "proc"
+	   "bytesize" | "bytesizeN" | "bitsize" | "vma" | "proc" |
+	   "compressed_image"
 type-options = [type-opt ["," type-opt]]
 ```
 
@@ -62,6 +63,9 @@ rest of the type-options are type-specific:
 	vma64 has size of 8 bytes regardless of target pointer size
 "proc": per process int (see description below), type-options:
 	value range start, how many values per process, underlying type
+"compressed_image": zlib-compressed disk image
+	syscalls accepting compressed images must be marked with `no_generate`
+	and `no_minimize` call attributes.
 "text": machine code of the specified type, type-options:
 	text type (x86_real, x86_16, x86_32, x86_64, arm64)
 "void": type with static size 0
@@ -93,6 +97,8 @@ Call attributes are:
 "ignore_return": ignore return value of this syscall in fallback feedback; need to be used for calls
 	that don't return fixed error codes but rather something else (e.g. the current time).
 "breaks_returns": ignore return values of all subsequent calls in the program in fallback feedback (can't be trusted).
+"no_generate": do not try to generate this syscall, i.e. use only seed descriptions to produce it.
+"no_minimize": do not modify instances of this syscall when trying to minimize a crashing program.
 ```
 
 ## Ints
@@ -129,8 +135,31 @@ structname "{" "\n"
 ```
 
 Fields can have attributes specified in parentheses after the field, independent
-of their type. The only attribute is direction (`in/out/inout`). For the field for
-which it is specified, the direction attributes on the upper levels are overridden.
+of their type. `in/out/inout` attribute specify per-field direction, for example:
+
+```
+foo {
+	field0	const[1, int32]	(in)
+	field1	int32		(inout)
+	field2	fd		(out)
+}
+```
+
+`out_overlay` attribute allows to have separate input and output layouts for the struct.
+Fields before the `out_overlay` field are input, fields starting from `out_overlay` are output.
+Input and output fields overlap in memory (both start from the beginning of the struct in memory).
+For example:
+
+```
+foo {
+	in0	const[1, int32]
+	in1	flags[bar, int8]
+	in2	ptr[in, string]
+	out0	fd	(out_overlay)
+	out1	int32
+}
+```
+
 
 Structs can have attributes specified in square brackets after the struct.
 Attributes are:
@@ -365,6 +394,22 @@ foo(a const[PATH_MAX])
 foo(a ptr[in, array[int8, MY_PATH_MAX]])
 define MY_PATH_MAX	PATH_MAX + 2
 ```
+
+## Meta
+
+Description files can also contain `meta` directives that specify meta-information for the whole file.
+
+```
+meta noextract
+```
+Tells `make extract` to not extract constants for this file.
+Though, `syz-extract` can still be invoked manually on this file.
+
+```
+meta arches["arch1", "arch2"]
+```
+Restricts this file only to the given set of architectures.
+`make extract` and ``make generate` will not use it on other architectures.
 
 ## Misc
 

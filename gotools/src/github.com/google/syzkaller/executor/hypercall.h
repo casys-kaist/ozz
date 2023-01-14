@@ -3,11 +3,15 @@
 
 #include "hcall_constant.h"
 
-__attribute__((noinline))
-unsigned long hypercall(unsigned long cmd, unsigned long arg,
-			unsigned long subarg, unsigned long subarg2)
+// #define NO_HYPERCALL
+
+__attribute__((noinline)) unsigned long hypercall(unsigned long cmd, unsigned long arg,
+						  unsigned long subarg, unsigned long subarg2)
 {
 	unsigned long ret = -1;
+#ifdef NO_HYPERCALL
+	return 0;
+#else
 #ifdef __amd64__
 	unsigned long id = HCALL_RAX_ID;
 	asm volatile(
@@ -33,6 +37,7 @@ unsigned long hypercall(unsigned long cmd, unsigned long arg,
 	    "popq %%rbx\n\t"
 	    : "=r"(ret)
 	    : "r"(id), "r"(cmd), "r"(arg), "r"(subarg), "r"(subarg2));
+#endif
 #endif
 	return ret;
 }

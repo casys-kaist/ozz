@@ -168,12 +168,32 @@ func (comp *compiler) checkStructFields(n *ast.Struct, typ, name string) {
 	if len(n.Fields) < 1 {
 		comp.error(n.Pos, "%v %v has no fields, need at least 1 field", typ, name)
 	}
-	for _, f := range n.Fields {
+	hasDirections, hasOutOverlay := false, false
+	for fieldIdx, f := range n.Fields {
 		attrs := comp.parseAttrs(fieldAttrs, f, f.Attrs)
-
-		if attrs[attrIn]+attrs[attrOut]+attrs[attrInOut] > 1 {
+		dirCount := attrs[attrIn] + attrs[attrOut] + attrs[attrInOut]
+		if dirCount != 0 {
+			hasDirections = true
+		}
+		if dirCount > 1 {
 			_, typ, _ := f.Info()
 			comp.error(f.Pos, "%v has multiple direction attributes", typ)
+		}
+		if attrs[attrOutOverlay] > 0 {
+			if n.IsUnion {
+				_, typ, name := f.Info()
+				comp.error(f.Pos, "unknown %v %v attribute %v", typ, name, attrOutOverlay.Name)
+			}
+			if fieldIdx == 0 {
+				comp.error(f.Pos, "%v attribute must not be specified on the first field", attrOutOverlay.Name)
+			}
+			if hasOutOverlay || attrs[attrOutOverlay] > 1 {
+				comp.error(f.Pos, "multiple %v attributes", attrOutOverlay.Name)
+			}
+			hasOutOverlay = true
+		}
+		if hasDirections && hasOutOverlay {
+			comp.error(f.Pos, "mix of direction and %v attributes is not supported", attrOutOverlay.Name)
 		}
 	}
 }
@@ -287,15 +307,65 @@ func (comp *compiler) checkAttributeValues() {
 			}
 			// Check each field's attributes.
 			st := decl.(*ast.Struct)
+			hasOutOverlay := false
 			for _, f := range st.Fields {
+				isOut := hasOutOverlay
 				for _, attr := range f.Attrs {
 					desc := fieldAttrs[attr.Ident]
 					if desc.CheckConsts != nil {
 						desc.CheckConsts(comp, f, attr)
 					}
+					switch attr.Ident {
+					case attrOutOverlay.Name:
+						hasOutOverlay = true
+						isOut = true
+					}
+				}
+				if isOut && comp.getTypeDesc(f.Type).CantBeOut {
+					comp.error(f.Pos, "%v type must not be used as output", f.Type.Ident)
 				}
 			}
+		case *ast.Call:
+			attrNames := make(map[string]bool)
+			descAttrs := comp.parseAttrs(callAttrs, n, n.Attrs)
+			for desc := range descAttrs {
+				attrNames[prog.CppName(desc.Name)] = true
+			}
+
+			checked := make(map[string]bool)
+			for _, a := range n.Args {
+				comp.checkRequiredCallAttrs(n, attrNames, a.Type, checked)
+			}
 		}
+	}
+}
+
+func (comp *compiler) checkRequiredCallAttrs(call *ast.Call, callAttrNames map[string]bool,
+	t *ast.Type, checked map[string]bool) {
+	desc := comp.getTypeDesc(t)
+	for attr := range desc.RequiresCallAttrs {
+		if !callAttrNames[attr] {
+			comp.error(call.Pos, "call %v refers to type %v and so must be marked %s", call.Name.Name, t.Ident, attr)
+		}
+	}
+
+	if desc == typeStruct {
+		s := comp.structs[t.Ident]
+		// Prune recursion, can happen even on correct tree via opt pointers.
+		if checked[s.Name.Name] {
+			return
+		}
+		checked[s.Name.Name] = true
+		fields := s.Fields
+		for _, fld := range fields {
+			comp.checkRequiredCallAttrs(call, callAttrNames, fld.Type, checked)
+		}
+	} else if desc == typeArray {
+		typ := t.Args[0]
+		comp.checkRequiredCallAttrs(call, callAttrNames, typ, checked)
+	} else if desc == typePtr {
+		typ := t.Args[1]
+		comp.checkRequiredCallAttrs(call, callAttrNames, typ, checked)
 	}
 }
 
@@ -781,11 +851,14 @@ type checkCtx struct {
 }
 
 func (comp *compiler) checkType(ctx checkCtx, t *ast.Type, flags checkFlags) {
+	comp.checkTypeImpl(ctx, t, comp.getTypeDesc(t), flags)
+}
+
+func (comp *compiler) checkTypeImpl(ctx checkCtx, t *ast.Type, desc *typeDesc, flags checkFlags) {
 	if unexpected, _, ok := checkTypeKind(t, kindIdent); !ok {
 		comp.error(t.Pos, "unexpected %v, expect type", unexpected)
 		return
 	}
-	desc := comp.getTypeDesc(t)
 	if desc == nil {
 		comp.error(t.Pos, "unknown type %v", t.Ident)
 		return

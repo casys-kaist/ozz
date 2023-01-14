@@ -9,6 +9,4 @@ export GOROOT="$GO_PATH"
 export GOPATH="$GOTOOLS_DIR"
 export GOOS="linux"
 export GOARCH="amd64"
-export GO_VERSION="go1.15.8"
-# Our affinity check mechanism relies on cgo
-export CGO_ENABLED=1
+export GO_VERSION="go1.19.4"

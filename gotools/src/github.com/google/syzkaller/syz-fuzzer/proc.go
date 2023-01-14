@@ -15,7 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/google/syzkaller/pkg/affinity"
 	"github.com/google/syzkaller/pkg/cover"
 	"github.com/google/syzkaller/pkg/hash"
 	"github.com/google/syzkaller/pkg/interleaving"
@@ -127,9 +126,6 @@ func (proc *Proc) loop() {
 		} else {
 			// Mutate a schedule of an existing prog.
 			proc.scheduleInput(fuzzerSnapshot)
-		}
-		if i%100 == 0 && !affinity.RunOnCPU(1<<0) {
-			log.Logf(0, "[WARN] Proc goroutine #%v runs on CPU other than 0", proc.pid)
 		}
 	}
 }

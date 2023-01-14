@@ -869,7 +869,6 @@ bool run_in_epoch(thread_t* th)
 void execute_one()
 {
 	WARN_ON_NOT_NULL(hypercall(HCALL_RESET, 0, 0, 0), "HCALL_RESET");
-	WARN_ON_NOT_NULL(hypercall(HCALL_ENABLE_KSSB, 0, 0, 0), "HCALL_ENABLE_KSSB");
 	// Duplicate global collide variable on stack.
 	// Fuzzer once come up with ioctl(fd, FIONREAD, 0x920000),
 	// where 0x920000 was exactly collide address, so every iteration reset collide to 0.
@@ -1108,8 +1107,6 @@ retry:
 		collide = colliding = true;
 		goto retry;
 	}
-
-	WARN_ON_NOT_NULL(hypercall(HCALL_DISABLE_KSSB, 0, 0, 0), "HCALL_DISABLE_KSSB");
 }
 
 // Get a thread to run a call

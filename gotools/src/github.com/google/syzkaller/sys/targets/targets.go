@@ -705,7 +705,7 @@ func (target *Target) Timeouts(slowdown int) Timeouts {
 		timeouts.Scale = 3
 	}
 	if timeouts.Syscall == 0 {
-		timeouts.Syscall = 50 * time.Millisecond
+		timeouts.Syscall = 200 * time.Millisecond
 	}
 	if timeouts.Program == 0 {
 		timeouts.Program = 5 * time.Second

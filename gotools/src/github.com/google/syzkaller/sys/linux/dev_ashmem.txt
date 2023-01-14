@@ -1,6 +1,12 @@
 # Copyright 2017 syzkaller project authors. All rights reserved.
 # Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 
+# Ashmem was removed in v5.18:
+# https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=721412ed3d819e767cac2b06646bf03aa158aaec
+# but still present in LTS 5.4/10 kernels which we want to support for some time.
+# Extract now fails due to missing headers.
+meta noextract
+
 include <asm/ioctl.h>
 include <uapi/linux/fcntl.h>
 include <drivers/staging/android/uapi/ashmem.h>

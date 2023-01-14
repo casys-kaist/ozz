@@ -596,6 +596,9 @@ func (mgr *Manager) preloadCorpus() {
 }
 
 func (mgr *Manager) loadInterleavingCoverage() {
+	if !*flagCorpus {
+		return
+	}
 	fn := filepath.Join(mgr.cfg.Workdir,
 		fmt.Sprintf("interleaving-%v", hex.EncodeToString(mgr.kernelHash)))
 
@@ -1317,7 +1320,9 @@ func (mgr *Manager) newScheduledInput(inp rpctype.RPCScheduledInput, sign interl
 		corpusInterleaving := mgr.serv.corpusInterleaving
 		diff := corpusInterleaving.Diff(sign)
 		data := diff.ToHex()
-		mgr.interleavingCovFile.Write(data)
+		if mgr.interleavingCovFile != nil {
+			mgr.interleavingCovFile.Write(data)
+		}		
 	}
 	return true
 }
