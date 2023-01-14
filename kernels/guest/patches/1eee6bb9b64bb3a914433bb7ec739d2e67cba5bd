@@ -1,0 +1,39 @@
+commit 1eee6bb9b64bb3a914433bb7ec739d2e67cba5bd
+Author: Stanimir Varbanov <stanimir.varbanov@linaro.org>
+Date:   Wed Oct 5 11:37:30 2022 +0300
+
+    venus: firmware: Correct assertion of reset bit on remote processor
+    
+    Currently we use read/write_relaxed in combination with mb() to assert
+    reset. This looks wrong because mb() after write_relaxed() will not
+    order correctly load-update-store sequence. Correct this by use
+    readl/writel which include memory barriers.
+    
+    Signed-off-by: Stanimir Varbanov <stanimir.varbanov@linaro.org>
+
+diff --git a/drivers/media/platform/qcom/venus/firmware.c b/drivers/media/platform/qcom/venus/firmware.c
+index 71e43611d1cf..142d4c74017c 100644
+--- a/drivers/media/platform/qcom/venus/firmware.c
++++ b/drivers/media/platform/qcom/venus/firmware.c
+@@ -181,17 +181,15 @@ static int venus_shutdown_no_tz(struct venus_core *core)
+ 
+ 	if (IS_V6(core)) {
+ 		/* Assert the reset to XTSS */
+-		reg = readl_relaxed(wrapper_tz_base + WRAPPER_TZ_XTSS_SW_RESET);
++		reg = readl(wrapper_tz_base + WRAPPER_TZ_XTSS_SW_RESET);
+ 		reg |= WRAPPER_XTSS_SW_RESET_BIT;
+-		writel_relaxed(reg, wrapper_tz_base + WRAPPER_TZ_XTSS_SW_RESET);
++		writel(reg, wrapper_tz_base + WRAPPER_TZ_XTSS_SW_RESET);
+ 	} else {
+ 		/* Assert the reset to ARM9 */
+-		reg = readl_relaxed(wrapper_base + WRAPPER_A9SS_SW_RESET);
++		reg = readl(wrapper_base + WRAPPER_A9SS_SW_RESET);
+ 		reg |= WRAPPER_A9SS_SW_RESET_BIT;
+-		writel_relaxed(reg, wrapper_base + WRAPPER_A9SS_SW_RESET);
++		writel(reg, wrapper_base + WRAPPER_A9SS_SW_RESET);
+ 	}
+-	/* Make sure reset is asserted before the mapping is removed */
+-	mb();
+ 
+ 	iommu = core->fw.iommu_domain;
+ 

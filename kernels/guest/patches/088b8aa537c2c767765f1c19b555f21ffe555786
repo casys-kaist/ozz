@@ -1,0 +1,298 @@
+commit 088b8aa537c2c767765f1c19b555f21ffe555786
+Author: David Hildenbrand <david@redhat.com>
+Date:   Thu Sep 1 10:35:59 2022 +0200
+
+    mm: fix PageAnonExclusive clearing racing with concurrent RCU GUP-fast
+    
+    commit 6c287605fd56 ("mm: remember exclusively mapped anonymous pages with
+    PG_anon_exclusive") made sure that when PageAnonExclusive() has to be
+    cleared during temporary unmapping of a page, that the PTE is
+    cleared/invalidated and that the TLB is flushed.
+    
+    What we want to achieve in all cases is that we cannot end up with a pin on
+    an anonymous page that may be shared, because such pins would be
+    unreliable and could result in memory corruptions when the mapped page
+    and the pin go out of sync due to a write fault.
+    
+    That TLB flush handling was inspired by an outdated comment in
+    mm/ksm.c:write_protect_page(), which similarly required the TLB flush in
+    the past to synchronize with GUP-fast. However, ever since general RCU GUP
+    fast was introduced in commit 2667f50e8b81 ("mm: introduce a general RCU
+    get_user_pages_fast()"), a TLB flush is no longer sufficient to handle
+    concurrent GUP-fast in all cases -- it only handles traditional IPI-based
+    GUP-fast correctly.
+    
+    Peter Xu (thankfully) questioned whether that TLB flush is really
+    required. On architectures that send an IPI broadcast on TLB flush,
+    it works as expected. To synchronize with RCU GUP-fast properly, we're
+    conceptually fine, however, we have to enforce a certain memory order and
+    are missing memory barriers.
+    
+    Let's document that, avoid the TLB flush where possible and use proper
+    explicit memory barriers where required. We shouldn't really care about the
+    additional memory barriers here, as we're not on extremely hot paths --
+    and we're getting rid of some TLB flushes.
+    
+    We use a smp_mb() pair for handling concurrent pinning and a
+    smp_rmb()/smp_wmb() pair for handling the corner case of only temporary
+    PTE changes but permanent PageAnonExclusive changes.
+    
+    One extreme example, whereby GUP-fast takes a R/O pin and KSM wants to
+    convert an exclusive anonymous page to a KSM page, and that page is already
+    mapped write-protected (-> no PTE change) would be:
+    
+            Thread 0 (KSM)                  Thread 1 (GUP-fast)
+    
+                                            (B1) Read the PTE
+                                            # (B2) skipped without FOLL_WRITE
+            (A1) Clear PTE
+            smp_mb()
+            (A2) Check pinned
+                                            (B3) Pin the mapped page
+                                            smp_mb()
+            (A3) Clear PageAnonExclusive
+            smp_wmb()
+            (A4) Restore PTE
+                                            (B4) Check if the PTE changed
+                                            smp_rmb()
+                                            (B5) Check PageAnonExclusive
+    
+    Thread 1 will properly detect that PageAnonExclusive was cleared and
+    back off.
+    
+    Note that we don't need a memory barrier between checking if the page is
+    pinned and clearing PageAnonExclusive, because stores are not
+    speculated.
+    
+    The possible issues due to reordering are of theoretical nature so far
+    and attempts to reproduce the race failed.
+    
+    Especially the "no PTE change" case isn't the common case, because we'd
+    need an exclusive anonymous page that's mapped R/O and the PTE is clean
+    in KSM code -- and using KSM with page pinning isn't extremely common.
+    Further, the clear+TLB flush we used for now implies a memory barrier.
+    So the problematic missing part should be the missing memory barrier
+    after pinning but before checking if the PTE changed.
+    
+    Link: https://lkml.kernel.org/r/20220901083559.67446-1-david@redhat.com
+    Fixes: 6c287605fd56 ("mm: remember exclusively mapped anonymous pages with PG_anon_exclusive")
+    Signed-off-by: David Hildenbrand <david@redhat.com>
+    Cc: Jason Gunthorpe <jgg@nvidia.com>
+    Cc: John Hubbard <jhubbard@nvidia.com>
+    Cc: Andrea Arcangeli <aarcange@redhat.com>
+    Cc: Hugh Dickins <hughd@google.com>
+    Cc: Peter Xu <peterx@redhat.com>
+    Cc: Alistair Popple <apopple@nvidia.com>
+    Cc: Nadav Amit <namit@vmware.com>
+    Cc: Yang Shi <shy828301@gmail.com>
+    Cc: Vlastimil Babka <vbabka@suse.cz>
+    Cc: Michal Hocko <mhocko@kernel.org>
+    Cc: Mike Kravetz <mike.kravetz@oracle.com>
+    Cc: Andrea Parri <parri.andrea@gmail.com>
+    Cc: Will Deacon <will@kernel.org>
+    Cc: Peter Zijlstra <peterz@infradead.org>
+    Cc: "Paul E. McKenney" <paulmck@kernel.org>
+    Cc: Christoph von Recklinghausen <crecklin@redhat.com>
+    Cc: Don Dutile <ddutile@redhat.com>
+    Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+
+diff --git a/include/linux/mm.h b/include/linux/mm.h
+index e98ef2cb1176..8a5ad9d050bf 100644
+--- a/include/linux/mm.h
++++ b/include/linux/mm.h
+@@ -2999,8 +2999,8 @@ static inline int vm_fault_to_errno(vm_fault_t vm_fault, int foll_flags)
+  * PageAnonExclusive() has to protect against concurrent GUP:
+  * * Ordinary GUP: Using the PT lock
+  * * GUP-fast and fork(): mm->write_protect_seq
+- * * GUP-fast and KSM or temporary unmapping (swap, migration):
+- *   clear/invalidate+flush of the page table entry
++ * * GUP-fast and KSM or temporary unmapping (swap, migration): see
++ *    page_try_share_anon_rmap()
+  *
+  * Must be called with the (sub)page that's actually referenced via the
+  * page table entry, which might not necessarily be the head page for a
+@@ -3021,6 +3021,11 @@ static inline bool gup_must_unshare(unsigned int flags, struct page *page)
+ 	 */
+ 	if (!PageAnon(page))
+ 		return false;
++
++	/* Paired with a memory barrier in page_try_share_anon_rmap(). */
++	if (IS_ENABLED(CONFIG_HAVE_FAST_GUP))
++		smp_rmb();
++
+ 	/*
+ 	 * Note that PageKsm() pages cannot be exclusive, and consequently,
+ 	 * cannot get pinned.
+diff --git a/include/linux/rmap.h b/include/linux/rmap.h
+index bf80adca980b..72b2bcc37f73 100644
+--- a/include/linux/rmap.h
++++ b/include/linux/rmap.h
+@@ -267,7 +267,7 @@ static inline int page_try_dup_anon_rmap(struct page *page, bool compound,
+  * @page: the exclusive anonymous page to try marking possibly shared
+  *
+  * The caller needs to hold the PT lock and has to have the page table entry
+- * cleared/invalidated+flushed, to properly sync against GUP-fast.
++ * cleared/invalidated.
+  *
+  * This is similar to page_try_dup_anon_rmap(), however, not used during fork()
+  * to duplicate a mapping, but instead to prepare for KSM or temporarily
+@@ -283,12 +283,68 @@ static inline int page_try_share_anon_rmap(struct page *page)
+ {
+ 	VM_BUG_ON_PAGE(!PageAnon(page) || !PageAnonExclusive(page), page);
+ 
+-	/* See page_try_dup_anon_rmap(). */
+-	if (likely(!is_device_private_page(page) &&
+-	    unlikely(page_maybe_dma_pinned(page))))
+-		return -EBUSY;
++	/* device private pages cannot get pinned via GUP. */
++	if (unlikely(is_device_private_page(page))) {
++		ClearPageAnonExclusive(page);
++		return 0;
++	}
+ 
++	/*
++	 * We have to make sure that when we clear PageAnonExclusive, that
++	 * the page is not pinned and that concurrent GUP-fast won't succeed in
++	 * concurrently pinning the page.
++	 *
++	 * Conceptually, PageAnonExclusive clearing consists of:
++	 * (A1) Clear PTE
++	 * (A2) Check if the page is pinned; back off if so.
++	 * (A3) Clear PageAnonExclusive
++	 * (A4) Restore PTE (optional, but certainly not writable)
++	 *
++	 * When clearing PageAnonExclusive, we cannot possibly map the page
++	 * writable again, because anon pages that may be shared must never
++	 * be writable. So in any case, if the PTE was writable it cannot
++	 * be writable anymore afterwards and there would be a PTE change. Only
++	 * if the PTE wasn't writable, there might not be a PTE change.
++	 *
++	 * Conceptually, GUP-fast pinning of an anon page consists of:
++	 * (B1) Read the PTE
++	 * (B2) FOLL_WRITE: check if the PTE is not writable; back off if so.
++	 * (B3) Pin the mapped page
++	 * (B4) Check if the PTE changed by re-reading it; back off if so.
++	 * (B5) If the original PTE is not writable, check if
++	 *	PageAnonExclusive is not set; back off if so.
++	 *
++	 * If the PTE was writable, we only have to make sure that GUP-fast
++	 * observes a PTE change and properly backs off.
++	 *
++	 * If the PTE was not writable, we have to make sure that GUP-fast either
++	 * detects a (temporary) PTE change or that PageAnonExclusive is cleared
++	 * and properly backs off.
++	 *
++	 * Consequently, when clearing PageAnonExclusive(), we have to make
++	 * sure that (A1), (A2)/(A3) and (A4) happen in the right memory
++	 * order. In GUP-fast pinning code, we have to make sure that (B3),(B4)
++	 * and (B5) happen in the right memory order.
++	 *
++	 * We assume that there might not be a memory barrier after
++	 * clearing/invalidating the PTE (A1) and before restoring the PTE (A4),
++	 * so we use explicit ones here.
++	 */
++
++	/* Paired with the memory barrier in try_grab_folio(). */
++	if (IS_ENABLED(CONFIG_HAVE_FAST_GUP))
++		smp_mb();
++
++	if (unlikely(page_maybe_dma_pinned(page)))
++		return -EBUSY;
+ 	ClearPageAnonExclusive(page);
++
++	/*
++	 * This is conceptually a smp_wmb() paired with the smp_rmb() in
++	 * gup_must_unshare().
++	 */
++	if (IS_ENABLED(CONFIG_HAVE_FAST_GUP))
++		smp_mb__after_atomic();
+ 	return 0;
+ }
+ 
+diff --git a/mm/gup.c b/mm/gup.c
+index ce8ff9f51e05..8e9cb89a4ed6 100644
+--- a/mm/gup.c
++++ b/mm/gup.c
+@@ -158,6 +158,13 @@ struct folio *try_grab_folio(struct page *page, int refs, unsigned int flags)
+ 		else
+ 			folio_ref_add(folio,
+ 					refs * (GUP_PIN_COUNTING_BIAS - 1));
++		/*
++		 * Adjust the pincount before re-checking the PTE for changes.
++		 * This is essentially a smp_mb() and is paired with a memory
++		 * barrier in page_try_share_anon_rmap().
++		 */
++		smp_mb__after_atomic();
++
+ 		node_stat_mod_folio(folio, NR_FOLL_PIN_ACQUIRED, refs);
+ 
+ 		return folio;
+diff --git a/mm/huge_memory.c b/mm/huge_memory.c
+index 0405d7375bce..2f18896c8f9a 100644
+--- a/mm/huge_memory.c
++++ b/mm/huge_memory.c
+@@ -2148,6 +2148,8 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
+ 		 *
+ 		 * In case we cannot clear PageAnonExclusive(), split the PMD
+ 		 * only and let try_to_migrate_one() fail later.
++		 *
++		 * See page_try_share_anon_rmap(): invalidate PMD first.
+ 		 */
+ 		anon_exclusive = PageAnon(page) && PageAnonExclusive(page);
+ 		if (freeze && anon_exclusive && page_try_share_anon_rmap(page))
+@@ -3181,6 +3183,7 @@ int set_pmd_migration_entry(struct page_vma_mapped_walk *pvmw,
+ 	flush_cache_range(vma, address, address + HPAGE_PMD_SIZE);
+ 	pmdval = pmdp_invalidate(vma, address, pvmw->pmd);
+ 
++	/* See page_try_share_anon_rmap(): invalidate PMD first. */
+ 	anon_exclusive = PageAnon(page) && PageAnonExclusive(page);
+ 	if (anon_exclusive && page_try_share_anon_rmap(page)) {
+ 		set_pmd_at(mm, address, pvmw->pmd, pmdval);
+diff --git a/mm/ksm.c b/mm/ksm.c
+index 2f315c69fa2c..fd6d03cb0463 100644
+--- a/mm/ksm.c
++++ b/mm/ksm.c
+@@ -1095,6 +1095,7 @@ static int write_protect_page(struct vm_area_struct *vma, struct page *page,
+ 			goto out_unlock;
+ 		}
+ 
++		/* See page_try_share_anon_rmap(): clear PTE first. */
+ 		if (anon_exclusive && page_try_share_anon_rmap(page)) {
+ 			set_pte_at(mm, pvmw.address, pvmw.pte, entry);
+ 			goto out_unlock;
+diff --git a/mm/rmap.c b/mm/rmap.c
+index af775855e58f..6781f693df50 100644
+--- a/mm/rmap.c
++++ b/mm/rmap.c
+@@ -1574,11 +1574,8 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
+ 			pteval = huge_ptep_clear_flush(vma, address, pvmw.pte);
+ 		} else {
+ 			flush_cache_page(vma, address, pte_pfn(*pvmw.pte));
+-			/*
+-			 * Nuke the page table entry. When having to clear
+-			 * PageAnonExclusive(), we always have to flush.
+-			 */
+-			if (should_defer_flush(mm, flags) && !anon_exclusive) {
++			/* Nuke the page table entry. */
++			if (should_defer_flush(mm, flags)) {
+ 				/*
+ 				 * We clear the PTE but do not flush so potentially
+ 				 * a remote CPU could still be writing to the folio.
+@@ -1709,6 +1706,8 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
+ 				page_vma_mapped_walk_done(&pvmw);
+ 				break;
+ 			}
++
++			/* See page_try_share_anon_rmap(): clear PTE first. */
+ 			if (anon_exclusive &&
+ 			    page_try_share_anon_rmap(subpage)) {
+ 				swap_free(entry);
+@@ -2040,6 +2039,8 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
+ 			}
+ 			VM_BUG_ON_PAGE(pte_write(pteval) && folio_test_anon(folio) &&
+ 				       !anon_exclusive, subpage);
++
++			/* See page_try_share_anon_rmap(): clear PTE first. */
+ 			if (anon_exclusive &&
+ 			    page_try_share_anon_rmap(subpage)) {
+ 				if (folio_test_hugetlb(folio))
