@@ -75,6 +75,7 @@ func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
 		epoch:  0,
 	}
 	w.writeScheduleFilter(p)
+	w.writeFlushVector(p)
 	for i, c := range p.Calls {
 		w.csumMap, w.csumUses = calcChecksumsCall(c)
 		w.serializeCall(c, p)
@@ -92,6 +93,14 @@ func (w *execContext) writeScheduleFilter(p *Prog) {
 	w.write(uint64(len(filter)))
 	for _, f := range filter {
 		w.write(uint64(f))
+	}
+}
+
+func (w *execContext) writeFlushVector(p *Prog) {
+	vec := p.FlushVector
+	w.write(uint64(vec.Len()))
+	for _, entry := range vec {
+		w.write(uint64(entry))
 	}
 }
 

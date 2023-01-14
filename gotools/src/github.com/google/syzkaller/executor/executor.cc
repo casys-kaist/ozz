@@ -77,6 +77,7 @@ typedef unsigned char uint8;
 const int kMaxFd = 250;
 const int kMaxThreads = 4;
 const int kMaxSchedule = 128;
+const int kMaxVector = 32;
 const int kMaxFallbackThreads = 3;
 const int kMaxPendingThreads = 1;
 const int kInPipeFd = kMaxFd - 1; // remapped from stdin
@@ -446,6 +447,7 @@ static void setup_features(char** enable, int n);
 static void setup_affinity_mask(int mask);
 static bool __run_in_epoch(uint32 epoch, uint32 global);
 static bool run_in_epoch(thread_t* th);
+static void feed_flush_vector(unsigned long* vector, int size);
 
 #include "syscalls.h"
 
@@ -894,8 +896,11 @@ retry:
 	int call_index = 0;
 	uint64 prog_extra_timeout = 0;
 	uint64 prog_extra_cover_timeout = 0;
-	int filter_size;
+	int filter_size, vector_size;
 	int filter[kMaxSchedule] = {
+	    0,
+	};
+	unsigned long vector[kMaxVector] = {
 	    0,
 	};
 
@@ -908,6 +913,13 @@ retry:
 	}
 	if (filter_size > kMaxSchedule)
 		filter_size = kMaxSchedule;
+
+	vector_size = (int)read_input(&input_pos);
+	for (int i = 0; i < vector_size; i++) {
+		int e = (int)read_input(&input_pos);
+		vector[i] = e;
+	}
+	feed_flush_vector(vector, vector_size);
 
 	for (;;) {
 		uint64 call_num = read_input(&input_pos);
@@ -1107,6 +1119,12 @@ retry:
 		collide = colliding = true;
 		goto retry;
 	}
+}
+
+void feed_flush_vector(unsigned long* vector, int size)
+{
+#define SYS_FEEDINPUT 500
+	syscall(SYS_FEEDINPUT, vector, size);
 }
 
 // Get a thread to run a call
