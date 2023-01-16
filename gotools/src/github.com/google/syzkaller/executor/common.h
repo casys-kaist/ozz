@@ -55,6 +55,16 @@ NORETURN void doexit(int status)
 }
 #endif
 
+static void enable_kssb(void)
+{
+	hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
+}
+
+static void disable_kssb(void)
+{
+	hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
+}
+
 #if SYZ_EXECUTOR || SYZ_MULTI_PROC || SYZ_REPEAT && SYZ_CGROUPS ||         \
     SYZ_NET_DEVICES || __NR_syz_mount_image || __NR_syz_read_part_table || \
     __NR_syz_usb_connect || __NR_syz_usb_connect_ath9k ||                  \
@@ -634,7 +644,9 @@ static void loop(void)
 #if SYZ_EXECUTOR && SYZ_EXECUTOR_USES_SHMEM
 			close(kOutPipeFd);
 #endif
+			enable_kssb();
 			execute_one();
+			disable_kssb();
 #if SYZ_HAVE_CLOSE_FDS && !SYZ_THREADED
 			close_fds();
 #endif
