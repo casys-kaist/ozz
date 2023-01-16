@@ -101,6 +101,8 @@ const int kCPUMaskAll = 0xff;
 const int kCoverSize = 256 << 10;
 const int kFailStatus = 67;
 
+const int kSSBSwitch = 503;
+
 // Logical error (e.g. invalid input program), use as an assert() alternative.
 // If such error happens 10+ times in a row, it will be detected as a bug by syz-fuzzer.
 // syz-fuzzer will fail and syz-manager will create a bug for this.
@@ -1530,7 +1532,11 @@ void* worker_thread(void* arg)
 		// after the notification.
 		wait_epoch(th);
 		event_reset(&th->ready);
+		// Turn on the ssb switch
+		syscall(kSSBSwitch);
 		execute_call(th);
+		// Then turn off the ssb switch
+		syscall(kSSBSwitch);
 		event_set(&th->done);
 	}
 	return 0;
