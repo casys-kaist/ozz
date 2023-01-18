@@ -468,6 +468,7 @@ malloc_trim="auto"
 gio="$default_feature"
 
 qcsched="yes"
+qcsched_trampoline="no"
 
 # parse CC options second
 for opt do
@@ -1571,6 +1572,10 @@ for opt do
   ;;
   --disable-qcsched) qcsched=no
   ;;
+  --enable-qcsched-trampoline) qcsched_trampoline=yes
+  ;;
+  --disable-qcsched-trampoline) qcsched_trampoline=no
+  ;;
   *)
       echo "ERROR: unknown option $opt"
       echo "Try '$0 --help' for more information"
@@ -1926,6 +1931,7 @@ disabled with --disable-FEATURE, default is enabled if available
   multiprocess    Out of process device emulation support
   gio             libgio support
   qcsched         QEMU custom scheduler
+  qcsched-trampoline Use trapmoline to suspend/resume a task
 
 NOTE: The object files are built at the place where configure is launched
 EOF
@@ -5689,6 +5695,9 @@ if test "$gio" = "yes" ; then
 fi
 if test "$qcsched" = "yes"; then
 	echo "CONFIG_QCSCHED=y" >> $config_host_mak
+fi
+if test "$qcsched_trampoline" = "yes"; then
+	echo "CONFIG_QCSCHED_TRAMPOLINE=y" >> $config_host_mak
 fi
 echo "CONFIG_TLS_PRIORITY=\"$tls_priority\"" >> $config_host_mak
 if test "$gnutls" = "yes" ; then

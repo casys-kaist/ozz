@@ -2504,6 +2504,7 @@ summary_info += {'vhost-user-fs support': config_host.has_key('CONFIG_VHOST_USER
 summary_info += {'vhost-vdpa support': config_host.has_key('CONFIG_VHOST_VDPA')}
 summary_info += {'build guest agent': config_host.has_key('CONFIG_GUEST_AGENT')}
 summary_info += {'QEMU custom scheduler': config_host.has_key('CONFIG_QCSCHED')}
+summary_info += {'QCSCHED trampoline': config_host.has_key('CONFIG_QCSCHED_trampoline')}
 summary(summary_info, bool_yn: true, section: 'Configurable features')
 
 # Compilation information
