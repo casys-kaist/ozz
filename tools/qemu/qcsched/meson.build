@@ -15,7 +15,7 @@ qcsched_ss.add(when: 'CONFIG_QCSCHED', if_true: files(
 qcsched_ss.add(when: 'CONFIG_QCSCHED_TRAMPOLINE', if_true: files(
   'trampoline.c',
 ), if_false: files(
-  'suspend.c',
+  'blocker.c',
 ))
 
 specific_ss.add_all(when: 'CONFIG_SOFTMMU', if_true: [qcsched_ss])

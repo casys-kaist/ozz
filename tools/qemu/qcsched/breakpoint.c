@@ -253,10 +253,3 @@ int qcsched_handle_breakpoint(CPUState *cpu)
     qemu_mutex_unlock_iothread();
     return ret;
 }
-
-void qcsched_escape_if_kidnapped(CPUState *cpu, CPUState *wakeup)
-{
-    bool kidnapped = task_kidnapped(wakeup);
-    if (kidnapped)
-        wake_cpu_up(cpu, wakeup);
-}

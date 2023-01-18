@@ -25,7 +25,7 @@ bool task_kidnapped(CPUState *cpu)
 #ifdef CONFIG_QCSCHED_TRAMPOLINE
     return trampoline_task_kidnapped(cpu);
 #else
-    return false;
+    return blocker_task_kidnapped(cpu);
 #endif
 }
 
@@ -49,6 +49,7 @@ void kidnap_task(CPUState *cpu)
 #ifdef CONFIG_QCSCHED_TRAMPOLINE
     trampoline_kidnap_task(cpu);
 #else
+    blocker_kidnap_task(cpu);
 #endif
     qcsched_arm_selfescape_timer(cpu);
 }
@@ -67,6 +68,7 @@ void resume_task(CPUState *cpu)
 #ifdef CONFIG_QCSCHED_TRAMPOLINE
     trampoline_resume_task(cpu);
 #else
+    blocker_resume_task(cpu);
 #endif
     qcsched_window_expand_window(cpu);
 }

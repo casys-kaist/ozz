@@ -57,19 +57,6 @@ void qcsched_post_run(CPUState *cpu)
     ASSERT(!kvm_read_registers(cpu, &cpu->regs), "failed to read registers");
 }
 
-static void qcsched_skip_executed_vmcall(CPUState *cpu)
-{
-#define VMCALL_INSN_LEN 3
-    cpu->regs.rip += VMCALL_INSN_LEN;
-}
-
-void qcsched_commit_state(CPUState *cpu, target_ulong hcall_ret)
-{
-    qcsched_skip_executed_vmcall(cpu);
-    cpu->regs.rax = hcall_ret;
-    cpu->qcsched_dirty = true;
-}
-
 // NOTE: The man page for sigevent clearly specifies that struct
 // sigevent has a member field 'sigev_notify_thread_id'. Indeed, the
 // struct does not have the member field and, instead, it is defined
