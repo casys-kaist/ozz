@@ -52,7 +52,7 @@
 #ifdef CONFIG_QCSCHED
 #include "qemu/qcsched/hcall.h"
 #include "qemu/qcsched/qcsched.h"
-#include "qemu/qcsched/trampoline.h"
+#include "qemu/qcsched/exec_control.h"
 #endif
 
 /* This check must be after config-host.h is included */
@@ -2982,15 +2982,15 @@ static int kvm_set_signal_mask(CPUState *cpu, const sigset_t *sigset)
 static void kvm_ipi_signal(int sig, siginfo_t *sinfo, void *ucontext)
 {
 #ifdef CONFIG_QCSCHED
-    struct qcsched_trampoline_info *trampoline;
+    struct qcsched_exec_info *exec;
 #endif
     if (current_cpu) {
 #ifdef CONFIG_QCSCHED
         if (sinfo->si_value.sival_int == TRAMPOLINE_ESCAPE_MAGIC) {
-            trampoline = get_trampoline_info(current_cpu);
+            exec = get_exec_info(current_cpu);
             // The timer armed when current_cpu is kidnapped is
             // expired.
-            trampoline->kicked = true;
+            exec->kicked = true;
         }
 #endif
         assert(kvm_immediate_exit);

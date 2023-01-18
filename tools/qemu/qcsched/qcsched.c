@@ -8,8 +8,8 @@
 #include "qemu/main-loop.h"
 #include "sysemu/kvm.h"
 
+#include "qemu/qcsched/exec_control.h"
 #include "qemu/qcsched/qcsched.h"
-#include "qemu/qcsched/trampoline.h"
 #include "qemu/qcsched/vmi.h"
 
 #include <sys/syscall.h>
@@ -63,11 +63,6 @@ static void qcsched_skip_executed_vmcall(CPUState *cpu)
     cpu->regs.rip += VMCALL_INSN_LEN;
 }
 
-bool qcsched_jumped_into_trampoline(CPUState *cpu)
-{
-    return cpu->regs.rip == vmi_info.trampoline_entry_addr;
-}
-
 void qcsched_commit_state(CPUState *cpu, target_ulong hcall_ret)
 {
     qcsched_skip_executed_vmcall(cpu);
@@ -87,13 +82,13 @@ void qcsched_commit_state(CPUState *cpu, target_ulong hcall_ret)
 
 void qcsched_init_vcpu(CPUState *cpu)
 {
-    struct qcsched_trampoline_info *trampoline = get_trampoline_info(cpu);
+    struct qcsched_exec_info *info = get_exec_info(cpu);
     struct sigevent sevp;
     pid_t tid = gettid();
     sevp.sigev_notify = SIGEV_THREAD_ID;
     sevp.sigev_signo = SIG_IPI;
     sevp.sigev_value.sival_int = TRAMPOLINE_ESCAPE_MAGIC;
     sevp.sigev_notify_thread_id = tid;
-    ASSERT(!timer_create(CLOCK_MONOTONIC, &sevp, &trampoline->timerid),
+    ASSERT(!timer_create(CLOCK_MONOTONIC, &sevp, &info->timerid),
            "timer_create");
 }

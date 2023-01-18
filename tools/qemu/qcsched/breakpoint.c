@@ -6,8 +6,8 @@
 #include "qemu/main-loop.h"
 #include "sysemu/kvm.h"
 
+#include "qemu/qcsched/exec_control.h"
 #include "qemu/qcsched/qcsched.h"
-#include "qemu/qcsched/trampoline.h"
 #include "qemu/qcsched/vmi.h"
 #include "qemu/qcsched/window.h"
 
@@ -254,9 +254,9 @@ int qcsched_handle_breakpoint(CPUState *cpu)
     return ret;
 }
 
-void qcsched_escape_if_trampoled(CPUState *cpu, CPUState *wakeup)
+void qcsched_escape_if_kidnapped(CPUState *cpu, CPUState *wakeup)
 {
-    struct qcsched_trampoline_info *trampoline = get_trampoline_info(wakeup);
-    if (trampoline->trampoled)
+    bool kidnapped = task_kidnapped(wakeup);
+    if (kidnapped)
         wake_cpu_up(cpu, wakeup);
 }

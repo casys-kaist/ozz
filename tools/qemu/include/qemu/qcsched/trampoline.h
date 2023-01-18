@@ -5,12 +5,16 @@
 
 #include "cpu.h"
 
-bool task_kidnapped(CPUState *cpu);
-void kidnap_task(CPUState *cpu);
-void resume_task(CPUState *cpu);
-void wake_cpu_up(CPUState *cpu, CPUState *wakeup);
-void wake_others_up(CPUState *cpu);
-void qcsched_escape_if_trampoled(CPUState *cpu, CPUState *wakeup);
-struct qcsched_trampoline_info *get_trampoline_info(CPUState *cpu);
+#include "qemu/qcsched/vmi.h"
+
+struct qcsched_trampoline_info {
+    struct qcsched_vmi_task t;
+    struct kvm_regs orig_regs;
+    bool trampoled;
+};
+
+void trampoline_kidnap_task(CPUState *cpu);
+void trampoline_resume_task(CPUState *cpu);
+bool trampoline_task_kidnapped(CPUState *cpu);
 
 #endif /* __TRAMPOLINE_H */

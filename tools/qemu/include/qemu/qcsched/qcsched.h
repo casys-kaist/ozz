@@ -54,8 +54,6 @@ void qcsched_commit_state(CPUState *cpu, target_ulong hcall_ret);
 void qcsched_yield_turn_from(CPUState *cpu, int order);
 void qcsched_keep_this_cpu_going(CPUState *cpu);
 
-bool qcsched_jumped_into_trampoline(CPUState *cpu);
-
 void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run);
 int qcsched_handle_breakpoint(CPUState *cpu);
 
@@ -67,15 +65,6 @@ enum {
 extern bool warn_once[warn_once_total];
 
 extern struct qcsched sched;
-
-struct qcsched_trampoline_info {
-    struct qcsched_vmi_task t;
-    struct kvm_regs orig_regs;
-    bool trampoled;
-    bool kicked;
-    // timerid should be the last member because of resume_task().
-    timer_t timerid;
-};
 
 void qcsched_arm_selfescape_timer(CPUState *cpu);
 void qcsched_handle_kick(CPUState *cpu);

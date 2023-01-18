@@ -11,10 +11,10 @@
 #include "sysemu/cpus.h"
 #include "sysemu/kvm.h"
 
+#include "qemu/qcsched/exec_control.h"
 #include "qemu/qcsched/hcall.h"
 #include "qemu/qcsched/qcsched.h"
 #include "qemu/qcsched/state.h"
-#include "qemu/qcsched/trampoline.h"
 #include "qemu/qcsched/vmi.h"
 
 static bool qcsched_entry_used(struct qcsched_entry *entry)
@@ -49,7 +49,7 @@ static void __remove_breakpoints_and_escape_cpu(CPUState *this,
             kvm_remove_breakpoint_cpu(remote, entry->schedpoint.addr, 1,
                                       GDB_BREAKPOINT_HW);
     }
-    qcsched_escape_if_trampoled(this, remote);
+    qcsched_escape_if_kidnapped(this, remote);
 }
 
 static void qcsched_reset_window(CPUState *cpu)
@@ -391,6 +391,15 @@ static target_ulong qcsched_clear_breakpoint(CPUState *cpu)
     // remove all breakpoints on this CPU
     kvm_remove_all_breakpoints_cpu(cpu);
     return 0;
+}
+
+static bool qcsched_jumped_into_trampoline(CPUState *cpu)
+{
+#ifdef CONFIG_QCSCHED_TRAMPOLINE
+    return cpu->regs.rip == vmi_info.trampoline_entry_addr;
+#else
+    return false;
+#endif
 }
 
 void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
