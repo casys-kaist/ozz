@@ -16,11 +16,13 @@ static bool breakpoint_on_hook(CPUState *cpu)
     return RIP(cpu) == vmi_info.hook_addr;
 }
 
+#ifdef CONFIG_QCSCHED_TRAMPOLINE
 static bool breakpoint_on_trampoline(CPUState *cpu)
 {
     return RIP(cpu) == vmi_info.trampoline_entry_addr ||
            RIP(cpu) == vmi_info.trampoline_exit_addr;
 }
+#endif
 
 static bool breakpoint_on_schedpoint(CPUState *cpu)
 {
@@ -232,8 +234,10 @@ static int qcsched_handle_breakpoint_iolocked(CPUState *cpu)
 
     if (breakpoint_on_hook(cpu)) {
         __handle_breakpoint_hook(cpu);
+#ifdef CONFIG_QCSCHED_TRAMPOLINE
     } else if (breakpoint_on_trampoline(cpu)) {
         __handle_breakpoint_trampoline(cpu);
+#endif
     } else if (breakpoint_on_schedpoint(cpu)) {
         __handle_breakpoint_schedpoint(cpu);
     } else {

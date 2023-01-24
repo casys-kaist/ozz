@@ -18,7 +18,6 @@ struct qcsched_exec_info {
     struct qcsched_blocker_info blocker;
 #endif
     bool kicked;
-    // timerid should be the last member because of resume_task().
     timer_t timerid;
 };
 

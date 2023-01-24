@@ -43,7 +43,11 @@ void trampoline_resume_task(CPUState *cpu)
     __copy_registers(&cpu->regs, &trampoline->orig_regs);
     cpu->qcsched_dirty = true;
     cpu->qcsched_force_wakeup = false;
-    memset(trampoline, 0, sizeof(*trampoline) - sizeof(timer_t));
+    memset(trampoline, 0, sizeof(*trampoline));
+    // XXX: I'm not sure info->kicked should be reset. I just follow
+    // the previous implementation.
+    struct qcsched_exec_info *info = (struct qcsched_exec_info *)trampoline;
+    info->kicked = false;
 }
 
 bool trampoline_task_kidnapped(CPUState *cpu)
