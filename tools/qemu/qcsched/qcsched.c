@@ -21,9 +21,6 @@ bool warn_once[warn_once_total];
 
 struct qcsched sched;
 
-#define INTERRUPT_FLAG_BIT 9
-#define INTERRUPT_FLAG_MASK 0x0200
-
 bool qcsched_pre_run(CPUState *cpu)
 {
     if (cpu->qcsched_dirty) {
@@ -31,7 +28,11 @@ bool qcsched_pre_run(CPUState *cpu)
                "failed to write registers");
         cpu->qcsched_dirty = false;
     }
+#ifdef CONFIG_QCSCHED_TRAMPOLINE
     return true;
+#else
+    return !task_kidnapped(cpu);
+#endif
 }
 
 void qcsched_post_run(CPUState *cpu)

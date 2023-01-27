@@ -62,6 +62,7 @@ static void __handle_breakpoint_hook(CPUState *cpu)
         qcsched_window_expand_window(cpu);
 }
 
+#ifdef CONFIG_QCSCHED_TRAMPOLINE
 static void __handle_breakpoint_trampoline(CPUState *cpu)
 {
     DRPRINTF(cpu, "%s\n", __func__);
@@ -69,6 +70,7 @@ static void __handle_breakpoint_trampoline(CPUState *cpu)
     if (qcsched_vmi_can_progress(cpu))
         resume_task(cpu);
 }
+#endif
 
 void qcsched_yield_turn_from(CPUState *cpu, int current_order)
 {
@@ -105,7 +107,7 @@ static void __handle_breakpoint_schedpoint(CPUState *cpu)
     DRPRINTF(cpu, "%s (%llx)\n", __func__, RIP(cpu));
 
     // XXX: still we are facing double-kidnapping. Is this
-    // workardound find...?
+    // workardound fine...?
     if (task_kidnapped(cpu))
         return;
 

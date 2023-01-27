@@ -55,3 +55,17 @@ bool trampoline_task_kidnapped(CPUState *cpu)
     struct qcsched_trampoline_info *trampoline = get_trampoline_info(cpu);
     return trampoline->trampoled;
 }
+
+void trampoline_wake_cpu_up(CPUState *cpu, CPUState *wakeup)
+{
+    // Installing a breakpoint on the trampoline so each CPU can
+    // wake up on its own.
+    int r = kvm_insert_breakpoint_cpu(wakeup, vmi_info.trampoline_exit_addr, 1,
+                                      GDB_BREAKPOINT_HW);
+    // The race condition scenario: one cpu is trying to wake another
+    // cpu up, and the one is also trying to wake up on its own. It is
+    // okay in this case because we install the breakpoint anyway. So
+    // ignore -EEXIST.
+    ASSERT(r == 0 || r == -EEXIST, "failing to wake cpu #%d up err=%d",
+           wakeup->cpu_index, r);
+}

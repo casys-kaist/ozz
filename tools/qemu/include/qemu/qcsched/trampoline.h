@@ -16,5 +16,6 @@ struct qcsched_trampoline_info {
 void trampoline_kidnap_task(CPUState *cpu);
 void trampoline_resume_task(CPUState *cpu);
 bool trampoline_task_kidnapped(CPUState *cpu);
+void trampoline_wake_cpu_up(CPUState *cpu, CPUState *wakeup);
 
 #endif /* __TRAMPOLINE_H */
