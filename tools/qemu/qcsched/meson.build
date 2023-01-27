@@ -8,8 +8,14 @@ qcsched_ss.add(when: 'CONFIG_QCSCHED', if_true: files(
   'kssb.c',
   'window.c',
   'state.c',
-  'trampoline.c',
+  'exec_control.c',
   'cookie.c',
+))
+
+qcsched_ss.add(when: 'CONFIG_QCSCHED_TRAMPOLINE', if_true: files(
+  'trampoline.c',
+), if_false: files(
+  'blocker.c',
 ))
 
 specific_ss.add_all(when: 'CONFIG_SOFTMMU', if_true: [qcsched_ss])

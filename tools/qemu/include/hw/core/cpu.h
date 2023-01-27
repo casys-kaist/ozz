@@ -22,16 +22,16 @@
 
 #include <linux/kvm.h>
 
-#include "hw/qdev-core.h"
 #include "disas/dis-asm.h"
 #include "exec/hwaddr.h"
 #include "exec/memattrs.h"
+#include "hw/qdev-core.h"
 #include "qapi/qapi-types-run-state.h"
 #include "qemu/bitmap.h"
-#include "qemu/rcu_queue.h"
-#include "qemu/queue.h"
-#include "qemu/thread.h"
 #include "qemu/plugin.h"
+#include "qemu/queue.h"
+#include "qemu/rcu_queue.h"
+#include "qemu/thread.h"
 #include "qom/object.h"
 
 typedef int (*WriteCoreDumpFunction)(const void *buf, size_t size,
@@ -65,11 +65,10 @@ typedef uint64_t vaddr;
 #define CPU(obj) ((CPUState *)(obj))
 
 typedef struct CPUClass CPUClass;
-DECLARE_CLASS_CHECKERS(CPUClass, CPU,
-                       TYPE_CPU)
+DECLARE_CLASS_CHECKERS(CPUClass, CPU, TYPE_CPU)
 
 typedef enum MMUAccessType {
-    MMU_DATA_LOAD  = 0,
+    MMU_DATA_LOAD = 0,
     MMU_DATA_STORE = 1,
     MMU_INST_FETCH = 2
 } MMUAccessType;
@@ -153,10 +152,10 @@ struct CPUClass {
     int reset_dump_flags;
     bool (*has_work)(CPUState *cpu);
     bool (*virtio_is_big_endian)(CPUState *cpu);
-    int (*memory_rw_debug)(CPUState *cpu, vaddr addr,
-                           uint8_t *buf, int len, bool is_write);
+    int (*memory_rw_debug)(CPUState *cpu, vaddr addr, uint8_t *buf, int len,
+                           bool is_write);
     void (*dump_state)(CPUState *cpu, FILE *, int flags);
-    GuestPanicInformation* (*get_crash_info)(CPUState *cpu);
+    GuestPanicInformation *(*get_crash_info)(CPUState *cpu);
     void (*dump_statistics)(CPUState *cpu, int flags);
     int64_t (*get_arch_id)(CPUState *cpu);
     bool (*get_paging_enabled)(const CPUState *cpu);
@@ -170,19 +169,19 @@ struct CPUClass {
     int (*gdb_read_register)(CPUState *cpu, GByteArray *buf, int reg);
     int (*gdb_write_register)(CPUState *cpu, uint8_t *buf, int reg);
 
-    int (*write_elf64_note)(WriteCoreDumpFunction f, CPUState *cpu,
-                            int cpuid, void *opaque);
+    int (*write_elf64_note)(WriteCoreDumpFunction f, CPUState *cpu, int cpuid,
+                            void *opaque);
     int (*write_elf64_qemunote)(WriteCoreDumpFunction f, CPUState *cpu,
                                 void *opaque);
-    int (*write_elf32_note)(WriteCoreDumpFunction f, CPUState *cpu,
-                            int cpuid, void *opaque);
+    int (*write_elf32_note)(WriteCoreDumpFunction f, CPUState *cpu, int cpuid,
+                            void *opaque);
     int (*write_elf32_qemunote)(WriteCoreDumpFunction f, CPUState *cpu,
                                 void *opaque);
 
     const VMStateDescription *vmsd;
     const char *gdb_core_xml_file;
-    gchar * (*gdb_arch_name)(CPUState *cpu);
-    const char * (*gdb_get_dynamic_xml)(CPUState *cpu, const char *xmlname);
+    gchar *(*gdb_arch_name)(CPUState *cpu);
+    const char *(*gdb_get_dynamic_xml)(CPUState *cpu, const char *xmlname);
 
     void (*disas_set_info)(CPUState *cpu, disassemble_info *info);
 
@@ -257,17 +256,17 @@ struct hax_vcpu_state;
  * hosts in a single parameter
  */
 typedef union {
-    int           host_int;
+    int host_int;
     unsigned long host_ulong;
-    void         *host_ptr;
-    vaddr         target_ptr;
+    void *host_ptr;
+    vaddr target_ptr;
 } run_on_cpu_data;
 
-#define RUN_ON_CPU_HOST_PTR(p)    ((run_on_cpu_data){.host_ptr = (p)})
-#define RUN_ON_CPU_HOST_INT(i)    ((run_on_cpu_data){.host_int = (i)})
+#define RUN_ON_CPU_HOST_PTR(p) ((run_on_cpu_data){.host_ptr = (p)})
+#define RUN_ON_CPU_HOST_INT(i) ((run_on_cpu_data){.host_int = (i)})
 #define RUN_ON_CPU_HOST_ULONG(ul) ((run_on_cpu_data){.host_ulong = (ul)})
-#define RUN_ON_CPU_TARGET_PTR(v)  ((run_on_cpu_data){.target_ptr = (v)})
-#define RUN_ON_CPU_NULL           RUN_ON_CPU_HOST_PTR(NULL)
+#define RUN_ON_CPU_TARGET_PTR(v) ((run_on_cpu_data){.target_ptr = (v)})
+#define RUN_ON_CPU_NULL RUN_ON_CPU_HOST_PTR(NULL)
 
 typedef void (*run_on_cpu_func)(CPUState *cpu, run_on_cpu_data data);
 
@@ -446,9 +445,6 @@ struct CPUState {
     struct kvm_regs regs;
     bool qcsched_dirty;
     bool qcsched_force_wakeup;
-    bool qcsched_disable_irq;
-    bool qcsched_restore_irq;
-    bool qcsched_orig_irq_enabled;
 
     cookie_t hcall_cookie;
     cookie_t breakpoint_cookie;
@@ -459,10 +455,10 @@ struct CPUState {
 typedef QTAILQ_HEAD(CPUTailQ, CPUState) CPUTailQ;
 extern CPUTailQ cpus;
 
-#define first_cpu        QTAILQ_FIRST_RCU(&cpus)
-#define CPU_NEXT(cpu)    QTAILQ_NEXT_RCU(cpu, node)
+#define first_cpu QTAILQ_FIRST_RCU(&cpus)
+#define CPU_NEXT(cpu) QTAILQ_NEXT_RCU(cpu, node)
 #define CPU_FOREACH(cpu) QTAILQ_FOREACH_RCU(cpu, &cpus, node)
-#define CPU_FOREACH_SAFE(cpu, next_cpu) \
+#define CPU_FOREACH_SAFE(cpu, next_cpu)                                        \
     QTAILQ_FOREACH_SAFE_RCU(cpu, &cpus, node, next_cpu)
 
 extern __thread CPUState *current_cpu;
@@ -511,8 +507,8 @@ void cpu_get_memory_mapping(CPUState *cpu, MemoryMappingList *list,
  * @cpuid: ID number of the CPU
  * @opaque: pointer to the CPUState struct
  */
-int cpu_write_elf64_note(WriteCoreDumpFunction f, CPUState *cpu,
-                         int cpuid, void *opaque);
+int cpu_write_elf64_note(WriteCoreDumpFunction f, CPUState *cpu, int cpuid,
+                         void *opaque);
 
 /**
  * cpu_write_elf64_qemunote:
@@ -531,8 +527,8 @@ int cpu_write_elf64_qemunote(WriteCoreDumpFunction f, CPUState *cpu,
  * @cpuid: ID number of the CPU
  * @opaque: pointer to the CPUState struct
  */
-int cpu_write_elf32_note(WriteCoreDumpFunction f, CPUState *cpu,
-                         int cpuid, void *opaque);
+int cpu_write_elf32_note(WriteCoreDumpFunction f, CPUState *cpu, int cpuid,
+                         void *opaque);
 
 /**
  * cpu_write_elf32_qemunote:
@@ -563,7 +559,7 @@ GuestPanicInformation *cpu_get_crash_info(CPUState *cpu);
  */
 enum CPUDumpFlags {
     CPU_DUMP_CODE = 0x00010000,
-    CPU_DUMP_FPU  = 0x00020000,
+    CPU_DUMP_FPU = 0x00020000,
     CPU_DUMP_CCOP = 0x00040000,
 };
 
@@ -776,7 +772,8 @@ void run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data);
  *
  * Schedules the function @func for execution on the vCPU @cpu asynchronously.
  */
-void async_run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data);
+void async_run_on_cpu(CPUState *cpu, run_on_cpu_func func,
+                      run_on_cpu_data data);
 
 /**
  * async_safe_run_on_cpu:
@@ -790,7 +787,8 @@ void async_run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data)
  * Unlike run_on_cpu and async_run_on_cpu, the function is run outside the
  * BQL.
  */
-void async_safe_run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data);
+void async_safe_run_on_cpu(CPUState *cpu, run_on_cpu_func func,
+                           run_on_cpu_data data);
 
 /**
  * cpu_in_exclusive_context()
@@ -942,9 +940,9 @@ void end_exclusive(void);
  */
 void qemu_init_vcpu(CPUState *cpu);
 
-#define SSTEP_ENABLE  0x1  /* Enable simulated HW single stepping */
-#define SSTEP_NOIRQ   0x2  /* Do not use IRQ while single stepping */
-#define SSTEP_NOTIMER 0x4  /* Do not Timers while single stepping */
+#define SSTEP_ENABLE 0x1  /* Enable simulated HW single stepping */
+#define SSTEP_NOIRQ 0x2   /* Do not use IRQ while single stepping */
+#define SSTEP_NOTIMER 0x4 /* Do not Timers while single stepping */
 
 /**
  * cpu_single_step:
@@ -956,14 +954,14 @@ void qemu_init_vcpu(CPUState *cpu);
 void cpu_single_step(CPUState *cpu, int enabled);
 
 /* Breakpoint/watchpoint flags */
-#define BP_MEM_READ           0x01
-#define BP_MEM_WRITE          0x02
-#define BP_MEM_ACCESS         (BP_MEM_READ | BP_MEM_WRITE)
+#define BP_MEM_READ 0x01
+#define BP_MEM_WRITE 0x02
+#define BP_MEM_ACCESS (BP_MEM_READ | BP_MEM_WRITE)
 #define BP_STOP_BEFORE_ACCESS 0x04
 /* 0x08 currently unused */
-#define BP_GDB                0x10
-#define BP_CPU                0x20
-#define BP_ANY                (BP_GDB | BP_CPU)
+#define BP_GDB 0x10
+#define BP_CPU 0x20
+#define BP_ANY (BP_GDB | BP_CPU)
 #define BP_WATCHPOINT_HIT_READ 0x40
 #define BP_WATCHPOINT_HIT_WRITE 0x80
 #define BP_WATCHPOINT_HIT (BP_WATCHPOINT_HIT_READ | BP_WATCHPOINT_HIT_WRITE)
@@ -980,7 +978,8 @@ static inline bool cpu_breakpoint_test(CPUState *cpu, vaddr pc, int mask)
     CPUBreakpoint *bp;
 
     if (unlikely(!QTAILQ_EMPTY(&cpu->breakpoints))) {
-        QTAILQ_FOREACH(bp, &cpu->breakpoints, entry) {
+        QTAILQ_FOREACH(bp, &cpu->breakpoints, entry)
+        {
             if (bp->pc == pc && (bp->flags & mask)) {
                 return true;
             }
@@ -996,8 +995,8 @@ static inline int cpu_watchpoint_insert(CPUState *cpu, vaddr addr, vaddr len,
     return -ENOSYS;
 }
 
-static inline int cpu_watchpoint_remove(CPUState *cpu, vaddr addr,
-                                        vaddr len, int flags)
+static inline int cpu_watchpoint_remove(CPUState *cpu, vaddr addr, vaddr len,
+                                        int flags)
 {
     return -ENOSYS;
 }
@@ -1007,25 +1006,22 @@ static inline void cpu_watchpoint_remove_by_ref(CPUState *cpu,
 {
 }
 
-static inline void cpu_watchpoint_remove_all(CPUState *cpu, int mask)
-{
-}
+static inline void cpu_watchpoint_remove_all(CPUState *cpu, int mask) {}
 
 static inline void cpu_check_watchpoint(CPUState *cpu, vaddr addr, vaddr len,
                                         MemTxAttrs atr, int fl, uintptr_t ra)
 {
 }
 
-static inline int cpu_watchpoint_address_matches(CPUState *cpu,
-                                                 vaddr addr, vaddr len)
+static inline int cpu_watchpoint_address_matches(CPUState *cpu, vaddr addr,
+                                                 vaddr len)
 {
     return 0;
 }
 #else
-int cpu_watchpoint_insert(CPUState *cpu, vaddr addr, vaddr len,
-                          int flags, CPUWatchpoint **watchpoint);
-int cpu_watchpoint_remove(CPUState *cpu, vaddr addr,
-                          vaddr len, int flags);
+int cpu_watchpoint_insert(CPUState *cpu, vaddr addr, vaddr len, int flags,
+                          CPUWatchpoint **watchpoint);
+int cpu_watchpoint_remove(CPUState *cpu, vaddr addr, vaddr len, int flags);
 void cpu_watchpoint_remove_by_ref(CPUState *cpu, CPUWatchpoint *watchpoint);
 void cpu_watchpoint_remove_all(CPUState *cpu, int mask);
 
@@ -1093,13 +1089,11 @@ extern const VMStateDescription vmstate_cpu_common;
 #define vmstate_cpu_common vmstate_dummy
 #endif
 
-#define VMSTATE_CPU() {                                                     \
-    .name = "parent_obj",                                                   \
-    .size = sizeof(CPUState),                                               \
-    .vmsd = &vmstate_cpu_common,                                            \
-    .flags = VMS_STRUCT,                                                    \
-    .offset = 0,                                                            \
-}
+#define VMSTATE_CPU()                                                          \
+    {                                                                          \
+        .name = "parent_obj", .size = sizeof(CPUState),                        \
+        .vmsd = &vmstate_cpu_common, .flags = VMS_STRUCT, .offset = 0,         \
+    }
 
 #endif /* NEED_CPU_H */
 

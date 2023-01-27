@@ -4,9 +4,9 @@
 
 #include "cpu.h"
 
+#include "qemu/qcsched/exec_control.h"
 #include "qemu/qcsched/hcall_constant.h"
 #include "qemu/qcsched/qcsched.h"
-#include "qemu/qcsched/trampoline.h"
 #include "qemu/qcsched/vmi.h"
 #include "qemu/qcsched/window.h"
 

@@ -6,8 +6,8 @@
 #include "qemu/main-loop.h"
 #include "sysemu/kvm.h"
 
+#include "qemu/qcsched/exec_control.h"
 #include "qemu/qcsched/qcsched.h"
-#include "qemu/qcsched/trampoline.h"
 #include "qemu/qcsched/vmi.h"
 
 #include <signal.h>
@@ -26,25 +26,25 @@ static void __init_itimerspec(struct itimerspec *its)
 void qcsched_arm_selfescape_timer(CPUState *cpu)
 {
     struct itimerspec its;
-    struct qcsched_trampoline_info *trampoline = get_trampoline_info(cpu);
+    struct qcsched_exec_info *exec = get_exec_info(cpu);
 
     __init_itimerspec(&its);
 
-    ASSERT(!timer_settime(trampoline->timerid, 0, &its, NULL), "timer_settime");
+    ASSERT(!timer_settime(exec->timerid, 0, &its, NULL), "timer_settime");
 }
 
 static void qcsched_handle_kick_locked(CPUState *cpu)
 {
-    struct qcsched_trampoline_info *trampoline = get_trampoline_info(cpu);
+    struct qcsched_exec_info *exec = get_exec_info(cpu);
 
     ASSERT(cpu == current_cpu, "something wrong: cpu != current_cpu");
 
-    if (!trampoline->kicked)
+    if (!exec->kicked)
         return;
 
-    trampoline->kicked = false;
+    exec->kicked = false;
 
-    if (!trampoline->trampoled)
+    if (!task_kidnapped(cpu))
         return;
 
     cpu->qcsched_force_wakeup = true;

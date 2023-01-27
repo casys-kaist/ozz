@@ -11,10 +11,10 @@
 #include "sysemu/cpus.h"
 #include "sysemu/kvm.h"
 
+#include "qemu/qcsched/exec_control.h"
 #include "qemu/qcsched/hcall.h"
 #include "qemu/qcsched/qcsched.h"
 #include "qemu/qcsched/state.h"
-#include "qemu/qcsched/trampoline.h"
 #include "qemu/qcsched/vmi.h"
 
 static bool qcsched_entry_used(struct qcsched_entry *entry)
@@ -36,6 +36,13 @@ static bool sanitize_breakpoint(struct qcsched *sched)
     return true;
 }
 
+static void __escape_if_kidnapped(CPUState *cpu, CPUState *wakeup)
+{
+    bool kidnapped = task_kidnapped(wakeup);
+    if (kidnapped)
+        wake_cpu_up(cpu, wakeup);
+}
+
 static void __remove_breakpoints_and_escape_cpu(CPUState *this,
                                                 CPUState *remote)
 {
@@ -49,7 +56,7 @@ static void __remove_breakpoints_and_escape_cpu(CPUState *this,
             kvm_remove_breakpoint_cpu(remote, entry->schedpoint.addr, 1,
                                       GDB_BREAKPOINT_HW);
     }
-    qcsched_escape_if_trampoled(this, remote);
+    __escape_if_kidnapped(this, remote);
 }
 
 static void qcsched_reset_window(CPUState *cpu)
@@ -393,6 +400,28 @@ static target_ulong qcsched_clear_breakpoint(CPUState *cpu)
     return 0;
 }
 
+static bool qcsched_jumped_into_trampoline(CPUState *cpu)
+{
+#ifdef CONFIG_QCSCHED_TRAMPOLINE
+    return cpu->regs.rip == vmi_info.trampoline_entry_addr;
+#else
+    return false;
+#endif
+}
+
+static void __skip_executed_vmcall(CPUState *cpu)
+{
+#define VMCALL_INSN_LEN 3
+    cpu->regs.rip += VMCALL_INSN_LEN;
+}
+
+static void __commit_state(CPUState *cpu, target_ulong hcall_ret)
+{
+    __skip_executed_vmcall(cpu);
+    cpu->regs.rax = hcall_ret;
+    cpu->qcsched_dirty = true;
+}
+
 void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
 {
     __u64 *args = run->hypercall.args;
@@ -465,5 +494,5 @@ void qcsched_handle_hcall(CPUState *cpu, struct kvm_run *run)
     qemu_mutex_unlock_iothread();
 
     if (!qcsched_jumped_into_trampoline(cpu))
-        qcsched_commit_state(cpu, ret);
+        __commit_state(cpu, ret);
 }

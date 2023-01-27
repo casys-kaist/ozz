@@ -8,8 +8,8 @@
 #include "qemu/main-loop.h"
 #include "sysemu/kvm.h"
 
+#include "qemu/qcsched/exec_control.h"
 #include "qemu/qcsched/qcsched.h"
-#include "qemu/qcsched/trampoline.h"
 #include "qemu/qcsched/vmi.h"
 
 #include <sys/syscall.h>
@@ -21,58 +21,23 @@ bool warn_once[warn_once_total];
 
 struct qcsched sched;
 
-#define INTERRUPT_FLAG_BIT 9
-#define INTERRUPT_FLAG_MASK 0x0200
-
-void qcsched_pre_run(CPUState *cpu)
+bool qcsched_pre_run(CPUState *cpu)
 {
-    if (cpu->qcsched_disable_irq) {
-        DRPRINTF(cpu, "Disabling irq\n");
-        cpu->qcsched_orig_irq_enabled =
-            !!(cpu->regs.rflags & INTERRUPT_FLAG_MASK);
-        cpu->regs.rflags &= ~INTERRUPT_FLAG_MASK;
-        cpu->qcsched_disable_irq = false;
-        cpu->qcsched_dirty = true;
-    }
-
-    if (cpu->qcsched_restore_irq) {
-        DRPRINTF(cpu, "Restoring irq\n");
-        cpu->regs.rflags |=
-            (cpu->qcsched_orig_irq_enabled << INTERRUPT_FLAG_BIT) &
-            INTERRUPT_FLAG_MASK;
-        cpu->qcsched_orig_irq_enabled = false;
-        cpu->qcsched_restore_irq = false;
-        cpu->qcsched_dirty = true;
-    }
-
     if (cpu->qcsched_dirty) {
         ASSERT(!kvm_write_registers(cpu, &cpu->regs),
                "failed to write registers");
         cpu->qcsched_dirty = false;
     }
+#ifdef CONFIG_QCSCHED_TRAMPOLINE
+    return true;
+#else
+    return !task_kidnapped(cpu);
+#endif
 }
 
 void qcsched_post_run(CPUState *cpu)
 {
     ASSERT(!kvm_read_registers(cpu, &cpu->regs), "failed to read registers");
-}
-
-static void qcsched_skip_executed_vmcall(CPUState *cpu)
-{
-#define VMCALL_INSN_LEN 3
-    cpu->regs.rip += VMCALL_INSN_LEN;
-}
-
-bool qcsched_jumped_into_trampoline(CPUState *cpu)
-{
-    return cpu->regs.rip == vmi_info.trampoline_entry_addr;
-}
-
-void qcsched_commit_state(CPUState *cpu, target_ulong hcall_ret)
-{
-    qcsched_skip_executed_vmcall(cpu);
-    cpu->regs.rax = hcall_ret;
-    cpu->qcsched_dirty = true;
 }
 
 // NOTE: The man page for sigevent clearly specifies that struct
@@ -87,13 +52,13 @@ void qcsched_commit_state(CPUState *cpu, target_ulong hcall_ret)
 
 void qcsched_init_vcpu(CPUState *cpu)
 {
-    struct qcsched_trampoline_info *trampoline = get_trampoline_info(cpu);
+    struct qcsched_exec_info *info = get_exec_info(cpu);
     struct sigevent sevp;
     pid_t tid = gettid();
     sevp.sigev_notify = SIGEV_THREAD_ID;
     sevp.sigev_signo = SIG_IPI;
     sevp.sigev_value.sival_int = TRAMPOLINE_ESCAPE_MAGIC;
     sevp.sigev_notify_thread_id = tid;
-    ASSERT(!timer_create(CLOCK_MONOTONIC, &sevp, &trampoline->timerid),
+    ASSERT(!timer_create(CLOCK_MONOTONIC, &sevp, &info->timerid),
            "timer_create");
 }

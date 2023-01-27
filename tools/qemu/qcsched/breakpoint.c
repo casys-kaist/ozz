@@ -6,8 +6,8 @@
 #include "qemu/main-loop.h"
 #include "sysemu/kvm.h"
 
+#include "qemu/qcsched/exec_control.h"
 #include "qemu/qcsched/qcsched.h"
-#include "qemu/qcsched/trampoline.h"
 #include "qemu/qcsched/vmi.h"
 #include "qemu/qcsched/window.h"
 
@@ -16,11 +16,13 @@ static bool breakpoint_on_hook(CPUState *cpu)
     return RIP(cpu) == vmi_info.hook_addr;
 }
 
+#ifdef CONFIG_QCSCHED_TRAMPOLINE
 static bool breakpoint_on_trampoline(CPUState *cpu)
 {
     return RIP(cpu) == vmi_info.trampoline_entry_addr ||
            RIP(cpu) == vmi_info.trampoline_exit_addr;
 }
+#endif
 
 static bool breakpoint_on_schedpoint(CPUState *cpu)
 {
@@ -60,6 +62,7 @@ static void __handle_breakpoint_hook(CPUState *cpu)
         qcsched_window_expand_window(cpu);
 }
 
+#ifdef CONFIG_QCSCHED_TRAMPOLINE
 static void __handle_breakpoint_trampoline(CPUState *cpu)
 {
     DRPRINTF(cpu, "%s\n", __func__);
@@ -67,6 +70,7 @@ static void __handle_breakpoint_trampoline(CPUState *cpu)
     if (qcsched_vmi_can_progress(cpu))
         resume_task(cpu);
 }
+#endif
 
 void qcsched_yield_turn_from(CPUState *cpu, int current_order)
 {
@@ -103,7 +107,7 @@ static void __handle_breakpoint_schedpoint(CPUState *cpu)
     DRPRINTF(cpu, "%s (%llx)\n", __func__, RIP(cpu));
 
     // XXX: still we are facing double-kidnapping. Is this
-    // workardound find...?
+    // workardound fine...?
     if (task_kidnapped(cpu))
         return;
 
@@ -232,8 +236,10 @@ static int qcsched_handle_breakpoint_iolocked(CPUState *cpu)
 
     if (breakpoint_on_hook(cpu)) {
         __handle_breakpoint_hook(cpu);
+#ifdef CONFIG_QCSCHED_TRAMPOLINE
     } else if (breakpoint_on_trampoline(cpu)) {
         __handle_breakpoint_trampoline(cpu);
+#endif
     } else if (breakpoint_on_schedpoint(cpu)) {
         __handle_breakpoint_schedpoint(cpu);
     } else {
@@ -252,11 +258,4 @@ int qcsched_handle_breakpoint(CPUState *cpu)
     ret = qcsched_handle_breakpoint_iolocked(cpu);
     qemu_mutex_unlock_iothread();
     return ret;
-}
-
-void qcsched_escape_if_trampoled(CPUState *cpu, CPUState *wakeup)
-{
-    struct qcsched_trampoline_info *trampoline = get_trampoline_info(wakeup);
-    if (trampoline->trampoled)
-        wake_cpu_up(cpu, wakeup);
 }
