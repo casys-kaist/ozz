@@ -24,32 +24,14 @@ struct qcsched sched;
 #define INTERRUPT_FLAG_BIT 9
 #define INTERRUPT_FLAG_MASK 0x0200
 
-void qcsched_pre_run(CPUState *cpu)
+bool qcsched_pre_run(CPUState *cpu)
 {
-    if (cpu->qcsched_disable_irq) {
-        DRPRINTF(cpu, "Disabling irq\n");
-        cpu->qcsched_orig_irq_enabled =
-            !!(cpu->regs.rflags & INTERRUPT_FLAG_MASK);
-        cpu->regs.rflags &= ~INTERRUPT_FLAG_MASK;
-        cpu->qcsched_disable_irq = false;
-        cpu->qcsched_dirty = true;
-    }
-
-    if (cpu->qcsched_restore_irq) {
-        DRPRINTF(cpu, "Restoring irq\n");
-        cpu->regs.rflags |=
-            (cpu->qcsched_orig_irq_enabled << INTERRUPT_FLAG_BIT) &
-            INTERRUPT_FLAG_MASK;
-        cpu->qcsched_orig_irq_enabled = false;
-        cpu->qcsched_restore_irq = false;
-        cpu->qcsched_dirty = true;
-    }
-
     if (cpu->qcsched_dirty) {
         ASSERT(!kvm_write_registers(cpu, &cpu->regs),
                "failed to write registers");
         cpu->qcsched_dirty = false;
     }
+    return true;
 }
 
 void qcsched_post_run(CPUState *cpu)

@@ -48,7 +48,7 @@ struct qcsched {
 
 void qcsched_init_vcpu(CPUState *cpu);
 
-void qcsched_pre_run(CPUState *cpu);
+bool qcsched_pre_run(CPUState *cpu);
 void qcsched_post_run(CPUState *cpu);
 void qcsched_yield_turn_from(CPUState *cpu, int order);
 void qcsched_keep_this_cpu_going(CPUState *cpu);
