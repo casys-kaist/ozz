@@ -64,6 +64,8 @@ func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
 	defaultKnotterOpts := scheduler.KnotterOpts{
 		Signal: &fuzzer.maxInterleaving,
 		Mu:     &fuzzer.signalMu,
+		// In RelRazzer, we want to track/test only parallel knots
+		Flags: scheduler.FlagWantParallel,
 	}
 	knotterOptsPreThreading := defaultKnotterOpts
 	knotterOptsPreThreading.Flags |= scheduler.FlagReassignThreadID
