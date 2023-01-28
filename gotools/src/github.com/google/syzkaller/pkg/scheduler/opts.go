@@ -17,4 +17,5 @@ type KnotterFlags int
 const (
 	FlagReassignThreadID KnotterFlags = 1 << iota
 	FlagStrictTimestamp
+	FlagWantParallel
 )

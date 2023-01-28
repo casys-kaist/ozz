@@ -350,25 +350,52 @@ func (knotter *Knotter) doFormKnots() bool {
 		(*knotter.opts.Mu).RLock()
 		defer (*knotter.opts.Mu).RUnlock()
 	}
-	for i := 0; i < len(knotter.comms0); i++ {
-		comm0 := knotter.comms0[i]
-		if knotter.tooManyNestedComm(comm0) {
-			continue
-		}
-		for j := 0; j < len(knotter.comms1); j++ {
-			comm1 := knotter.comms1[j]
-			knotter.formKnotSingle(comm0, comm1)
-		}
+
+	if knotter.opts.Flags&FlagWantParallel != 0 {
+		// RelRazzer
+		knotter.doFormKnotsParallel()
+	} else {
+		// SegFuzz
+		knotter.doFormKnotsNotParallel()
 	}
 	return len(knotter.knots) < thresholdKnots
 }
 
+func (knotter *Knotter) doFormKnotsNotParallel() {
+	for _, comm0 := range knotter.comms0 {
+		if knotter.tooManyNestedComm(comm0) {
+			continue
+		}
+		for _, comm1 := range knotter.comms1 {
+			knotter.formKnotSingle(comm0, comm1)
+		}
+	}
+}
+
+func (knotter *Knotter) doFormKnotsParallel() {
+	knotter.doFormKnotsinThread(knotter.comms0)
+	knotter.doFormKnotsinThread(knotter.comms1)
+}
+
+func (knotter *Knotter) doFormKnotsinThread(comms []interleaving.Communication) {
+	for i := 0; i < len(comms); i++ {
+		for j := i + 1; j < len(comms); j++ {
+			comm0, comm1 := comms[i], comms[j]
+			knotter.formKnotSingle(comm0, comm1)
+		}
+	}
+}
+
 func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication) {
 	knot := interleaving.Knot{comm0, comm1}
+	parallel := knot.Type() == interleaving.KnotParallel
+	if parallel && comm0.Former().Timestamp > comm1.Former().Timestamp {
+		knot = interleaving.Knot{comm1, comm0}
+	}
 	if knotter.alreadyHave(knot) {
 		return
 	}
-	if knotter.tooFarComms(comm0, comm1) {
+	if knotter.tooFarComms(comm0, comm1, parallel) {
 		return
 	}
 	if typ := knot.Type(); typ == interleaving.KnotInvalid {
@@ -390,7 +417,7 @@ func (knotter *Knotter) tooManyNestedComm(comm interleaving.Communication) bool 
 	return knotter.innerCommCount[comm] >= knotter.config.threshold
 }
 
-func (knotter *Knotter) tooFarComms(comm0, comm1 interleaving.Communication) bool {
+func (knotter *Knotter) tooFarComms(comm0, comm1 interleaving.Communication, parallel bool) bool {
 	tooFar := func(acc0, acc1 interleaving.Access) bool {
 		if acc0.Thread != acc1.Thread {
 			panic("wrong")
@@ -404,7 +431,13 @@ func (knotter *Knotter) tooFarComms(comm0, comm1 interleaving.Communication) boo
 		dist := timeDiff(acc0, acc1)
 		return dist > uint32(float32(windowSize)*factor)
 	}
-	return tooFar(comm0.Former(), comm1.Latter()) && tooFar(comm1.Latter(), comm0.Former())
+	if parallel {
+		// TODO: At this point, we don't know exactly what the
+		// condition of tooFar should be.
+		return tooFar(comm0.Former(), comm1.Former()) && tooFar(comm0.Latter(), comm1.Latter())
+	} else {
+		return tooFar(comm0.Former(), comm1.Latter()) && tooFar(comm1.Latter(), comm0.Former())
+	}
 }
 
 func timeDiff(acc0, acc1 interleaving.Access) (dist uint32) {
