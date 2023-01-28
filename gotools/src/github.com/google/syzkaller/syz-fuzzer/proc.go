@@ -38,8 +38,9 @@ type Proc struct {
 	execOptsComps     *ipc.ExecOpts
 	execOptsNoCollide *ipc.ExecOpts
 
-	knotterOptsThreading knotterOpts
-	knotterOptsSchedule  knotterOpts
+	knotterOptsPreThreading scheduler.KnotterOpts
+	knotterOptsThreading    scheduler.KnotterOpts
+	knotterOptsSchedule     scheduler.KnotterOpts
 
 	// To give a half of computing power for scheduling. We don't use
 	// proc.fuzzer.Stats and proc.env.StatExec as it is periodically
@@ -63,19 +64,29 @@ func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
 	execOptsCover.Flags |= ipc.FlagCollectCover
 	execOptsComps := execOptsNoCollide
 	execOptsComps.Flags |= ipc.FlagCollectComps
-	knotterOptsThreading := knotterOpts{&fuzzer.maxInterleaving, true, false}
-	knotterOptsSchedule := knotterOpts{&fuzzer.corpusInterleaving, false, true}
+
+	defaultKnotterOpts := scheduler.KnotterOpts{
+		Signal: &fuzzer.maxInterleaving,
+		Mu:     &fuzzer.signalMu,
+	}
+	knotterOptsPreThreading := defaultKnotterOpts
+	knotterOptsPreThreading.Flags |= scheduler.FlagReassignThreadID
+	knotterOptsThreading := defaultKnotterOpts
+	knotterOptsSchedule := defaultKnotterOpts
+	knotterOptsSchedule.Flags |= scheduler.FlagStrictTimestamp
+
 	proc := &Proc{
-		fuzzer:               fuzzer,
-		pid:                  pid,
-		env:                  env,
-		rnd:                  rnd,
-		execOpts:             fuzzer.execOpts,
-		execOptsCover:        &execOptsCover,
-		execOptsComps:        &execOptsComps,
-		execOptsNoCollide:    &execOptsNoCollide,
-		knotterOptsThreading: knotterOptsThreading,
-		knotterOptsSchedule:  knotterOptsSchedule,
+		fuzzer:                  fuzzer,
+		pid:                     pid,
+		env:                     env,
+		rnd:                     rnd,
+		execOpts:                fuzzer.execOpts,
+		execOptsCover:           &execOptsCover,
+		execOptsComps:           &execOptsComps,
+		execOptsNoCollide:       &execOptsNoCollide,
+		knotterOptsPreThreading: knotterOptsPreThreading,
+		knotterOptsThreading:    knotterOptsThreading,
+		knotterOptsSchedule:     knotterOptsSchedule,
 	}
 	return proc, nil
 }
@@ -407,7 +418,7 @@ func (proc *Proc) executeThreading(p *prog.Prog) []interleaving.Segment {
 		panic("n should be less than (\"relrazzer\") or equal to 2 (\"SegFuzz\")")
 	}
 
-	knotter := scheduler.GetKnotter(&proc.fuzzer.maxInterleaving, &proc.fuzzer.signalMu)
+	knotter := scheduler.GetKnotter(proc.knotterOptsThreading)
 	p0 := p.Clone()
 	for i := 0; i < n; i++ {
 		inf := proc.executeRaw(proc.execOpts, p0, StatThreading)
@@ -501,7 +512,7 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 			}
 
 			cont := prog.Contender{Calls: []int{c1, c2}}
-			knots, comms := proc.extractKnotsAndComms(info, cont, proc.knotterOptsThreading)
+			knots, comms := proc.extractKnotsAndComms(info, cont, proc.knotterOptsPreThreading)
 			if len(knots) == 0 && len(comms) == 0 {
 				continue
 			}
@@ -538,23 +549,8 @@ func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.Pro
 	return info
 }
 
-type knotterOpts struct {
-	collected        *interleaving.Signal
-	reassignThreadID bool
-	strictTimestamp  bool
-}
-
-func (proc *Proc) extractKnotsAndComms(info *ipc.ProgInfo, calls prog.Contender, opts knotterOpts) ([]interleaving.Segment, []interleaving.Segment) {
-	knotter := scheduler.GetKnotter(
-		opts.collected,
-		&proc.fuzzer.signalMu,
-	)
-	if opts.reassignThreadID {
-		knotter.SetReassignThreadID()
-	}
-	if opts.strictTimestamp {
-		knotter.SetStrictTimestamp()
-	}
+func (proc *Proc) extractKnotsAndComms(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) ([]interleaving.Segment, []interleaving.Segment) {
+	knotter := scheduler.GetKnotter(opts)
 
 	seq := proc.sequentialAccesses(info, calls)
 	if !knotter.AddSequentialTrace(seq) {
@@ -565,7 +561,7 @@ func (proc *Proc) extractKnotsAndComms(info *ipc.ProgInfo, calls prog.Contender,
 	return knotter.GetKnots(), knotter.GetCommunications()
 }
 
-func (proc *Proc) extractKnots(info *ipc.ProgInfo, calls prog.Contender, opts knotterOpts) []interleaving.Segment {
+func (proc *Proc) extractKnots(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) []interleaving.Segment {
 	knots, _ := proc.extractKnotsAndComms(info, calls, opts)
 	return knots
 }

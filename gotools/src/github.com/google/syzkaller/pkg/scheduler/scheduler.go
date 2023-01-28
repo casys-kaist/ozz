@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"sort"
-	"sync"
 
 	"github.com/google/syzkaller/pkg/interleaving"
 )
@@ -13,28 +12,18 @@ import (
 
 type Knotter struct {
 	config config
+	opts   KnotterOpts
 
 	loopAllowed []int
 	commChan    map[uint32]struct{}
 	accessMap   map[uint32][]interleaving.Access
 	numThr      int
 
-	StrictTimestamp bool
-	// Used only for thread works. Our implmenetation requires to
-	// distinguish two accesses will be executed in different threads,
-	// while all Access have same Thread when sequentially executing
-	// all calls. When reassignThreadID is true, Knotter will reassign
-	// Thread to each Access when fastening Knots
-	ReassignThreadID bool
-
 	commHsh        map[uint64]struct{}
 	innerCommCount map[interleaving.Communication]int
 	comms0         []interleaving.Communication
 	comms1         []interleaving.Communication
 	windowSize     []int
-
-	havingMu *sync.RWMutex
-	having   *interleaving.Signal
 
 	// input
 	seqCount int
@@ -45,27 +34,10 @@ type Knotter struct {
 	comms []interleaving.Segment
 }
 
-func GetKnotter(having *interleaving.Signal, havingMu *sync.RWMutex) Knotter {
-	if having == nil {
-		havingMu = nil
-	}
-	if havingMu != nil {
-		(*havingMu).RLock()
-		defer (*havingMu).RUnlock()
-	}
+func GetKnotter(opts KnotterOpts) Knotter {
 	return Knotter{
-		havingMu: havingMu,
-		having:   having,
+		opts: opts,
 	}
-}
-
-func (knotter *Knotter) SetReassignThreadID() {
-	knotter.ReassignThreadID = true
-}
-
-func (knotter *Knotter) SetStrictTimestamp() {
-	knotter.StrictTimestamp = true
-
 }
 
 type config struct {
@@ -97,7 +69,7 @@ func (knotter *Knotter) sanitizeSequentialTrace(seq []interleaving.SerialAccess)
 		return false
 	}
 	var chk []bool
-	if !knotter.ReassignThreadID {
+	if (knotter.opts.Flags & FlagReassignThreadID) == 0 {
 		chk = make([]bool, len(seq))
 	}
 	for _, serial := range seq {
@@ -108,7 +80,7 @@ func (knotter *Knotter) sanitizeSequentialTrace(seq []interleaving.SerialAccess)
 			// All serial execution should be a single thread
 			return false
 		}
-		if knotter.ReassignThreadID {
+		if (knotter.opts.Flags & FlagReassignThreadID) != 0 {
 			continue
 		}
 		thr := int(serial[0].Thread)
@@ -141,7 +113,7 @@ func (knotter *Knotter) ExcavateKnots() {
 
 func (knotter *Knotter) fastenKnots() {
 	knotter.collectCommChans()
-	knotter.reassignThreadID()
+	knotter.doReassignThreadID()
 	knotter.inferProgramOrder()
 	knotter.inferWindowSize()
 	// At this point, two accesses conducted by a single thread are
@@ -204,8 +176,8 @@ func (knotter *Knotter) distillSerial(serial *interleaving.SerialAccess, distile
 	}
 }
 
-func (knotter *Knotter) reassignThreadID() {
-	if !knotter.ReassignThreadID {
+func (knotter *Knotter) doReassignThreadID() {
+	if (knotter.opts.Flags & FlagReassignThreadID) == 0 {
 		return
 	}
 	if len(knotter.seqs) != 1 {
@@ -325,7 +297,7 @@ func (knotter *Knotter) formCommunicationAddr(accesses []interleaving.Access) {
 }
 
 func (knotter *Knotter) formCommunicationSingle(acc0, acc1 interleaving.Access) {
-	if knotter.StrictTimestamp && acc0.Timestamp > acc1.Timestamp {
+	if (knotter.opts.Flags&FlagStrictTimestamp) != 0 && acc0.Timestamp > acc1.Timestamp {
 		return
 	}
 	comm := interleaving.Communication{acc0, acc1}
@@ -374,9 +346,9 @@ func (knotter *Knotter) formKnots() {
 
 func (knotter *Knotter) doFormKnots() bool {
 	knotter.knots = []interleaving.Segment{}
-	if knotter.havingMu != nil {
-		(*knotter.havingMu).RLock()
-		defer (*knotter.havingMu).RUnlock()
+	if knotter.opts.Mu != nil {
+		(*knotter.opts.Mu).RLock()
+		defer (*knotter.opts.Mu).RUnlock()
 	}
 	for i := 0; i < len(knotter.comms0); i++ {
 		comm0 := knotter.comms0[i]
@@ -406,11 +378,11 @@ func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication) 
 }
 
 func (knotter *Knotter) alreadyHave(knot interleaving.Knot) bool {
-	if knotter.having == nil {
+	if knotter.opts.Signal == nil {
 		return false
 	}
 	hsh := knot.Hash()
-	_, ok := (*knotter.having)[hsh]
+	_, ok := (*knotter.opts.Signal)[hsh]
 	return ok
 }
 
