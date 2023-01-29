@@ -242,6 +242,14 @@ func TestDupCheck(t *testing.T) {
 	t.Logf("Duplicated communications pairs: %d", dupCommCnt)
 }
 
+func TestMessagePassing(t *testing.T) {
+	opts := KnotterOpts{Flags: FlagWantParallel | FlagWantMessagePassing}
+	knots := loadKnots(t, []string{"simple_message_passing"}, opts)
+	if !checkAnswer(t, knots, simple_message_passing) {
+		t.Errorf("%s: can't find the required knot", "ssb")
+	}
+}
+
 // TODO: answers depend on the data (i.e., two test data from the same
 // CVE may differ depending on the binary they ran on such as
 // CVE20196974 and CVE20196974_2), so it should reside in the data
@@ -261,6 +269,10 @@ var CVE20196974_2 = interleaving.Knot{
 var CVE20196974_3 = interleaving.Knot{
 	{{Inst: 0x8d576637, Size: 4, Typ: interleaving.TypeStore, Thread: 1, Timestamp: 68}, {Inst: 0x8d592495, Size: 4, Typ: interleaving.TypeLoad, Timestamp: 276}},
 	{{Inst: 0x81f9ebf6, Size: 4, Typ: interleaving.TypeStore, Timestamp: 230}, {Inst: 0x81f9f2e8, Size: 4, Typ: interleaving.TypeLoad, Thread: 1, Timestamp: 161}}}
+
+var simple_message_passing = interleaving.Knot{
+	{{Inst: 0x81a22f53, Size: 8, Typ: interleaving.TypeStore, Timestamp: 767}, {Inst: 0x81a23342, Size: 8, Typ: interleaving.TypeLoad, Thread: 1, Timestamp: 1639}},
+	{{Inst: 0x81a22f6a, Size: 1, Typ: interleaving.TypeStore, Timestamp: 768}, {Inst: 0x81a232a0, Size: 1, Typ: interleaving.TypeLoad, Thread: 1, Timestamp: 1638}}}
 
 func BenchmarkExcavateKnots(b *testing.B) {
 	benchmarkExcavateKnots(b)
