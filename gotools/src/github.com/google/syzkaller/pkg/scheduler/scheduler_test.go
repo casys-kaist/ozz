@@ -205,7 +205,11 @@ func TestExcavateKnotsSingleThread(t *testing.T) {
 				thrs[i][j].Thread = 0
 			}
 		}
-		knotter := Knotter{ReassignThreadID: true}
+		knotter := Knotter{
+			opts: KnotterOpts{
+				Flags: FlagReassignThreadID,
+			},
+		}
 		knotter.AddSequentialTrace(thrs[:])
 		knotter.ExcavateKnots()
 		knots0 := knotter.GetKnots()
