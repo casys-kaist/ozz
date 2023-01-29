@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"sort"
+	"time"
 
 	"github.com/google/syzkaller/pkg/interleaving"
 )
@@ -35,6 +36,9 @@ type Knotter struct {
 }
 
 func GetKnotter(opts KnotterOpts) Knotter {
+	if !opts.flagSet(FlagWantParallel) {
+		opts.Flags &= ^FlagWantMessagePassing
+	}
 	return Knotter{
 		opts: opts,
 	}
@@ -69,7 +73,7 @@ func (knotter *Knotter) sanitizeSequentialTrace(seq []interleaving.SerialAccess)
 		return false
 	}
 	var chk []bool
-	if (knotter.opts.Flags & FlagReassignThreadID) == 0 {
+	if !knotter.opts.flagSet(FlagReassignThreadID) {
 		chk = make([]bool, len(seq))
 	}
 	for _, serial := range seq {
@@ -80,7 +84,7 @@ func (knotter *Knotter) sanitizeSequentialTrace(seq []interleaving.SerialAccess)
 			// All serial execution should be a single thread
 			return false
 		}
-		if (knotter.opts.Flags & FlagReassignThreadID) != 0 {
+		if knotter.opts.flagSet(FlagReassignThreadID) {
 			continue
 		}
 		thr := int(serial[0].Thread)
@@ -108,6 +112,7 @@ func (knotter *Knotter) ExcavateKnots() {
 		return
 	}
 	knotter.loopAllowed = loopAllowed
+	time.Sleep(time.Microsecond * 100)
 	knotter.fastenKnots()
 }
 
@@ -177,7 +182,7 @@ func (knotter *Knotter) distillSerial(serial *interleaving.SerialAccess, distile
 }
 
 func (knotter *Knotter) doReassignThreadID() {
-	if (knotter.opts.Flags & FlagReassignThreadID) == 0 {
+	if !knotter.opts.flagSet(FlagReassignThreadID) {
 		return
 	}
 	if len(knotter.seqs) != 1 {
@@ -297,7 +302,7 @@ func (knotter *Knotter) formCommunicationAddr(accesses []interleaving.Access) {
 }
 
 func (knotter *Knotter) formCommunicationSingle(acc0, acc1 interleaving.Access) {
-	if (knotter.opts.Flags&FlagStrictTimestamp) != 0 && acc0.Timestamp > acc1.Timestamp {
+	if knotter.opts.flagSet(FlagStrictTimestamp) && acc0.Timestamp > acc1.Timestamp {
 		return
 	}
 	comm := interleaving.Communication{acc0, acc1}
@@ -351,7 +356,7 @@ func (knotter *Knotter) doFormKnots() bool {
 		defer (*knotter.opts.Mu).RUnlock()
 	}
 
-	if knotter.opts.Flags&FlagWantParallel != 0 {
+	if knotter.opts.flagSet(FlagWantParallel) {
 		// RelRazzer
 		knotter.doFormKnotsParallel()
 	} else {
@@ -391,6 +396,13 @@ func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication) 
 	parallel := knot.Type() == interleaving.KnotParallel
 	if parallel && comm0.Former().Timestamp > comm1.Former().Timestamp {
 		knot = interleaving.Knot{comm1, comm0}
+	}
+	if knotter.opts.flagSet(FlagWantMessagePassing) {
+		if !(comm0.Former().Typ == comm1.Former().Typ &&
+			comm0.Latter().Typ == comm1.Latter().Typ &&
+			comm0.Former().Typ != comm0.Latter().Typ) {
+			return
+		}
 	}
 	if knotter.alreadyHave(knot) {
 		return

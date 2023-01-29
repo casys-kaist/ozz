@@ -18,4 +18,9 @@ const (
 	FlagReassignThreadID KnotterFlags = 1 << iota
 	FlagStrictTimestamp
 	FlagWantParallel
+	FlagWantMessagePassing
 )
+
+func (opts KnotterOpts) flagSet(flag KnotterFlags) bool {
+	return (opts.Flags & flag) != 0
+}
