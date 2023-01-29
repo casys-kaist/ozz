@@ -92,8 +92,8 @@ func loadTestdata(tb testing.TB, paths []string, knotter *Knotter) [][2]interlea
 	return res
 }
 
-func loadKnots(t *testing.T, paths []string) []interleaving.Knot {
-	knotter := Knotter{}
+func loadKnots(t *testing.T, paths []string, opts KnotterOpts) []interleaving.Knot {
+	knotter := GetKnotter(opts)
 	loadTestdata(t, paths, &knotter)
 	knotter.ExcavateKnots()
 	knots0 := knotter.GetKnots()

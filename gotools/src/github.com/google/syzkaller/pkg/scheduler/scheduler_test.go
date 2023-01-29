@@ -106,7 +106,7 @@ func TestExcavateKnots(t *testing.T) {
 }
 
 func testExcavateKnots(t *testing.T, filename string, answer interleaving.Knot) []interleaving.Knot {
-	knots := loadKnots(t, []string{filename})
+	knots := loadKnots(t, []string{filename}, KnotterOpts{})
 	if !checkAnswer(t, knots, answer) {
 		t.Errorf("%s: can't find the required knot", filename)
 	}
@@ -114,7 +114,7 @@ func testExcavateKnots(t *testing.T, filename string, answer interleaving.Knot) 
 }
 
 func TestGenerateSchedPoint(t *testing.T) {
-	knots := loadKnots(t, []string{"data1_simple"})
+	knots := loadKnots(t, []string{"data1_simple"}, KnotterOpts{})
 	segs := []interleaving.Segment{}
 	for _, knot := range knots {
 		segs = append(segs, knot)
@@ -189,7 +189,7 @@ func TestExcavateKnotsTwoSeqs(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		knots := loadKnots(t, test.filenames)
+		knots := loadKnots(t, test.filenames, KnotterOpts{})
 		if !checkAnswer(t, knots, test.answer) {
 			t.Errorf("%v: can't find the required knot", test.filenames)
 		}

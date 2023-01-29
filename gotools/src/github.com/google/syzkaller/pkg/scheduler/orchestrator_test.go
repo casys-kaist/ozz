@@ -13,7 +13,7 @@ func TestSelectHarmoniousKnotsIterSimple(t *testing.T) {
 }
 
 func testSelectHarmoniousKnotsIter(t *testing.T, path string, answer interleaving.Knot) {
-	knots := loadKnots(t, []string{path})
+	knots := loadKnots(t, []string{path}, KnotterOpts{})
 
 	segs := []interleaving.Segment{}
 	for _, knot := range knots {
