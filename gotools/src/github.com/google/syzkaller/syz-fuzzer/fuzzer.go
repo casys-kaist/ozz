@@ -873,22 +873,6 @@ func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog) bool {
 	return false
 }
 
-func (fuzzer *Fuzzer) spillCollection(collection Collection, threshold uint64) bool {
-	fuzzer.corpusMu.RLock()
-	defer fuzzer.corpusMu.RUnlock()
-	return fuzzer.collection[collection] > threshold
-}
-
-const spillThreshold = uint64(100000)
-
-func (fuzzer *Fuzzer) spillThreading() bool {
-	return fuzzer.spillCollection(CollectionThreadingHint, spillThreshold)
-}
-
-func (fuzzer *Fuzzer) spillScheduling() bool {
-	return fuzzer.spillCollection(CollectionScheduleHint, spillThreshold)
-}
-
 func (fuzzer *Fuzzer) addCollection(collection Collection, num uint64) {
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()

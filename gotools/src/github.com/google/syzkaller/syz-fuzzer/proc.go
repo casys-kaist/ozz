@@ -4,15 +4,11 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"math"
 	"math/rand"
-	"os"
 	"runtime/debug"
-	"strings"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/google/syzkaller/pkg/cover"
@@ -38,8 +34,9 @@ type Proc struct {
 	execOptsComps     *ipc.ExecOpts
 	execOptsNoCollide *ipc.ExecOpts
 
-	knotterOptsThreading knotterOpts
-	knotterOptsSchedule  knotterOpts
+	knotterOptsPreThreading scheduler.KnotterOpts
+	knotterOptsThreading    scheduler.KnotterOpts
+	knotterOptsSchedule     scheduler.KnotterOpts
 
 	// To give a half of computing power for scheduling. We don't use
 	// proc.fuzzer.Stats and proc.env.StatExec as it is periodically
@@ -63,19 +60,31 @@ func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
 	execOptsCover.Flags |= ipc.FlagCollectCover
 	execOptsComps := execOptsNoCollide
 	execOptsComps.Flags |= ipc.FlagCollectComps
-	knotterOptsThreading := knotterOpts{&fuzzer.maxInterleaving, true, false}
-	knotterOptsSchedule := knotterOpts{&fuzzer.corpusInterleaving, false, true}
+
+	defaultKnotterOpts := scheduler.KnotterOpts{
+		Signal: &fuzzer.maxInterleaving,
+		Mu:     &fuzzer.signalMu,
+		// In RelRazzer, we want to track/test only parallel knots
+		Flags: scheduler.FlagWantParallel,
+	}
+	knotterOptsPreThreading := defaultKnotterOpts
+	knotterOptsPreThreading.Flags |= scheduler.FlagReassignThreadID
+	knotterOptsThreading := defaultKnotterOpts
+	knotterOptsSchedule := defaultKnotterOpts
+	knotterOptsSchedule.Flags |= scheduler.FlagStrictTimestamp
+
 	proc := &Proc{
-		fuzzer:               fuzzer,
-		pid:                  pid,
-		env:                  env,
-		rnd:                  rnd,
-		execOpts:             fuzzer.execOpts,
-		execOptsCover:        &execOptsCover,
-		execOptsComps:        &execOptsComps,
-		execOptsNoCollide:    &execOptsNoCollide,
-		knotterOptsThreading: knotterOptsThreading,
-		knotterOptsSchedule:  knotterOptsSchedule,
+		fuzzer:                  fuzzer,
+		pid:                     pid,
+		env:                     env,
+		rnd:                     rnd,
+		execOpts:                fuzzer.execOpts,
+		execOptsCover:           &execOptsCover,
+		execOptsComps:           &execOptsComps,
+		execOptsNoCollide:       &execOptsNoCollide,
+		knotterOptsPreThreading: knotterOptsPreThreading,
+		knotterOptsThreading:    knotterOptsThreading,
+		knotterOptsSchedule:     knotterOptsSchedule,
 	}
 	return proc, nil
 }
@@ -129,52 +138,6 @@ func (proc *Proc) loop() {
 			proc.scheduleInput(fuzzerSnapshot)
 		}
 	}
-}
-
-func (proc *Proc) powerSchedule() {
-	if proc.threadingPlugged {
-		proc.unplugThreading()
-	} else {
-		proc.plugThreading()
-	}
-}
-
-func (proc *Proc) unplugThreading() {
-	if proc.scheduled < uint64(float64(proc.executed)*0.4) {
-		proc.fuzzer.addCollection(CollectionUnplug, 1)
-		proc.threadingPlugged = false
-	}
-}
-
-func (proc *Proc) plugThreading() {
-	if proc.scheduled > uint64(float64(proc.executed)*0.7) {
-		proc.fuzzer.addCollection(CollectionPlug, 1)
-		proc.threadingPlugged = true
-	}
-}
-
-func (proc *Proc) relieveMemoryPressure() {
-	needSchedule := proc.fuzzer.spillScheduling()
-	needThreading := proc.fuzzer.spillThreading()
-	if !needSchedule && !needThreading {
-		return
-	}
-	MonitorMemUsage()
-	for cnt := 0; (needSchedule || needThreading) && cnt < 10; cnt++ {
-		log.Logf(2, "Relieving memory pressure schedule=%v threading=%v", needSchedule, needThreading)
-		if needSchedule {
-			fuzzerSnapshot := proc.fuzzer.snapshot()
-			proc.scheduleInput(fuzzerSnapshot)
-		} else if item := proc.fuzzer.workQueue.dequeueThreading(); item != nil {
-			proc.threadingInput(item)
-		}
-		needSchedule = proc.fuzzer.spillScheduling()
-		needThreading = proc.fuzzer.spillThreading()
-		if !needSchedule && !needThreading {
-			break
-		}
-	}
-	return
 }
 
 func (proc *Proc) needScheduling() bool {
@@ -402,15 +365,21 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 }
 
 func (proc *Proc) executeThreading(p *prog.Prog) []interleaving.Segment {
-	knotter := scheduler.GetKnotter(&proc.fuzzer.maxInterleaving, &proc.fuzzer.signalMu)
-	for i := 0; i < 2; i++ {
-		inf := proc.executeRaw(proc.execOpts, p, StatThreading)
-		seq := proc.sequentialAccesses(inf, p.Contender)
+	const n = 1
+	if n > 2 {
+		panic("n should be less than (\"relrazzer\") or equal to 2 (\"SegFuzz\")")
+	}
+
+	knotter := scheduler.GetKnotter(proc.knotterOptsThreading)
+	p0 := p.Clone()
+	for i := 0; i < n; i++ {
+		inf := proc.executeRaw(proc.execOpts, p0, StatThreading)
+		seq := proc.sequentialAccesses(inf, p0.Contender)
 		if !knotter.AddSequentialTrace(seq) {
 			log.Logf(1, "Failed to add sequential traces")
 			return nil
 		}
-		p.Reverse()
+		p0.Reverse()
 	}
 	knotter.ExcavateKnots()
 	return knotter.GetKnots()
@@ -495,7 +464,7 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 			}
 
 			cont := prog.Contender{Calls: []int{c1, c2}}
-			knots, comms := proc.extractKnotsAndComms(info, cont, proc.knotterOptsThreading)
+			knots, comms := proc.extractKnotsAndComms(info, cont, proc.knotterOptsPreThreading)
 			if len(knots) == 0 && len(comms) == 0 {
 				continue
 			}
@@ -532,23 +501,8 @@ func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.Pro
 	return info
 }
 
-type knotterOpts struct {
-	collected        *interleaving.Signal
-	reassignThreadID bool
-	strictTimestamp  bool
-}
-
-func (proc *Proc) extractKnotsAndComms(info *ipc.ProgInfo, calls prog.Contender, opts knotterOpts) ([]interleaving.Segment, []interleaving.Segment) {
-	knotter := scheduler.GetKnotter(
-		opts.collected,
-		&proc.fuzzer.signalMu,
-	)
-	if opts.reassignThreadID {
-		knotter.SetReassignThreadID()
-	}
-	if opts.strictTimestamp {
-		knotter.SetStrictTimestamp()
-	}
+func (proc *Proc) extractKnotsAndComms(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) ([]interleaving.Segment, []interleaving.Segment) {
+	knotter := scheduler.GetKnotter(opts)
 
 	seq := proc.sequentialAccesses(info, calls)
 	if !knotter.AddSequentialTrace(seq) {
@@ -559,7 +513,7 @@ func (proc *Proc) extractKnotsAndComms(info *ipc.ProgInfo, calls prog.Contender,
 	return knotter.GetKnots(), knotter.GetCommunications()
 }
 
-func (proc *Proc) extractKnots(info *ipc.ProgInfo, calls prog.Contender, opts knotterOpts) []interleaving.Segment {
+func (proc *Proc) extractKnots(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) []interleaving.Segment {
 	knots, _ := proc.extractKnotsAndComms(info, calls, opts)
 	return knots
 }
@@ -705,152 +659,4 @@ func buildScheduleFilter(p *prog.Prog, info *ipc.ProgInfo) []uint32 {
 		}
 	}
 	return filter
-}
-
-func (proc *Proc) logProgram(opts *ipc.ExecOpts, p *prog.Prog) {
-	if proc.fuzzer.outputType == OutputNone {
-		return
-	}
-
-	data := p.Serialize()
-	strOpts := ""
-	if opts.Flags&ipc.FlagInjectFault != 0 {
-		strOpts = fmt.Sprintf(" (fault-call:%v fault-nth:%v)", opts.FaultCall, opts.FaultNth)
-	}
-	if p.Threaded {
-		strOpts += fmt.Sprintf(" (threaded %v) ", p.Contender.Calls)
-	}
-
-	// The following output helps to understand what program crashed kernel.
-	// It must not be intermixed.
-	switch proc.fuzzer.outputType {
-	case OutputStdout:
-		now := time.Now()
-		proc.fuzzer.logMu.Lock()
-		fmt.Printf("%02v:%02v:%02v executing program (%d calls) %v%v:\n%s\n",
-			now.Hour(), now.Minute(), now.Second(), len(p.Calls),
-			proc.pid, strOpts, data)
-		proc.fuzzer.logMu.Unlock()
-	case OutputDmesg:
-		fd, err := syscall.Open("/dev/kmsg", syscall.O_WRONLY, 0)
-		if err == nil {
-			buf := new(bytes.Buffer)
-			fmt.Fprintf(buf, "syzkaller: executing program %v%v:\n%s\n",
-				proc.pid, strOpts, data)
-			syscall.Write(fd, buf.Bytes())
-			syscall.Close(fd)
-		}
-	case OutputFile:
-		f, err := os.Create(fmt.Sprintf("%v-%v.prog", proc.fuzzer.name, proc.pid))
-		if err == nil {
-			if strOpts != "" {
-				fmt.Fprintf(f, "#%v\n", strOpts)
-			}
-			f.Write(data)
-			f.Close()
-		}
-	default:
-		log.Fatalf("unknown output type: %v", proc.fuzzer.outputType)
-	}
-}
-
-type ResultLogger struct {
-	p          *prog.Prog
-	info       *ipc.ProgInfo
-	threads    uint64
-	epochs     uint64
-	outputType OutputType
-	column     int
-}
-
-func (proc *Proc) logResult(p *prog.Prog, info *ipc.ProgInfo, hanged, retry bool) {
-	if proc.fuzzer.outputType == OutputNone {
-		return
-	}
-
-	threads, epochs := p.Frame()
-	logger := ResultLogger{
-		p:          p,
-		info:       info,
-		threads:    threads,
-		epochs:     epochs,
-		outputType: proc.fuzzer.outputType,
-	}
-	(&logger).initialize()
-
-	proc.fuzzer.logMu.Lock()
-	defer proc.fuzzer.logMu.Unlock()
-
-	logger.logHeader()
-	for i := uint64(0); i < epochs; i++ {
-		logger.logEpochLocked(i)
-	}
-	log.Logf(2, "Retry: %v", retry)
-	logger.logFootprint()
-}
-
-func (logger *ResultLogger) initialize() {
-	logger.column = len("thread#0")
-	for _, c := range logger.p.Calls {
-		l := len(c.Meta.Name)
-		if l > logger.column {
-			logger.column = l
-		}
-	}
-	logger.column += 2
-}
-
-func (logger ResultLogger) logHeader() {
-	header := []string{}
-	for i := uint64(0); i < logger.threads; i++ {
-		header = append(header, fmt.Sprintf("thread%d", i))
-	}
-	logger.logRowLocked(header)
-}
-
-func (logger ResultLogger) logEpochLocked(epoch uint64) {
-	m := make(map[uint64]string)
-	for _, c := range logger.p.Calls {
-		if c.Epoch == epoch {
-			m[c.Thread] = c.Meta.Name
-		}
-	}
-	row := []string{}
-	for i := uint64(0); i < logger.threads; i++ {
-		str := "(empty)"
-		if str0, ok := m[i]; ok {
-			str = str0
-		}
-		row = append(row, str)
-	}
-	logger.logRowLocked(row)
-}
-
-func (logger ResultLogger) logRowLocked(row []string) {
-	switch logger.outputType {
-	case OutputStdout:
-		s := ""
-		for _, r := range row {
-			s += r
-			s += strings.Repeat(" ", logger.column-len(r))
-		}
-		log.Logf(2, "%s", s)
-	default:
-		// XXX: We support standard output only, but don't want to
-		// quit with others
-	}
-}
-
-func (logger ResultLogger) logFootprint() {
-	log.Logf(2, "Footprint")
-	for i, inf := range logger.info.Calls {
-		if len(inf.SchedpointOutcome) == 0 {
-			continue
-		}
-		str := fmt.Sprintf("Call #%d: ", i)
-		for _, outcome := range inf.SchedpointOutcome {
-			str += fmt.Sprintf("(%d, %d) ", outcome.Order, outcome.Footprint)
-		}
-		log.Logf(2, "%s", str)
-	}
 }
