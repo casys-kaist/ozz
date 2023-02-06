@@ -1,0 +1,40 @@
+commit 108a7ac448caff8e35e8c3f92f65faad893e5aca
+Author: Will Deacon <will@kernel.org>
+Date:   Mon Jul 10 15:48:28 2017 -0700
+
+    include/linux/page_ref.h: ensure page_ref_unfreeze is ordered against prior accesses
+    
+    page_ref_freeze and page_ref_unfreeze are designed to be used as a pair,
+    wrapping a critical section where struct pages can be modified without
+    having to worry about consistency for a concurrent fast-GUP.
+    
+    Whilst page_ref_freeze has full barrier semantics due to its use of
+    atomic_cmpxchg, page_ref_unfreeze is implemented using atomic_set, which
+    doesn't provide any barrier semantics and allows the operation to be
+    reordered with respect to page modifications in the critical section.
+    
+    This patch ensures that page_ref_unfreeze is ordered after any critical
+    section updates, by invoking smp_mb() prior to the atomic_set.
+    
+    Link: http://lkml.kernel.org/r/1497349722-6731-3-git-send-email-will.deacon@arm.com
+    Signed-off-by: Will Deacon <will.deacon@arm.com>
+    Acked-by: Steve Capper <steve.capper@arm.com>
+    Acked-by: Kirill A. Shutemov <kirill.shutemov@linux.intel.com>
+    Cc: Mark Rutland <mark.rutland@arm.com>
+    Cc: Mel Gorman <mgorman@suse.de>
+    Cc: Vlastimil Babka <vbabka@suse.cz>
+    Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+    Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/include/linux/page_ref.h b/include/linux/page_ref.h
+index 610e13271918..1fd71733aa68 100644
+--- a/include/linux/page_ref.h
++++ b/include/linux/page_ref.h
+@@ -174,6 +174,7 @@ static inline void page_ref_unfreeze(struct page *page, int count)
+ 	VM_BUG_ON_PAGE(page_count(page) != 0, page);
+ 	VM_BUG_ON(count == 0);
+ 
++	smp_mb();
+ 	atomic_set(&page->_refcount, count);
+ 	if (page_ref_tracepoint_active(__tracepoint_page_ref_unfreeze))
+ 		__page_ref_unfreeze(page, count);
