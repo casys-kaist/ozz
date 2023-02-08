@@ -4,3 +4,8 @@
   io_cqring_ev_posted_iopoll() (calling waitqueue_active()). Thus, the
   store buffer emulation cannot trigger the bug. This can be triggered
   if we develop a mechanism to prefetch loads.
+
+- 45da9c1767ac31857df572f0a909fbe88fd5a7e9:
+  This happened in reality, but we cannot trigger the bug since it
+  happened in the async thread. By the design of Syzkaller, it is hard
+  to track the execution path of async threads.
