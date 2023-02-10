@@ -1,7 +1,7 @@
 #!/bin/sh -e
 
 if [ -z $SUFFIX ]; then
-	_SUFFIX=$(git rev-parse --abbrev-ref HEAD)
+	_SUFFIX=$(cd $KERNELS_DIR/linux; git rev-parse --abbrev-ref HEAD)
 else
 	_SUFFIX=$SUFFIX
 fi
