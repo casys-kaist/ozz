@@ -17,6 +17,7 @@ import (
 	"unsafe"
 
 	"github.com/google/syzkaller/pkg/cover"
+	"github.com/google/syzkaller/pkg/interleaving"
 	"github.com/google/syzkaller/pkg/osutil"
 	"github.com/google/syzkaller/pkg/signal"
 	"github.com/google/syzkaller/prog"
@@ -84,6 +85,7 @@ const (
 	CallFinished                            // finished executing (rather than blocked forever)
 	CallBlocked                             // finished but blocked during execution
 	CallFaultInjected                       // fault was injected into this call
+	CallRetry
 )
 
 type CallInfo struct {
@@ -91,8 +93,17 @@ type CallInfo struct {
 	Signal []uint32 // feedback signal, filled if FlagSignal is set
 	Cover  []uint32 // per-call coverage, filled if FlagSignal is set and cover == true,
 	// if dedup == false, then cov effectively contains a trace, otherwise duplicates are removed
-	Comps prog.CompMap // per-call comparison operands
-	Errno int          // call errno (0 if the call was successful)
+	Comps  prog.CompMap // per-call comparison operands
+	Access interleaving.SerialAccess
+	Errno  int // call errno (0 if the call was successful)
+	// information about what happened for each schedpoint
+	SchedpointOutcome []SchedpointOutcome
+	ConcurrencyInfo
+}
+
+type ConcurrencyInfo struct {
+	Thread uint64
+	Epoch  uint64
 }
 
 type ProgInfo struct {
@@ -356,6 +367,10 @@ func (env *Env) parseOutput(p *prog.Prog, opts *ExecOpts) (*ProgInfo, error) {
 			}
 			inf.Errno = int(reply.errno)
 			inf.Flags = CallFlags(reply.flags)
+			inf.ConcurrencyInfo = ConcurrencyInfo{
+				Thread: p.Calls[reply.index].Thread,
+				Epoch:  p.Calls[reply.index].Epoch,
+			}
 		} else {
 			extraParts = append(extraParts, CallInfo{})
 			inf = &extraParts[len(extraParts)-1]
@@ -368,11 +383,24 @@ func (env *Env) parseOutput(p *prog.Prog, opts *ExecOpts) (*ProgInfo, error) {
 			return nil, fmt.Errorf("call %v/%v/%v: cover overflow: %v/%v",
 				i, reply.index, reply.num, reply.coverSize, len(out))
 		}
+		if inf.Access, ok = readReadFromCoverages(&out, reply.rfCoverSize, inf); !ok {
+			return nil, fmt.Errorf("call %v/%v%v: rfcover overflow: %v/%v",
+				i, reply.index, reply.num, reply.rfCoverSize, len(out))
+		}
+		if p.Threaded && !p.IsContender(int(reply.index)) {
+			// If p is threaded, and the call is not a contender, we
+			// don't need to keep Accesses.
+			inf.Access = nil
+		}
 		comps, err := readComps(&out, reply.compsSize)
 		if err != nil {
 			return nil, err
 		}
 		inf.Comps = comps
+		if inf.SchedpointOutcome, ok = readFootprint(&out, reply.footprintSize); !ok {
+			return nil, fmt.Errorf("call %v/%v%v: footprint: %v/%v",
+				i, reply.index, reply.num, reply.footprintSize, len(out))
+		}
 	}
 	if len(extraParts) == 0 {
 		return info, nil
@@ -487,6 +515,54 @@ func readUint32Array(outp *[]byte, size uint32) ([]uint32, bool) {
 	return res, true
 }
 
+func readReadFromCoverages(outp *[]byte, size uint32, inf *CallInfo) (interleaving.SerialAccess, bool) {
+	array, ok := readUint32Array(outp, size*5)
+	if !ok {
+		return nil, false
+	}
+	if len(array)%5 != 0 {
+		return nil, false
+	}
+	var res interleaving.SerialAccess
+	for i := 0; i < len(array); i += 5 {
+		res = append(res, interleaving.Access{
+			Inst:      array[i],
+			Addr:      array[i+1],
+			Size:      array[i+2],
+			Typ:       array[i+3],
+			Timestamp: array[i+4],
+			Thread:    inf.Thread,
+			// Epoch: inf.Epoch,
+		})
+	}
+	return res, true
+}
+
+type SchedpointOutcome struct {
+	Order     uint32
+	Footprint Footprint
+}
+
+type Footprint uint32
+
+func readFootprint(outp *[]byte, size uint32) ([]SchedpointOutcome, bool) {
+	array, ok := readUint32Array(outp, size*2)
+	if !ok {
+		return nil, false
+	}
+	if len(array)%2 != 0 {
+		return nil, false
+	}
+	res := make([]SchedpointOutcome, 0, size)
+	for i := 0; i < len(array); i += 2 {
+		res = append(res, SchedpointOutcome{
+			Order:     array[i],
+			Footprint: Footprint(array[i+1]),
+		})
+	}
+	return res, true
+}
+
 type command struct {
 	pid      int
 	config   *Config
@@ -546,6 +622,10 @@ type callReply struct {
 	signalSize uint32
 	coverSize  uint32
 	compsSize  uint32
+	// Read-from coverage
+	rfCoverSize uint32
+	// Footprint of each schedpoint
+	footprintSize uint32
 	// signal/cover/comps follow
 }
 
@@ -795,6 +875,8 @@ func (c *command) exec(opts *ExecOpts, progData []byte) (output []byte, hanged b
 			exitStatus = int(reply.status)
 			break
 		}
+		// NOTE: In this project (i.e., relrazzer), below codes will
+		// never be executed.
 		callReply := &callReply{}
 		callReplyData := (*[unsafe.Sizeof(*callReply)]byte)(unsafe.Pointer(callReply))[:]
 		if _, err := io.ReadFull(c.inrp, callReplyData); err != nil {

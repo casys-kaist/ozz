@@ -6,12 +6,21 @@ package prog
 import (
 	"fmt"
 	"reflect"
+
+	"github.com/google/syzkaller/pkg/ssb"
 )
 
 type Prog struct {
 	Target   *Target
 	Calls    []*Call
 	Comments []string
+	// TODO: Razzer mechanism. if Threaded is true, p is already
+	// threaded so we don't thread it more. This is possibly a
+	// limittation of Razzer. Improve this if possible.
+	Threaded bool
+	Contender
+	Schedule
+	ssb.FlushVector
 }
 
 // These properties are parsed and serialized according to the tag and the type
@@ -29,6 +38,8 @@ type Call struct {
 	Args    []Arg
 	Ret     *ResultArg
 	Props   CallProps
+	Thread  uint64
+	Epoch   uint64
 	Comment string
 }
 
@@ -346,6 +357,12 @@ func (p *Prog) insertBefore(c *Call, calls []*Call) {
 		newCalls = append(newCalls, p.Calls[idx+1:]...)
 	}
 	p.Calls = newCalls
+	inserted := len(calls)
+	for i, ci := range p.Contender.Calls {
+		if idx <= ci {
+			p.Contender.Calls[i] += inserted
+		}
+	}
 }
 
 // replaceArg replaces arg with arg1 in a program.
@@ -430,6 +447,11 @@ func (p *Prog) RemoveCall(idx int) {
 	}
 	copy(p.Calls[idx:], p.Calls[idx+1:])
 	p.Calls = p.Calls[:len(p.Calls)-1]
+	for i, ci := range p.Contender.Calls {
+		if idx <= ci {
+			p.Contender.Calls[i]--
+		}
+	}
 }
 
 func (p *Prog) sanitizeFix() {
@@ -456,4 +478,79 @@ func (props *CallProps) ForeachProp(f func(fieldName, key string, value reflect.
 		fieldType := typeObj.Field(i)
 		f(fieldType.Name, fieldType.Tag.Get("key"), fieldValue)
 	}
+}
+
+type epochContext struct {
+	p      *Prog
+	epoch  uint64
+	thr    []bool
+	maxThr int
+}
+
+func (ctx *epochContext) newEpoch() {
+	ctx.epoch += 1
+	ctx.thr = make([]bool, ctx.maxThr)
+}
+
+func (ctx *epochContext) doneEpoch(c *Call) bool {
+	return ctx.thr[c.Thread]
+}
+
+func (ctx *epochContext) useThread(thr uint64) {
+	ctx.thr[thr] = true
+}
+
+func (p *Prog) fixupEpoch() {
+	// XXX: we don't really need this. The only case that epochs are
+	// incorrect is p is a sequential program. Otherwise, our
+	// implmenetaion is somewhere incorrect.
+	if p.Threaded {
+		return
+	}
+
+	const undefined = ^uint64(0)
+	// TODO: fix maxThr
+	maxThr := 3
+	ctx := &epochContext{
+		p:      p,
+		epoch:  0,
+		thr:    make([]bool, maxThr),
+		maxThr: maxThr,
+	}
+
+	for _, c := range p.Calls {
+		newepoch := false
+		if c.Epoch == undefined || c.Thread == undefined {
+			// NOTE: we do not allow only one of epoch and thread is
+			// undefined, and in that case, just consider both are
+			// undefined
+			newepoch = true
+			// the new epoch is about to start. thread 0 should be
+			// safe.
+			c.Thread = 0
+		}
+		if !newepoch && ctx.doneEpoch(c) {
+			newepoch = true
+		}
+		if newepoch {
+			ctx.newEpoch()
+		}
+		c.Epoch = ctx.epoch
+		ctx.useThread(c.Thread)
+	}
+}
+
+func (p *Prog) Frame() (uint64, uint64) {
+	thread, epoch := uint64(0), uint64(0)
+	for i := 0; i < len(p.Calls); i++ {
+		if thread < p.Calls[i].Thread {
+			thread = p.Calls[i].Thread
+		}
+		if epoch < p.Calls[i].Epoch {
+			epoch = p.Calls[i].Epoch
+		}
+	}
+	// the size of the frame is one larger than the max thread id and
+	// the max epoch.
+	return thread + 1, epoch + 1
 }

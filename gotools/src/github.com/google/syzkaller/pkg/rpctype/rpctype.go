@@ -9,6 +9,7 @@ import (
 	"math"
 
 	"github.com/google/syzkaller/pkg/host"
+	"github.com/google/syzkaller/pkg/interleaving"
 	"github.com/google/syzkaller/pkg/ipc"
 	"github.com/google/syzkaller/pkg/signal"
 )
@@ -20,6 +21,12 @@ type Input struct {
 	Cover    []uint32
 	CallID   int // seq number of call in the prog to which the item is related (-1 for extra)
 	RawCover []uint32
+}
+
+type ScheduledInput struct {
+	Prog   []byte
+	Cover  []uint32
+	Signal interleaving.SerialSignal
 }
 
 type Candidate struct {
@@ -70,17 +77,30 @@ type NewInputArgs struct {
 	Input
 }
 
+type NewScheduledInputArgs struct {
+	Name string
+	ScheduledInput
+}
+
 type PollArgs struct {
-	Name           string
-	NeedCandidates bool
-	MaxSignal      signal.Serial
-	Stats          map[string]uint64
+	Name             string
+	NeedCandidates   bool
+	MaxSignal        signal.Serial
+	MaxInterleaving  interleaving.SerialSignal
+	MaxCommunication interleaving.SerialSignal
+	Stats            map[string]uint64
+	Collections      map[string]uint64
+
+	InstCount []uint32
 }
 
 type PollRes struct {
-	Candidates []Candidate
-	NewInputs  []Input
-	MaxSignal  signal.Serial
+	Candidates       []Candidate
+	NewInputs        []Input
+	MaxSignal        signal.Serial
+	MaxInterleaving  interleaving.SerialSignal
+	MaxCommunication interleaving.SerialSignal
+	InstBlacklist    []uint32
 }
 
 type RunnerConnectArgs struct {

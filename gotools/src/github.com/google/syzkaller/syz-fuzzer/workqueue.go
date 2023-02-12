@@ -4,9 +4,12 @@
 package main
 
 import (
+	"math/rand"
 	"sync"
 
+	"github.com/google/syzkaller/pkg/interleaving"
 	"github.com/google/syzkaller/pkg/ipc"
+	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/prog"
 )
 
@@ -20,6 +23,7 @@ type WorkQueue struct {
 	candidate       []*WorkCandidate
 	triage          []*WorkTriage
 	smash           []*WorkSmash
+	threading       []*WorkThreading
 
 	procs          int
 	needCandidates chan struct{}
@@ -61,6 +65,14 @@ type WorkSmash struct {
 	call int
 }
 
+// WorkThreading are programs that are about to split into multiple
+// threads.
+type WorkThreading struct {
+	p     *prog.Prog
+	calls prog.Contender
+	knots []interleaving.Segment
+}
+
 func newWorkQueue(procs int, needCandidates chan struct{}) *WorkQueue {
 	return &WorkQueue{
 		procs:          procs,
@@ -82,6 +94,8 @@ func (wq *WorkQueue) enqueue(item interface{}) {
 		wq.candidate = append(wq.candidate, item)
 	case *WorkSmash:
 		wq.smash = append(wq.smash, item)
+	case *WorkThreading:
+		wq.threading = append(wq.threading, item)
 	default:
 		panic("unknown work type")
 	}
@@ -89,10 +103,12 @@ func (wq *WorkQueue) enqueue(item interface{}) {
 
 func (wq *WorkQueue) dequeue() (item interface{}) {
 	wq.mu.RLock()
-	if len(wq.triageCandidate)+len(wq.candidate)+len(wq.triage)+len(wq.smash) == 0 {
+	if len(wq.triageCandidate)+len(wq.candidate)+len(wq.triage)+len(wq.threading)+len(wq.smash) == 0 {
 		wq.mu.RUnlock()
 		return nil
 	}
+	log.Logf(1, "triageCandidate=%v candidate=%v threading=%v triage=%v smash=%v",
+		len(wq.triageCandidate), len(wq.candidate), len(wq.threading), len(wq.triage), len(wq.smash))
 	wq.mu.RUnlock()
 	wq.mu.Lock()
 	wantCandidates := false
@@ -105,10 +121,25 @@ func (wq *WorkQueue) dequeue() (item interface{}) {
 		item = wq.candidate[last]
 		wq.candidate = wq.candidate[:last]
 		wantCandidates = len(wq.candidate) < wq.procs
-	} else if len(wq.triage) != 0 {
-		last := len(wq.triage) - 1
-		item = wq.triage[last]
-		wq.triage = wq.triage[:last]
+	} else if len(wq.threading) != 0 || len(wq.triage) != 0 {
+		// We equally prioritize the triage queue and the threading
+		// queue.
+		threading := rand.Intn(2) == 0
+		if threading && len(wq.threading) == 0 {
+			threading = false
+		}
+		if !threading && len(wq.triage) == 0 {
+			threading = true
+		}
+		if threading {
+			last := len(wq.threading) - 1
+			item = wq.threading[last]
+			wq.threading = wq.threading[:last]
+		} else {
+			last := len(wq.triage) - 1
+			item = wq.triage[last]
+			wq.triage = wq.triage[:last]
+		}
 	} else if len(wq.smash) != 0 {
 		last := len(wq.smash) - 1
 		item = wq.smash[last]
@@ -121,6 +152,18 @@ func (wq *WorkQueue) dequeue() (item interface{}) {
 		default:
 		}
 	}
+	return item
+}
+
+func (wq *WorkQueue) dequeueThreading() *WorkThreading {
+	wq.mu.Lock()
+	defer wq.mu.Unlock()
+	if len(wq.threading) == 0 {
+		return nil
+	}
+	last := len(wq.threading) - 1
+	item := wq.threading[last]
+	wq.threading = wq.threading[:last]
 	return item
 }
 
