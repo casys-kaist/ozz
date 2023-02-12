@@ -22,6 +22,7 @@ require (
 	github.com/gorilla/handlers v1.5.1
 	github.com/ianlancetaylor/demangle v0.0.0-20210905161508-09a460cdf81d
 	github.com/kisielk/errcheck v1.6.2 // indirect
+	github.com/knightsc/gapstone v4.0.1+incompatible // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mgechev/revive v1.2.3 // indirect
 	github.com/polyfloyd/go-errorlint v1.0.2 // indirect

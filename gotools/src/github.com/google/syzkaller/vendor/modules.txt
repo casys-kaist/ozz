@@ -298,6 +298,9 @@ github.com/kisielk/errcheck/errcheck
 # github.com/kisielk/gotool v1.0.0
 github.com/kisielk/gotool
 github.com/kisielk/gotool/internal/load
+# github.com/knightsc/gapstone v4.0.1+incompatible
+## explicit
+github.com/knightsc/gapstone
 # github.com/kulti/thelper v0.6.3
 github.com/kulti/thelper/pkg/analyzer
 # github.com/kunwardeep/paralleltest v1.0.6
