@@ -10,9 +10,12 @@ import (
 func (p *Prog) Clone() *Prog {
 	newargs := make(map[*ResultArg]*ResultArg)
 	p1 := &Prog{
-		Target: p.Target,
-		Calls:  cloneCalls(p.Calls, newargs),
+		Target:    p.Target,
+		Calls:     cloneCalls(p.Calls, newargs),
+		Threaded:  p.Threaded,
+		Contender: Contender{Calls: append([]int{}, p.Contender.Calls...)},
 	}
+	scheduleClone(p, p1)
 	p1.debugValidate()
 	return p1
 }
@@ -30,9 +33,26 @@ func cloneCalls(origCalls []*Call, newargs map[*ResultArg]*ResultArg) []*Call {
 			c1.Args[ai] = clone(arg, newargs)
 		}
 		c1.Props = c.Props
+		c1.Thread, c1.Epoch = c.Thread, c.Epoch
 		calls[ci] = c1
 	}
 	return calls
+}
+
+func scheduleClone(p, p1 *Prog) {
+	for _, pnt := range p.Schedule.points {
+		pnt1 := Point{
+			addr:  pnt.addr,
+			order: pnt.order,
+		}
+		for ci, c := range p.Calls {
+			if pnt.call == c {
+				pnt1.call = p1.Calls[ci]
+				break
+			}
+		}
+		p1.Schedule.points = append(p1.Schedule.points, pnt1)
+	}
 }
 
 func clone(arg Arg, newargs map[*ResultArg]*ResultArg) Arg {

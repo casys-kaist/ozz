@@ -37,6 +37,7 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[
 		noMutate: noMutate,
 		corpus:   corpus,
 	}
+	ctx.initialize()
 	for stop, ok := false, false; !stop; stop = ok && len(p.Calls) != 0 && r.oneOf(3) {
 		switch {
 		case r.oneOf(5):
@@ -53,6 +54,11 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[
 			ok = ctx.removeCall()
 		}
 	}
+	ctx.checkContenders()
+	// Unthreading p before threading to prevent epochs from being
+	// messed up.
+	p.unthreading()
+	p.Threading(p.Contender)
 	p.sanitizeFix()
 	p.debugValidate()
 	if got := len(p.Calls); got < 1 || got > ncalls {
@@ -69,6 +75,26 @@ type mutator struct {
 	ct       *ChoiceTable // ChoiceTable for syscalls.
 	noMutate map[int]bool // Set of IDs of syscalls which should not be mutated.
 	corpus   []*Prog      // The entire corpus, including original program p.
+
+	contenders []string
+}
+
+func (ctx *mutator) initialize() {
+	for _, c := range ctx.p.Contenders() {
+		ctx.contenders = append(ctx.contenders, c.Meta.Name)
+	}
+}
+
+func (ctx *mutator) checkContenders() {
+	cs := ctx.p.Contenders()
+	if len(cs) != len(ctx.contenders) {
+		panic(fmt.Sprintf("wrong length, before=%v, after=%v", len(ctx.contenders), len(cs)))
+	}
+	for i, c := range cs {
+		if ctx.contenders[i] != c.Meta.Name {
+			panic(fmt.Sprintf("wrong contender at %d, before=%v, after=%v", i, ctx.contenders[i], c.Meta.Name))
+		}
+	}
 }
 
 // This function selects a random other program p0 out of the corpus, and
@@ -83,7 +109,17 @@ func (ctx *mutator) splice() bool {
 	p0c := p0.Clone()
 	idx := r.Intn(len(p.Calls))
 	p.Calls = append(p.Calls[:idx], append(p0c.Calls, p.Calls[idx:]...)...)
-	for i := len(p.Calls) - 1; i >= ctx.ncalls; i-- {
+
+	inserted := len(p0c.Calls)
+	for i := range p.Contender.Calls {
+		if idx <= p.Contender.Calls[i] {
+			p.Contender.Calls[i] += inserted
+		}
+	}
+	for i := len(p.Calls) - 1; len(p.Calls) >= ctx.ncalls; i-- {
+		if p.IsContender(i) {
+			continue
+		}
 		p.RemoveCall(i)
 	}
 	return true
@@ -152,6 +188,8 @@ func (ctx *mutator) insertCall() bool {
 	calls := r.generateCall(s, p, idx)
 	p.insertBefore(c, calls)
 	for len(p.Calls) > ctx.ncalls {
+		// NOTE: no need to check idx is a contender because this loop
+		// can be repeated until removing all inserted call
 		p.RemoveCall(idx)
 	}
 	return true
@@ -163,9 +201,16 @@ func (ctx *mutator) removeCall() bool {
 	if len(p.Calls) == 0 {
 		return false
 	}
-	idx := r.Intn(len(p.Calls))
-	p.RemoveCall(idx)
-	return true
+	for try := 0; try < 3; try++ {
+		idx := r.Intn(len(p.Calls))
+		// don't want to remove a contender if exists
+		if p.IsContender(idx) {
+			continue
+		}
+		p.RemoveCall(idx)
+		return true
+	}
+	return false
 }
 
 // Mutate an argument of a random call.

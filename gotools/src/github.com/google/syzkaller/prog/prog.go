@@ -45,9 +45,11 @@ type Call struct {
 
 func MakeCall(meta *Syscall, args []Arg) *Call {
 	return &Call{
-		Meta: meta,
-		Args: args,
-		Ret:  MakeReturnArg(meta.Ret),
+		Meta:   meta,
+		Args:   args,
+		Ret:    MakeReturnArg(meta.Ret),
+		Thread: ^uint64(0),
+		Epoch:  ^uint64(0),
 	}
 }
 
