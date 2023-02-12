@@ -31,6 +31,7 @@ const (
 	execInstrCopyin
 	execInstrCopyout
 	execInstrSetProps
+	execInstrEpoch
 )
 
 const (
@@ -64,16 +65,23 @@ var ErrExecBufferTooSmall = errors.New("encodingexec: provided buffer is too sma
 // Returns number of bytes written to the buffer.
 // If the provided buffer is too small for the program an error is returned.
 func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
+	if err := p.sanitizeRazzer(); err != nil {
+		panic(err)
+	}
 	p.debugValidate()
 	w := &execContext{
 		target: p.Target,
 		buf:    buffer,
 		eof:    false,
 		args:   make(map[Arg]argInfo),
+		epoch:  0,
 	}
-	for _, c := range p.Calls {
+	w.writeScheduleFilter(p)
+	w.writeFlushVector(p)
+	for i, c := range p.Calls {
 		w.csumMap, w.csumUses = calcChecksumsCall(c)
-		w.serializeCall(c)
+		w.serializeCall(c, p)
+		w.writeEpoch(c, i, p.Calls)
 	}
 	w.write(execInstrEOF)
 	if w.eof || w.copyoutSeq > execMaxCommands {
@@ -82,7 +90,48 @@ func (p *Prog) SerializeForExec(buffer []byte) (int, error) {
 	return len(buffer) - len(w.buf), nil
 }
 
-func (w *execContext) serializeCall(c *Call) {
+func (w *execContext) writeScheduleFilter(p *Prog) {
+	filter := p.Filter()
+	w.write(uint64(len(filter)))
+	for _, f := range filter {
+		w.write(uint64(f))
+	}
+}
+
+func (w *execContext) writeFlushVector(p *Prog) {
+	vec := p.FlushVector
+	w.write(uint64(vec.Len()))
+	for _, entry := range vec {
+		w.write(uint64(entry))
+	}
+}
+
+func (w *execContext) writeSchedule(c *Call, sched Schedule) {
+	match := sched.Match(c)
+	w.write(uint64(match.Len()))
+	for _, point := range match.points {
+		w.write(point.call.Thread)
+		w.write(point.addr)
+		w.write(point.order)
+	}
+}
+
+func (w *execContext) writeEpoch(c *Call, ci int, calls []*Call) {
+	// TODO: Razzer's mechanism.
+	for i := ci + 1; i < len(calls); i++ {
+		c0 := calls[i]
+		if c.Epoch == c0.Epoch {
+			// There is another Call that will run in the same epoch
+			// with c. Wait for the call and do not write
+			// execInstrEpoch.
+			return
+		}
+	}
+	// c is the last call in this epoch. Let's start the epoch.
+	w.write(execInstrEpoch)
+}
+
+func (w *execContext) serializeCall(c *Call, p *Prog) {
 	// Calculate arg offsets within structs.
 	// Generate copyin instructions that fill in data into pointer arguments.
 	w.writeCopyin(c)
@@ -109,7 +158,8 @@ func (w *execContext) serializeCall(c *Call) {
 	for _, arg := range c.Args {
 		w.writeArg(arg)
 	}
-
+	w.writeConcurrencyInfo(c.Thread, c.Epoch)
+	w.writeSchedule(c, p.Schedule)
 	// Generate copyout instructions that persist interesting return values.
 	w.writeCopyout(c)
 }
@@ -123,6 +173,8 @@ type execContext struct {
 	// Per-call state cached here to not pass it through all functions.
 	csumMap  map[Arg]CsumInfo
 	csumUses map[Arg]struct{}
+	// Current epoch
+	epoch uint64
 }
 
 type argInfo struct {
@@ -253,6 +305,11 @@ func (w *execContext) write(v uint64) {
 	}
 	HostEndian.PutUint64(w.buf, v)
 	w.buf = w.buf[8:]
+}
+
+func (w *execContext) writeConcurrencyInfo(thread, epoch uint64) {
+	w.write(thread)
+	w.write(epoch)
 }
 
 func (w *execContext) writeArg(arg Arg) {

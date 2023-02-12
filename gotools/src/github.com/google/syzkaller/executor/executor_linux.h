@@ -36,6 +36,27 @@ struct kcov_remote_arg {
 #define KCOV_SUBSYSTEM_MASK (0xffull << 56)
 #define KCOV_INSTANCE_MASK (0xffffffffull)
 
+#define KCOV_PATH "/sys/kernel/debug/kcov"
+
+enum kmemcov_access_type {
+	KMEMCOV_ACCESS_STORE,
+	KMEMCOV_ACCESS_LOAD,
+};
+
+struct kmemcov_access {
+	unsigned long inst;
+	unsigned long addr;
+	size_t size;
+	enum kmemcov_access_type type;
+	uint64_t timestamp;
+};
+
+#define KMEMCOV_INIT_TRACE _IO('d', 100)
+#define KMEMCOV_ENABLE _IO('d', 101)
+#define KMEMCOV_DISABLE _IO('d', 102)
+
+#define KMEMCOV_PATH "/sys/kernel/debug/kmemcov"
+
 static bool is_gvisor;
 
 static inline __u64 kcov_remote_handle(__u64 subsys, __u64 inst)
@@ -52,7 +73,13 @@ static void os_init(int argc, char** argv, char* data, size_t data_size)
 {
 	prctl(PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0);
 	is_kernel_64_bit = detect_kernel_bitness();
+	if (!is_kernel_64_bit)
+		// XXX: In this project, we support only 64-bit kernels.
+		fail("kernel is not 64 bit");
 	is_gvisor = detect_gvisor();
+	if (is_gvisor)
+		// XXX: In this project, we support only Linux
+		fail("kernel is gvisor");
 	// Surround the main data mapping with PROT_NONE pages to make virtual address layout more consistent
 	// across different configurations (static/non-static build) and C repros.
 	// One observed case before: executor had a mapping above the data mapping (output region),
@@ -76,19 +103,35 @@ static intptr_t execute_syscall(const call_t* c, intptr_t a[kMaxArgs])
 	return syscall(c->sys_nr, a[0], a[1], a[2], a[3], a[4], a[5]);
 }
 
-static void cover_open(cover_t* cov, bool extra)
+static int __cover_open_kcov_fd(cover_t* cov)
 {
-	int fd = open("/sys/kernel/debug/kcov", O_RDWR);
+	int fd = open(KCOV_PATH, O_RDWR);
 	if (fd == -1)
 		fail("open of /sys/kernel/debug/kcov failed");
+	return fd;
+}
+
+static int __cover_open_kmemcov_fd(cover_t* cov)
+{
+	int fd = open(KMEMCOV_PATH, O_RDWR);
+	if (fd == -1)
+		fail("open of /sys/kernel/debug/kmemcov failed");
+	return fd;
+}
+
+static void cover_open(cover_t* cov, bool extra)
+{
+	int fd = (cov->type == code_coverage ? __cover_open_kcov_fd(cov) : __cover_open_kmemcov_fd(cov));
+	// NOTE: fd is guaranteed not to be -1. See __cover_open_*_fd().
 	if (dup2(fd, cov->fd) < 0)
-		failmsg("filed to dup cover fd", "from=%d, to=%d", fd, cov->fd);
+		failmsg("failed to dup cover fd", "from=%d, to=%d", fd, cov->fd);
 	close(fd);
-	const int kcov_init_trace = is_kernel_64_bit ? KCOV_INIT_TRACE64 : KCOV_INIT_TRACE32;
+	const int cov_init_trace = (cov->type == code_coverage ? (is_kernel_64_bit ? KCOV_INIT_TRACE64 : KCOV_INIT_TRACE32) : KMEMCOV_INIT_TRACE);
 	const int cover_size = extra ? kExtraCoverSize : kCoverSize;
-	if (ioctl(cov->fd, kcov_init_trace, cover_size))
-		fail("cover init trace write failed");
-	cov->mmap_alloc_size = cover_size * (is_kernel_64_bit ? 8 : 4);
+	if (ioctl(cov->fd, cov_init_trace, cover_size))
+		failmsg("cover init trace write failed", "fd=%d", cov->fd);
+	uint64 mmap_alloc_scale = (cov->type == code_coverage ? (is_kernel_64_bit ? 8 : 4) : sizeof(struct kmemcov_access));
+	cov->mmap_alloc_size = cover_size * mmap_alloc_scale;
 }
 
 static void cover_protect(cover_t* cov)
@@ -110,13 +153,13 @@ static void cover_mmap(cover_t* cov)
 	cov->data = (char*)mmap(NULL, cov->mmap_alloc_size,
 				PROT_READ | PROT_WRITE, MAP_SHARED, cov->fd, 0);
 	if (cov->data == MAP_FAILED)
-		exitf("cover mmap failed");
+		exitf("cover mmap failed, fd=%d", cov->fd);
 	cov->data_end = cov->data + cov->mmap_alloc_size;
 	cov->data_offset = is_kernel_64_bit ? sizeof(uint64_t) : sizeof(uint32_t);
 	cov->pc_offset = 0;
 }
 
-static void cover_enable(cover_t* cov, bool collect_comps, bool extra)
+static void cover_kcov_enable(cover_t* cov, bool collect_comps, bool extra)
 {
 	unsigned int kcov_mode = collect_comps ? KCOV_TRACE_CMP : KCOV_TRACE_PC;
 	// The KCOV_ENABLE call should be fatal,
@@ -124,7 +167,7 @@ static void cover_enable(cover_t* cov, bool collect_comps, bool extra)
 	// so we use exitf.
 	if (!extra) {
 		if (ioctl(cov->fd, KCOV_ENABLE, kcov_mode))
-			exitf("cover enable write trace failed, mode=%d", kcov_mode);
+			exitf("cover enable write trace failed, fd=%d mode=%d", cov->fd, kcov_mode);
 		return;
 	}
 	kcov_remote_arg<1> arg = {
@@ -137,6 +180,30 @@ static void cover_enable(cover_t* cov, bool collect_comps, bool extra)
 	arg.handles[0] = kcov_remote_handle(KCOV_SUBSYSTEM_USB, procid + 1);
 	if (ioctl(cov->fd, KCOV_REMOTE_ENABLE, &arg))
 		exitf("remote cover enable write trace failed");
+	exitf("remote cover enable write trace failed, fd=%d", cov->fd);
+}
+
+static void cover_kmemcov_enable(cover_t* cov, bool collect_comps, bool extra)
+{
+	if (collect_comps || extra)
+		// extra is possibly useful, but at this point, we
+		// don't plan to use it.
+		failmsg("wrong arguments in cover_kmemcov_enable", "fd=%d, collect_comps=%d, extra=%d", cov->fd, collect_comps, extra);
+	if (ioctl(cov->fd, KMEMCOV_ENABLE, 0))
+		exitf("rfcover enable write trace failed, fd=%d", cov->fd);
+}
+
+static void cover_enable(cover_t* cov, bool collect_comps, bool extra)
+{
+	if (cov->type == code_coverage)
+		cover_kcov_enable(cov, collect_comps, extra);
+	else
+		cover_kmemcov_enable(cov, collect_comps, extra);
+}
+
+static void __cover_reset(cover_t* cov)
+{
+	*(uint64*)cov->data = 0;
 }
 
 static void cover_reset(cover_t* cov)
@@ -147,9 +214,20 @@ static void cover_reset(cover_t* cov)
 	if (cov == 0) {
 		if (current_thread == 0)
 			fail("cover_reset: current_thread == 0");
-		cov = &current_thread->cov;
+		__cover_reset(&current_thread->cov);
+		__cover_reset(&current_thread->rfcov);
+	} else {
+		__cover_reset(cov);
 	}
-	*(uint64*)cov->data = 0;
+}
+
+static void cover_init(cover_t* cov, int fd, enum cov_type type)
+{
+	debug("cover init: fd=%d, type=%d\n", fd, type);
+	cov->fd = fd;
+	cov->type = type;
+	cover_open(cov, false);
+	cover_protect(cov);
 }
 
 static void cover_collect(cover_t* cov)

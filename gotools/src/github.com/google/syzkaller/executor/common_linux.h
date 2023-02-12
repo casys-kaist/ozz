@@ -2758,6 +2758,8 @@ static void initialize_vhci()
 	if (write(vhci_fd, &vendor_pkt_req, sizeof(vendor_pkt_req)) != sizeof(vendor_pkt_req))
 		fail("vendor_pkt_req write failed");
 
+	bool first_read = true;
+retry:
 	struct vhci_pkt vhci_pkt;
 	if (read(vhci_fd, &vhci_pkt, sizeof(vhci_pkt)) != sizeof(vhci_pkt))
 		fail("vhci_pkt read failed");
@@ -2770,8 +2772,20 @@ static void initialize_vhci()
 			fail("vhci_pkt read failed");
 	}
 
-	if (vhci_pkt.type != HCI_VENDOR_PKT)
-		fail("wrong response packet");
+	if (vendor_pkt_req.type != HCI_VENDOR_PKT) {
+		if (vendor_pkt_req.type == 1 && first_read) {
+			// XXX: This seems like a race condition between
+			// hci_send_frame() and __vhci_create_device() in a
+			// kernel. I can reproduce this syzfail with
+			// tests/vhci_init_test.c (which is not affected by my
+			// modification) in the lastest kernel (v5.18, 4b0986a36).
+			// I'm not sure this is a bug or not, but it is not our
+			// fault anyway, so let's ignore it.
+			first_read = false;
+			goto retry;
+		}
+		failmsg("wrong response packet", "expected=%d, got=%d", HCI_VENDOR_PKT, vendor_pkt_req.type);
+	}
 
 	int dev_id = vhci_pkt.vendor_pkt.id;
 	debug("hci dev id: %x\n", dev_id);
@@ -3712,11 +3726,14 @@ static void setup_cgroups_loop()
 	if (mkdir(cgroupdir, 0777)) {
 		debug("mkdir(%s) failed: %d\n", cgroupdir, errno);
 	}
-	// Restrict number of pids per test process to prevent fork bombs.
-	// We have up to 16 threads + main process + loop.
-	// 32 pids should be enough for everyone.
+	// Syzkaller comment:
+	//   Restrict number of pids per test process to prevent fork bombs.
+	//   We have up to 16 threads + main process + loop.
+	//   32 pids should be enough for everyone.
+	// And we create more threads when a threads is blocked, so let's
+	// double the number of threads
 	snprintf(file, sizeof(file), "%s/pids.max", cgroupdir);
-	write_file(file, "32");
+	write_file(file, "64");
 	// Restrict memory consumption.
 	// We have some syscalls that inherently consume lots of memory,
 	// e.g. mounting some filesystem images requires at least 128MB
@@ -4615,8 +4632,8 @@ static void kill_and_wait(int pid, int* status)
 {
 	kill(-pid, SIGKILL);
 	kill(pid, SIGKILL);
-	// First, give it up to 100 ms to surrender.
-	for (int i = 0; i < 100; i++) {
+	// First, give it up to 600 ms to surrender.
+	for (int i = 0; i < 600; i++) {
 		if (waitpid(-1, status, WNOHANG | __WALL) == pid)
 			return;
 		usleep(1000);

@@ -35,6 +35,7 @@ func (p *Prog) SerializeVerbose() []byte {
 }
 
 func (p *Prog) serialize(verbose bool) []byte {
+	p.fixupEpoch()
 	p.debugValidate()
 	ctx := &serializer{
 		target:  p.Target,
@@ -45,6 +46,7 @@ func (p *Prog) serialize(verbose bool) []byte {
 	for _, c := range p.Calls {
 		ctx.call(c)
 	}
+	ctx.schedule(p)
 	return ctx.buf.Bytes()
 }
 
@@ -110,7 +112,17 @@ func (ctx *serializer) call(c *Call) {
 		ctx.printf(")")
 	}
 
+	ctx.printf(")")
+	ctx.printf(" <0x%x, 0x%x>", c.Thread, c.Epoch)
 	ctx.printf("\n")
+}
+
+func (ctx *serializer) schedule(p *Prog) {
+	sched := p.Schedule
+	for _, pnt := range sched.points {
+		idx := sched.CallIndex(pnt.call, p)
+		ctx.printf("#-- 0x%x, 0x%x, 0x%x\n", idx, pnt.addr, pnt.order)
+	}
 }
 
 func (ctx *serializer) arg(arg Arg) {
@@ -300,6 +312,7 @@ func (p *parser) parseProg() (*Prog, error) {
 			return nil, fmt.Errorf("unknown syscall %v", name)
 		}
 		c := MakeCall(meta, nil)
+		c.Thread, c.Epoch = 0, 0
 		c.Comment = p.comment
 		prog.Calls = append(prog.Calls, c)
 		p.Parse('(')
@@ -330,6 +343,20 @@ func (p *parser) parseProg() (*Prog, error) {
 		}
 
 		if !p.EOF() {
+			if p.Char() == '<' {
+				// Parse our modificaiton of Prog. Syzkaller's Prog does
+				// not have this part
+				p.Parse('<')
+				thread, epoch, err := p.parseConcurrencyInfo()
+				if err != nil {
+					return nil, err
+				}
+				c.Thread, c.Epoch = thread, epoch
+				p.Parse('>')
+				p.SkipWs()
+			}
+		}
+		if !p.EOF() {
 			if p.Char() != '#' {
 				return nil, fmt.Errorf("tailing data (line #%v)", p.l)
 			}
@@ -353,7 +380,91 @@ func (p *parser) parseProg() (*Prog, error) {
 	if p.comment != "" {
 		prog.Comments = append(prog.Comments, p.comment)
 	}
+	if err := p.postProcess(prog); err != nil {
+		return nil, err
+	}
 	return prog, nil
+}
+
+func (p *parser) postProcess(prog *Prog) error {
+	if err := p.parseSchedule(prog); err != nil {
+		return err
+	}
+	if err := p.inspectThreaded(prog); err != nil {
+		return err
+	}
+	if err := prog.sanitizeRazzer(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *parser) inspectThreaded(prog *Prog) error {
+	if prog.Schedule.Len() == 0 {
+		prog.Threaded = false
+		return nil
+	}
+	for ci, c := range prog.Calls {
+		if prog.Schedule.Match(c).Len() != 0 {
+			prog.Contender.Calls = append(prog.Contender.Calls, ci)
+		}
+	}
+	if len(prog.Contender.Calls) != 2 {
+		return fmt.Errorf("wrong number of calls: %d", len(prog.Contender.Calls))
+	}
+	prog.Threaded = true
+	return nil
+}
+
+func (p *parser) parseConcurrencyInfo() (uint64, uint64, error) {
+	val := p.Ident()
+	thread, err := strconv.ParseUint(val, 0, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	p.Parse(',')
+	val = p.Ident()
+	epoch, err := strconv.ParseUint(val, 0, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	return thread, epoch, nil
+}
+
+func (p *parser) parseSchedule(prog *Prog) error {
+	// NOTE: serializing/deserializing our schedule relies on
+	// syzkaller's comment. inspect comments to see if they describe
+	// our schedule.
+	s := Schedule{}
+	new := []string{}
+	for _, comment := range prog.Comments {
+		if strings.HasPrefix(comment, "-- ") {
+			a := []uint64{}
+			for _, token := range strings.Split(comment[3:], ", ") {
+				u, err := strconv.ParseUint(token, 0, 64)
+				if err != nil {
+					return err
+				}
+				a = append(a, u)
+			}
+			if len(a) != 3 {
+				return fmt.Errorf("wrong fields count of schedule: %v", comment)
+			}
+			if int(a[0]) > len(prog.Calls) {
+				return fmt.Errorf("wrong call index: %d, %v", int(a[0]), comment)
+			}
+			s.points = append(s.points, Point{
+				call:  prog.Calls[int(a[0])],
+				addr:  a[1],
+				order: a[2],
+			})
+		} else {
+			new = append(new, comment)
+		}
+	}
+	prog.Schedule = s
+	prog.Comments = new
+	return nil
 }
 
 func (p *parser) parseCallProps() CallProps {

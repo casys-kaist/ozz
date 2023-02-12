@@ -66,11 +66,26 @@ NORETURN void doexit_thread(int status)
 #endif
 #endif
 
+#include "hypercall.h"
+
+static void enable_kssb(void)
+{
+	hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
+}
+
+static void disable_kssb(void)
+{
+	hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
+}
+
 #if SYZ_EXECUTOR || SYZ_MULTI_PROC || SYZ_REPEAT && SYZ_CGROUPS ||         \
     SYZ_NET_DEVICES || __NR_syz_mount_image || __NR_syz_read_part_table || \
     __NR_syz_usb_connect || __NR_syz_usb_connect_ath9k ||                  \
     (GOOS_freebsd || GOOS_darwin || GOOS_openbsd || GOOS_netbsd) && SYZ_NET_INJECTION
 static unsigned long long procid;
+#endif
+#if SYZ_EXECUTOR
+static __thread unsigned int threadid = -1;
 #endif
 
 #if !GOOS_fuchsia && !GOOS_windows
@@ -622,6 +637,8 @@ static void execute_one(void);
 static void reply_handshake();
 #endif
 
+// #define __DEBUG_THROUGHPUT
+
 static void loop(void)
 {
 #if SYZ_HAVE_SETUP_LOOP
@@ -686,9 +703,14 @@ static void loop(void)
 #if SYZ_EXECUTOR && SYZ_EXECUTOR_USES_SHMEM
 			close(kOutPipeFd);
 #endif
+			enable_kssb();
 			execute_one();
+			disable_kssb();
 #if SYZ_HAVE_CLOSE_FDS && !SYZ_THREADED
 			close_fds();
+#endif
+#ifdef __DEBUG_THROUGHPUT
+			debug("      do_exit: %llx\n", current_time_ms());
 #endif
 			doexit(0);
 #endif
@@ -745,10 +767,13 @@ static void loop(void)
 			if (current_time_ms() - start < /*{{{PROGRAM_TIMEOUT_MS}}}*/)
 				continue;
 #endif
-			debug("killing hanging pid %d\n", pid);
+			debug("killing hanging pid %d, executed=%d\n", pid, executed_calls);
 			kill_and_wait(pid, &status);
 			break;
 		}
+#ifdef __DEBUG_THROUGHPUT
+		debug("after waitloop: %llx\n", current_time_ms());
+#endif
 #if SYZ_EXECUTOR
 		if (WEXITSTATUS(status) == kFailStatus) {
 			errno = 0;
