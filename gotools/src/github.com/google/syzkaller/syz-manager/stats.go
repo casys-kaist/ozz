@@ -19,6 +19,7 @@ type Stats struct {
 	crashSuppressed     Stat
 	vmRestarts          Stat
 	newInputs           Stat
+	newScheduledInputs  Stat
 	rotatedInputs       Stat
 	execTotal           Stat
 	hubSendProgAdd      Stat
@@ -31,7 +32,12 @@ type Stats struct {
 	corpusCover         Stat
 	corpusCoverFiltered Stat
 	corpusSignal        Stat
+	corpusInterleaving  Stat
+	corpusKnots         Stat
 	maxSignal           Stat
+	maxInterleaving     Stat
+	instBlacklist       Stat
+	maxCommunication    Stat
 
 	mu         sync.Mutex
 	namedStats map[string]uint64
@@ -62,17 +68,23 @@ func (mgr *Manager) initStats() {
 
 func (stats *Stats) all() map[string]uint64 {
 	m := map[string]uint64{
-		"crashes":           stats.crashes.get(),
-		"crash types":       stats.crashTypes.get(),
-		"suppressed":        stats.crashSuppressed.get(),
-		"vm restarts":       stats.vmRestarts.get(),
-		"new inputs":        stats.newInputs.get(),
-		"rotated inputs":    stats.rotatedInputs.get(),
-		"exec total":        stats.execTotal.get(),
-		"coverage":          stats.corpusCover.get(),
-		"filtered coverage": stats.corpusCoverFiltered.get(),
-		"signal":            stats.corpusSignal.get(),
-		"max signal":        stats.maxSignal.get(),
+		"crashes":               stats.crashes.get(),
+		"crash types":           stats.crashTypes.get(),
+		"suppressed":            stats.crashSuppressed.get(),
+		"vm restarts":           stats.vmRestarts.get(),
+		"new inputs":            stats.newInputs.get(),
+		"new scheduled inputs":  stats.newScheduledInputs.get(),
+		"rotated inputs":        stats.rotatedInputs.get(),
+		"exec total":            stats.execTotal.get(),
+		"coverage":              stats.corpusCover.get(),
+		"filtered coverage":     stats.corpusCoverFiltered.get(),
+		"signal":                stats.corpusSignal.get(),
+		"interleaving signal":   stats.corpusInterleaving.get(),
+		"interleaving cover":    stats.corpusKnots.get(),
+		"max signal":            stats.maxSignal.get(),
+		"max interleaving":      stats.maxInterleaving.get(),
+		"instruction blacklist": stats.instBlacklist.get(),
+		"max communication":     stats.maxCommunication.get(),
 	}
 	if stats.haveHub {
 		m["hub: send prog add"] = stats.hubSendProgAdd.get()
@@ -104,6 +116,17 @@ func (stats *Stats) mergeNamed(named map[string]uint64) {
 		default:
 			stats.namedStats[k] += v
 		}
+	}
+}
+
+func (stats *Stats) replaceNamed(named map[string]uint64) {
+	stats.mu.Lock()
+	defer stats.mu.Unlock()
+	if stats.namedStats == nil {
+		stats.namedStats = make(map[string]uint64)
+	}
+	for k, v := range named {
+		stats.namedStats[k] = v
 	}
 }
 

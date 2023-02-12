@@ -5,22 +5,26 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
+	golog "log"
 	"math/rand"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/google/syzkaller/dashboard/dashapi"
 	"github.com/google/syzkaller/pkg/asset"
+	"github.com/google/syzkaller/pkg/binimage"
 	"github.com/google/syzkaller/pkg/cover"
 	"github.com/google/syzkaller/pkg/csource"
 	"github.com/google/syzkaller/pkg/db"
@@ -28,6 +32,7 @@ import (
 	"github.com/google/syzkaller/pkg/hash"
 	"github.com/google/syzkaller/pkg/host"
 	"github.com/google/syzkaller/pkg/instance"
+	"github.com/google/syzkaller/pkg/interleaving"
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/pkg/mgrconfig"
 	"github.com/google/syzkaller/pkg/osutil"
@@ -41,32 +46,47 @@ import (
 )
 
 var (
-	flagConfig = flag.String("config", "", "configuration file")
-	flagDebug  = flag.Bool("debug", false, "dump all VM output to console")
-	flagBench  = flag.String("bench", "", "write execution statistics into this file periodically")
+	flagConfig       = flag.String("config", "", "configuration file")
+	flagDebug        = flag.Bool("debug", false, "dump all VM output to console")
+	flagBench        = flag.String("bench", "", "write execution statistics into this file periodically")
+	flagSeed         = flag.String("seed", "normal", "seed type (normal, threaded-cve, cve, test)")
+	flagGen          = flag.Bool("gen", true, "generate/mutate inputs")
+	flagCorpus       = flag.Bool("load-corpus", true, "load corpus")
+	flagNewKernel    = flag.Bool("new-kernel", false, "set true if using a new kernel version")
+	flagDumpCoverage = flag.Bool("dump-coverage", false, "for experiments. dump both coverages periodically")
+	flagOneShot      = flag.Bool("one-shot", false, "quit after a crash occurs")
 )
 
 type Manager struct {
-	cfg            *mgrconfig.Config
-	vmPool         *vm.Pool
-	target         *prog.Target
-	sysTarget      *targets.Target
-	reporter       *report.Reporter
-	crashdir       string
-	serv           *RPCServer
-	corpusDB       *db.DB
-	startTime      time.Time
-	firstConnect   time.Time
-	fuzzingTime    time.Duration
-	stats          *Stats
-	crashTypes     map[string]bool
-	vmStop         chan bool
-	checkResult    *rpctype.CheckArgs
-	fresh          bool
-	numFuzzing     uint32
-	numReproducing uint32
+	cfg                 *mgrconfig.Config
+	vmPool              *vm.Pool
+	target              *prog.Target
+	sysTarget           *targets.Target
+	reporter            *report.Reporter
+	crashdir            string
+	serv                *RPCServer
+	corpusDB            *db.DB
+	newKernel           bool
+	kernelHash          []byte
+	startTime           time.Time
+	firstConnect        time.Time
+	fuzzingTime         time.Duration
+	stats               *Stats
+	crashTypes          map[string]bool
+	vmStop              chan bool
+	checkResult         *rpctype.CheckArgs
+	fresh               bool
+	numFuzzing          uint32
+	numReproducing      uint32
+	shifterPath         string
+	interleavingCovPath string
+	interleavingCovFile *os.File
+
+	seedType string
 
 	dash *dashapi.Dashboard
+
+	binImage *binimage.BinaryImage
 
 	mu                    sync.Mutex
 	phase                 int
@@ -75,6 +95,7 @@ type Manager struct {
 	candidates       []rpctype.Candidate // untriaged inputs from corpus and hub
 	disabledHashes   map[string]struct{}
 	corpus           map[string]CorpusItem
+	scheduledCorpus  map[string]rpctype.ScheduledInput
 	seeds            [][]byte
 	newRepros        [][]byte
 	lastMinCorpus    int
@@ -145,6 +166,7 @@ type Crash struct {
 }
 
 func main() {
+	golog.SetPrefix("[MANAGER] ")
 	if prog.GitRevision == "" {
 		log.Fatalf("bad syz-manager build: build with make, run bin/syz-manager")
 	}
@@ -178,6 +200,12 @@ func RunManager(cfg *mgrconfig.Config) {
 		log.Fatalf("%v", err)
 	}
 
+	vmlinux := filepath.Join(cfg.KernelObj, "vmlinux")
+	binImage, err := binimage.BuildBinaryImage(cfg.Workdir, vmlinux)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+
 	mgr := &Manager{
 		cfg:              cfg,
 		vmPool:           vmPool,
@@ -189,6 +217,7 @@ func RunManager(cfg *mgrconfig.Config) {
 		stats:            &Stats{haveHub: cfg.HubClient != ""},
 		crashTypes:       make(map[string]bool),
 		corpus:           make(map[string]CorpusItem),
+		scheduledCorpus:  make(map[string]rpctype.ScheduledInput),
 		disabledHashes:   make(map[string]struct{}),
 		memoryLeakFrames: make(map[string]bool),
 		dataRaceFrames:   make(map[string]bool),
@@ -199,8 +228,11 @@ func RunManager(cfg *mgrconfig.Config) {
 		reproRequest:     make(chan chan map[string]bool),
 		usedFiles:        make(map[string]time.Time),
 		saturatedCalls:   make(map[string]bool),
+		seedType:         *flagSeed,
+		binImage:         binImage,
 	}
 
+	mgr.buildShifter()
 	mgr.preloadCorpus()
 	mgr.initStats() // Initializes prometheus variables.
 	mgr.initHTTP()  // Creates HTTP server.
@@ -211,6 +243,8 @@ func RunManager(cfg *mgrconfig.Config) {
 	if err != nil {
 		log.Fatalf("failed to create rpc server: %v", err)
 	}
+
+	mgr.loadInterleavingCoverage()
 
 	if cfg.DashboardAddr != "" {
 		mgr.dash, err = dashapi.New(cfg.DashboardClient, cfg.DashboardAddr, cfg.DashboardKey)
@@ -242,13 +276,16 @@ func RunManager(cfg *mgrconfig.Config) {
 			crashes := mgr.stats.crashes.get()
 			corpusCover := mgr.stats.corpusCover.get()
 			corpusSignal := mgr.stats.corpusSignal.get()
+			corpusInterleaving := mgr.stats.corpusInterleaving.get()
+			maxInterleaving := mgr.stats.maxInterleaving.get()
+			blacklist := mgr.stats.instBlacklist.get()
 			maxSignal := mgr.stats.maxSignal.get()
 			mgr.mu.Unlock()
 			numReproducing := atomic.LoadUint32(&mgr.numReproducing)
 			numFuzzing := atomic.LoadUint32(&mgr.numFuzzing)
 
-			log.Logf(0, "VMs %v, executed %v, cover %v, signal %v/%v, crashes %v, repro %v",
-				numFuzzing, executed, corpusCover, corpusSignal, maxSignal, crashes, numReproducing)
+			log.Logf(0, "VMs %v, executed %v, cover %v, signal %v/%v, interleaving %v/%v, blacklist %v, crashes %v, repro %v",
+				numFuzzing, executed, corpusCover, corpusSignal, maxSignal, corpusInterleaving, maxInterleaving, blacklist, crashes, numReproducing)
 		}
 	}()
 
@@ -287,6 +324,7 @@ func (mgr *Manager) initBench() {
 			}
 			mgr.minimizeCorpus()
 			vals["corpus"] = uint64(len(mgr.corpus))
+			vals["scheduled corpus"] = uint64(len(mgr.scheduledCorpus))
 			vals["uptime"] = uint64(time.Since(mgr.firstConnect)) / 1e9
 			vals["fuzzing"] = uint64(mgr.fuzzingTime) / 1e9
 			mgr.mu.Unlock()
@@ -321,6 +359,8 @@ type ReproResult struct {
 // Manager needs to be refactored (#605).
 // nolint: gocyclo, gocognit, funlen
 func (mgr *Manager) vmLoop() {
+	log.Logf(0, "limiting number of procs from %v to 1. We don't support multi fuzzer processors yet.", mgr.cfg.Procs)
+	mgr.cfg.Procs = 1
 	log.Logf(0, "booting test machines...")
 	log.Logf(0, "wait for the connection from test machine...")
 	instancesPerRepro := 4
@@ -416,6 +456,10 @@ func (mgr *Manager) vmLoop() {
 			// which we detect as "lost connection". Don't save that as crash.
 			if shutdown != nil && res.crash != nil {
 				needRepro := mgr.saveCrash(res.crash)
+				if *flagOneShot {
+					log.Logf(0, "exiting...")
+					os.Exit(0)
+				}
 				if needRepro {
 					log.Logf(1, "loop: add pending repro for '%v'", res.crash.Title)
 					pendingRepro[res.crash] = true
@@ -558,6 +602,66 @@ func (pool *ResourcePool) TakeOne() *int {
 	return &ret[0]
 }
 
+func (mgr *Manager) seedDir(typ string) (dir string) {
+	dir = filepath.Join(mgr.cfg.Syzkaller, "sys", mgr.cfg.TargetOS, "test")
+	if typ == "normal" {
+		// We don't want to dump seeds for testing
+		return
+	}
+	options := []struct {
+		typ, path, misc string
+	}{
+		{"cve", "cve", "loading seeds for CVEs..."},
+		{"test", "test", "loading seeds for testing..."},
+		{"threaded-cve", "threaded-cve", "loading threaded seeds for CVEs..."},
+	}
+	for _, o := range options {
+		if o.typ == typ {
+			log.Logf(0, "%s", o.misc)
+			dir = filepath.Join(dir, o.path)
+			break
+		}
+	}
+	return dir
+}
+
+func (mgr *Manager) buildShifter() {
+	shifter, path, failed, err := mgr.binImage.BuildOrReadShifter()
+	if err != nil {
+		log.Logf(0, "Failed to build a shifter: %v", err)
+		mgr.shifterPath = ""
+		return
+	}
+	mgr.shifterPath = path
+	for _, failed := range failed {
+		log.Logf(2, "Failed to build shfiter for %s", failed)
+	}
+	for k, v := range shifter {
+		log.Logf(4, "%x %d", k, v)
+	}
+}
+
+func (mgr *Manager) checkKernelVersion() {
+	fn := filepath.Join(mgr.cfg.KernelObj, "vmlinux")
+	hsh, err := osutil.BinaryHash(fn)
+	if err != nil {
+		log.Fatalf("Failed to hash %v", fn)
+	}
+	mgr.kernelHash = hsh
+	if *flagNewKernel {
+		mgr.newKernel = true
+		log.Logf(0, "Using a new kernel version")
+		log.Logf(0, "  Current  %v", hex.EncodeToString(hsh))
+	}
+	if rec, ok := mgr.corpusDB.Records[versionKey]; ok && !bytes.Equal(hsh, rec.Val) {
+		// Kernel version has been changed.
+		mgr.newKernel = true
+		log.Logf(0, "Kernel version has been changed")
+		log.Logf(0, "  Previous %v", hex.EncodeToString(rec.Val))
+		log.Logf(0, "  Current  %v", hex.EncodeToString(hsh))
+	}
+}
+
 func (mgr *Manager) preloadCorpus() {
 	log.Logf(0, "loading corpus...")
 	corpusDB, err := db.Open(filepath.Join(mgr.cfg.Workdir, "corpus.db"), true)
@@ -569,12 +673,30 @@ func (mgr *Manager) preloadCorpus() {
 	}
 	mgr.corpusDB = corpusDB
 
-	if seedDir := filepath.Join(mgr.cfg.Syzkaller, "sys", mgr.cfg.TargetOS, "test"); osutil.IsExist(seedDir) {
+	mgr.checkKernelVersion()
+
+	seedType, wanted := mgr.seedType, ""
+	if strings.IndexByte(seedType, '/') != -1 {
+		toks := strings.SplitN(seedType, "/", 2)
+		seedType, wanted = toks[0], toks[1]
+		// We are testing a fuzzer with a specific bug. It's okay with
+		// one crash
+		*flagOneShot = true
+	}
+	seedDir := mgr.seedDir(seedType)
+
+	if osutil.IsExist(seedDir) {
 		seeds, err := ioutil.ReadDir(seedDir)
 		if err != nil {
 			log.Fatalf("failed to read seeds dir: %v", err)
 		}
 		for _, seed := range seeds {
+			if wanted != "" && seed.Name() != wanted {
+				continue
+			}
+			if seed.IsDir() {
+				continue
+			}
 			data, err := ioutil.ReadFile(filepath.Join(seedDir, seed.Name()))
 			if err != nil {
 				log.Fatalf("failed to read seed %v: %v", seed.Name(), err)
@@ -582,6 +704,29 @@ func (mgr *Manager) preloadCorpus() {
 			mgr.seeds = append(mgr.seeds, data)
 		}
 	}
+}
+
+func (mgr *Manager) loadInterleavingCoverage() {
+	if !*flagCorpus {
+		return
+	}
+	fn := filepath.Join(mgr.cfg.Workdir,
+		fmt.Sprintf("interleaving-%v", hex.EncodeToString(mgr.kernelHash)))
+
+	data, err := ioutil.ReadFile(fn)
+	mgr.serv.corpusInterleaving.FromHex(data)
+	mgr.serv.maxInterleaving.FromHex(data)
+	total := mgr.serv.corpusInterleaving.Len()
+	mgr.stats.corpusInterleaving.set(total)
+	mgr.stats.maxInterleaving.set(total)
+	log.Logf(0, "loaded %d interleaving coverage", total)
+
+	f, err := os.OpenFile(fn, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		panic(err)
+	}
+	mgr.interleavingCovPath = fn
+	mgr.interleavingCovFile = f
 }
 
 func (mgr *Manager) loadCorpus() {
@@ -609,18 +754,28 @@ func (mgr *Manager) loadCorpus() {
 	case currentDBVersion:
 	}
 	broken := 0
-	for key, rec := range mgr.corpusDB.Records {
-		if !mgr.loadProg(rec.Val, minimized, smashed) {
-			mgr.corpusDB.Delete(key)
-			broken++
+	if *flagCorpus {
+		// We don't save multi-thread progs anymore.
+		allowThreaded := false
+		for key, rec := range mgr.corpusDB.Records {
+			if key == versionKey {
+				continue
+			}
+			if !mgr.loadProg(rec.Val, minimized, smashed, allowThreaded) {
+				mgr.corpusDB.Delete(key)
+				broken++
+			}
 		}
 	}
+	mgr.corpusDB.Save(versionKey, mgr.kernelHash, 0)
+	mgr.corpusDB.Flush()
+	log.Logf(0, "%-24v: %v", "kernel hash", hex.EncodeToString(mgr.kernelHash))
 	mgr.fresh = len(mgr.corpusDB.Records) == 0
 	corpusSize := len(mgr.candidates)
 	log.Logf(0, "%-24v: %v (deleted %v broken)", "corpus", corpusSize, broken)
 
 	for _, seed := range mgr.seeds {
-		mgr.loadProg(seed, true, false)
+		mgr.loadProg(seed, true, false, true)
 	}
 	log.Logf(0, "%-24v: %v/%v", "seeds", len(mgr.candidates)-corpusSize, len(mgr.seeds))
 	mgr.seeds = nil
@@ -630,19 +785,21 @@ func (mgr *Manager) loadCorpus() {
 	// in such case it will also lost all cached candidates. Or, the input can be somewhat flaky
 	// and doesn't give the coverage on first try. So we give each input the second chance.
 	// Shuffling should alleviate deterministically losing the same inputs on fuzzer crashing.
-	mgr.candidates = append(mgr.candidates, mgr.candidates...)
-	shuffle := mgr.candidates[len(mgr.candidates)/2:]
-	rand.Shuffle(len(shuffle), func(i, j int) {
-		shuffle[i], shuffle[j] = shuffle[j], shuffle[i]
-	})
-	if mgr.phase != phaseInit {
-		panic(fmt.Sprintf("loadCorpus: bad phase %v", mgr.phase))
+	if *flagSeed == "normal" {
+		mgr.candidates = append(mgr.candidates, mgr.candidates...)
+		shuffle := mgr.candidates[len(mgr.candidates)/2:]
+		rand.Shuffle(len(shuffle), func(i, j int) {
+			shuffle[i], shuffle[j] = shuffle[j], shuffle[i]
+		})
+		if mgr.phase != phaseInit {
+			panic(fmt.Sprintf("loadCorpus: bad phase %v", mgr.phase))
+		}
 	}
 	mgr.phase = phaseLoadedCorpus
 }
 
-func (mgr *Manager) loadProg(data []byte, minimized, smashed bool) bool {
-	bad, disabled := checkProgram(mgr.target, mgr.targetEnabledSyscalls, data)
+func (mgr *Manager) loadProg(data []byte, minimized, smashed, allowThreaded bool) bool {
+	bad, disabled := checkProgram(mgr.target, mgr.targetEnabledSyscalls, allowThreaded, data)
 	if bad {
 		return false
 	}
@@ -691,7 +848,7 @@ func programLeftover(target *prog.Target, enabled map[*prog.Syscall]bool, data [
 	return p.Serialize()
 }
 
-func checkProgram(target *prog.Target, enabled map[*prog.Syscall]bool, data []byte) (bad, disabled bool) {
+func checkProgram(target *prog.Target, enabled map[*prog.Syscall]bool, allowThreaded bool, data []byte) (bad, disabled bool) {
 	p, err := target.Deserialize(data, prog.NonStrict)
 	if err != nil {
 		return true, true
@@ -703,6 +860,9 @@ func checkProgram(target *prog.Target, enabled map[*prog.Syscall]bool, data []by
 		if !enabled[c.Meta] {
 			return false, true
 		}
+	}
+	if !allowThreaded && p.Threaded {
+		return true, true
 	}
 	return false, false
 }
@@ -747,6 +907,12 @@ func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Re
 		return nil, nil, fmt.Errorf("failed to setup port forwarding: %v", err)
 	}
 
+	shifterPath, err := inst.Copy(mgr.shifterPath)
+	if err != nil {
+		log.Logf(0, "failed to copy shifter: %v", err)
+		shifterPath = ""
+	}
+
 	fuzzerBin, err := inst.Copy(mgr.cfg.FuzzerBin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to copy binary: %v", err)
@@ -778,6 +944,7 @@ func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Re
 		Fuzzer:    fuzzerBin,
 		Executor:  executorBin,
 		Name:      instanceName,
+		Shifter:   shifterPath,
 		OS:        mgr.cfg.TargetOS,
 		Arch:      mgr.cfg.TargetArch,
 		FwdAddr:   fwdAddr,
@@ -788,6 +955,8 @@ func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Re
 		Debug:     *flagDebug,
 		Test:      false,
 		Runtest:   false,
+		Generate:  *flagGen,
+		Pinning:   true,
 		Optional: &instance.OptionalFuzzerArgs{
 			Slowdown:   mgr.cfg.Timeouts.Slowdown,
 			RawCover:   mgr.cfg.RawCover,
@@ -867,6 +1036,15 @@ func (mgr *Manager) saveCrash(crash *Crash) bool {
 		mgr.stats.crashTypes.inc()
 	}
 	mgr.mu.Unlock()
+
+	if *flagDumpCoverage {
+		go func() {
+			for {
+				mgr.dumpCoverage()
+				time.Sleep(time.Hour)
+			}
+		}()
+	}
 
 	if mgr.dash != nil {
 		if crash.Type == report.MemoryLeak {
@@ -1358,6 +1536,35 @@ func (mgr *Manager) newInput(inp rpctype.Input, sign signal.Signal) bool {
 	return true
 }
 
+func (mgr *Manager) newScheduledInput(inp rpctype.ScheduledInput, sign interleaving.Signal) bool {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	// XXX: we maintain the threaded corpus independent to the corpus
+	// as I am not sure that threaded inputs are subject to the
+	// minimization of the corpus (see .minimizeCorpus()). Merge the
+	// two corpus once I'm sure that the two corpuses can actually be
+	// handled in a same way.
+	sig := hash.String(inp.Prog)
+	if old, ok := mgr.scheduledCorpus[sig]; ok {
+		sign.Merge(old.Signal.Deserialize())
+		old.Signal = sign.Serialize()
+		var cov interleaving.Cover
+		cov.Merge(old.Cover)
+		cov.Merge(inp.Cover)
+		old.Cover = cov.Serialize()
+		mgr.scheduledCorpus[sig] = old
+	} else {
+		mgr.scheduledCorpus[sig] = inp
+		corpusInterleaving := mgr.serv.corpusInterleaving
+		diff := corpusInterleaving.Diff(sign)
+		data := diff.ToHex()
+		if mgr.interleavingCovFile != nil {
+			mgr.interleavingCovFile.Write(data)
+		}
+	}
+	return true
+}
+
 func (mgr *Manager) candidateBatch(size int) []rpctype.Candidate {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
@@ -1475,6 +1682,89 @@ func (mgr *Manager) dashboardReporter() {
 	}
 }
 
+func (mgr *Manager) dumpCoverage() {
+	const (
+		coverageDir             = "coverage"
+		codeCovFilename         = "code"
+		interleavingCovFilename = "knot"
+		hintCovFilename         = "hint"
+		commCovFilename         = "communication"
+
+		instCountFilename     = "instCount"
+		instBlacklistFilename = "instBlacklist"
+	)
+
+	codecov, intcov, hintcov, commcov := mgr.serializeCoverage()
+	instCount, instBlacklist := mgr.serializeInstInfo()
+
+	dir := filepath.Join(mgr.cfg.Workdir, coverageDir, hex.EncodeToString(mgr.kernelHash))
+	osutil.MkdirAll(dir)
+
+	mgr.dumpCoverageToFile(dir, codeCovFilename, codecov)
+	mgr.dumpCoverageToFile(dir, interleavingCovFilename, intcov)
+	mgr.dumpCoverageToFile(dir, hintCovFilename, hintcov)
+	mgr.dumpCoverageToFile(dir, commCovFilename, commcov)
+
+	mgr.dumpCoverageToFile(dir, instCountFilename, instCount)
+	mgr.dumpCoverageToFile(dir, instBlacklistFilename, instBlacklist)
+}
+
+func (mgr *Manager) serializeCoverage() (bytes.Buffer, bytes.Buffer, bytes.Buffer, bytes.Buffer) {
+	mgr.serv.mu.Lock()
+	defer mgr.serv.mu.Unlock()
+
+	start := time.Now()
+
+	var codecov, intcov, hintcov, commcov bytes.Buffer
+
+	code := mgr.serv.corpusCover.Serialize()
+	for _, cc := range code {
+		codecov.WriteString(fmt.Sprintf("%x\n", cc))
+	}
+
+	interleaving := mgr.serv.corpusInterleaving
+	for k := range interleaving {
+		intcov.WriteString(fmt.Sprintf("%x\n", k))
+	}
+
+	hint := mgr.serv.maxInterleaving
+	for k := range hint {
+		hintcov.WriteString(fmt.Sprintf("%x\n", k))
+	}
+
+	comm := mgr.serv.maxCommunication
+	for k := range comm {
+		commcov.WriteString(fmt.Sprintf("%x\n", k))
+	}
+
+	log.Logf(0, "Serializing coverage takes %v", time.Since(start))
+
+	return codecov, intcov, hintcov, commcov
+}
+
+func (mgr *Manager) serializeInstInfo() (bytes.Buffer, bytes.Buffer) {
+	var instCount, instBlacklist bytes.Buffer
+	mgr.serv.mu.Lock()
+	defer mgr.serv.mu.Unlock()
+	for k, v := range mgr.serv.instCount {
+		instCount.WriteString(fmt.Sprintf("%x %d\n", k, v))
+	}
+	for k := range mgr.serv.instBlacklist {
+		instBlacklist.WriteString(fmt.Sprintf("%x\n", k))
+	}
+	return instCount, instBlacklist
+}
+
+func (mgr *Manager) dumpCoverageToFile(dir, filename string, cov bytes.Buffer) {
+	codef, err := os.OpenFile(filepath.Join(dir, filename), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, osutil.DefaultFilePerm)
+	if err != nil {
+		log.Fatalf("failed to open coverage file (%s): %v", filename, err)
+	}
+	if _, err := codef.Write(cov.Bytes()); err != nil {
+		log.Fatalf("failed to write coverage to file (%s): %v", filename, err)
+	}
+}
+
 func publicWebAddr(addr string) string {
 	_, port, err := net.SplitHostPort(addr)
 	if err == nil && port != "" {
@@ -1487,3 +1777,5 @@ func publicWebAddr(addr string) string {
 	}
 	return "http://" + addr
 }
+
+const versionKey = "kernelversion"
