@@ -454,6 +454,7 @@ type FuzzerCmdArgs struct {
 	Fuzzer    string
 	Executor  string
 	Name      string
+	Shifter   string
 	OS        string
 	Arch      string
 	FwdAddr   string
@@ -464,6 +465,8 @@ type FuzzerCmdArgs struct {
 	Debug     bool
 	Test      bool
 	Runtest   bool
+	Generate  bool
+	Pinning   bool
 	Optional  *OptionalFuzzerArgs
 }
 
@@ -492,10 +495,16 @@ func FuzzerCmd(args *FuzzerCmdArgs) string {
 		}
 		optionalArg = " " + tool.OptionalFlags(flags)
 	}
-	return fmt.Sprintf("%v -executor=%v -name=%v -arch=%v%v -manager=%v -sandbox=%v"+
-		" -procs=%v -cover=%v -debug=%v -test=%v%v%v%v",
-		args.Fuzzer, args.Executor, args.Name, args.Arch, osArg, args.FwdAddr, args.Sandbox,
-		args.Procs, args.Cover, args.Debug, args.Test, runtestArg, verbosityArg, optionalArg)
+	taskset := ""
+	if args.Pinning {
+		taskset = "taskset 0x1"
+	}
+	// Monitor memory usage if debug mode
+	monitor := args.Debug
+	return fmt.Sprintf("%v %v -executor=%v -shifter=%v -name=%v -arch=%v%v -manager=%v -sandbox=%v"+
+		" -procs=%v -cover=%v -debug=%v -test=%v%v%v%v -gen=%v -monitor-memory-usage=%v",
+		taskset, args.Fuzzer, args.Executor, args.Shifter, args.Name, args.Arch, osArg, args.FwdAddr, args.Sandbox,
+		args.Procs, args.Cover, args.Debug, args.Test, runtestArg, verbosityArg, optionalArg, args.Generate, monitor)
 }
 
 func OldFuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox string, sandboxArg, procs int,
@@ -504,10 +513,10 @@ func OldFuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox string, san
 	if optionalFlags {
 		optional = &OptionalFuzzerArgs{Slowdown: slowdown, SandboxArg: sandboxArg}
 	}
-	return FuzzerCmd(&FuzzerCmdArgs{Fuzzer: fuzzer, Executor: executor, Name: name,
+	return FuzzerCmd(&FuzzerCmdArgs{Fuzzer: fuzzer, Executor: executor, Name: name, Shifter: "",
 		OS: OS, Arch: arch, FwdAddr: fwdAddr, Sandbox: sandbox,
 		Procs: procs, Verbosity: 0, Cover: cover, Debug: false, Test: test, Runtest: false,
-		Optional: optional})
+		Generate: true, Pinning: false, Optional: optional})
 }
 
 func ExecprogCmd(execprog, executor, OS, arch, sandbox string, sandboxArg int, repeat, threaded, collide bool,
