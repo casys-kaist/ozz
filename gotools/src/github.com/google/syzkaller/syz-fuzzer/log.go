@@ -20,9 +20,6 @@ func (proc *Proc) logProgram(opts *ipc.ExecOpts, p *prog.Prog) {
 
 	data := p.Serialize()
 	strOpts := ""
-	if opts.Flags&ipc.FlagInjectFault != 0 {
-		strOpts = fmt.Sprintf(" (fault-call:%v fault-nth:%v)", opts.FaultCall, opts.FaultNth)
-	}
 	if p.Threaded {
 		strOpts += fmt.Sprintf(" (threaded %v) ", p.Contender.Calls)
 	}
