@@ -599,7 +599,7 @@ func (inst *instance) Forward(port int) (string, error) {
 		}
 		inst.forwardPort = port
 	}
-	return fmt.Sprintf("localhost:%v", port), nil
+	return fmt.Sprintf("127.0.0.1:%v", port), nil
 }
 
 func (inst *instance) targetDir() string {
