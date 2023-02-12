@@ -9,6 +9,7 @@ syz_compare(want ptr[in, string], want_len bytesize[want], got ptr[in, compare_d
 syz_compare_int$2(n const[2], v0 intptr, v1 intptr)
 syz_compare_int$3(n const[3], v0 intptr, v1 intptr, v2 intptr)
 syz_compare_int$4(n const[4], v0 intptr, v1 intptr, v2 intptr, v3 intptr)
+syz_compare_zlib(data ptr[in, array[int8]], size bytesize[data], zdata ptr[in, compressed_image], zsize bytesize[zdata]) (no_generate, no_minimize)
 
 compare_data [
 	align0		align0
@@ -253,6 +254,7 @@ resource overlayres64[int64]
 
 overlay_ctor(a ptr[out, overlayres8], b ptr[out, overlayres16], c ptr[out, overlayres32], d ptr[out, overlayres64])
 overlay_uses(a overlayres8, b overlayres16, c overlayres32, d overlayres64)
+overlay_any(a ptr[in, compare_data])
 
 overlayres [
 	res8	overlayres8

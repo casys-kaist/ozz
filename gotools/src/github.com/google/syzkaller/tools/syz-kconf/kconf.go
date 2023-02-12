@@ -129,6 +129,10 @@ func checkConfigs(instances []*Instance, unusedFeatures []string) error {
 	errorString := ""
 	for _, inst := range instances {
 		for _, cfg := range inst.Configs {
+			if strings.HasPrefix(cfg.Name, "CONFIG_") {
+				msg := fmt.Sprintf("Warning: excessive CONFIG_ in %v at %v:%v ?", cfg.Name, cfg.File, cfg.Line)
+				errorString += "\n" + msg
+			}
 			for _, feat := range cfg.Constraints {
 				if feat[0] == '-' {
 					feat = feat[1:]
@@ -241,8 +245,7 @@ func (ctx *Context) executeShell() error {
 		}
 		args := strings.Split(shell.Cmd, " ")
 		for i := 1; i < len(args); i++ {
-			args[i] = strings.ReplaceAll(args[i], "${BUILDDIR}", ctx.BuildDir)
-			args[i] = strings.ReplaceAll(args[i], "${ARCH}", ctx.Target.KernelArch)
+			args[i] = ctx.replaceVars(args[i])
 		}
 		if args[0] == "make" {
 			if err := ctx.Make(args[1:]...); err != nil {
@@ -425,11 +428,23 @@ func (ctx *Context) Make(args ...string) error {
 	if ctx.Target.Triple != "" {
 		args = append(args, "CROSS_COMPILE="+ctx.Target.Triple+"-")
 	}
-	if ctx.Target.KernelCompiler != "" {
+	if ctx.Inst.Compiler != "" {
+		args = append(args, "CC="+ctx.replaceVars(ctx.Inst.Compiler))
+	} else if ctx.Target.KernelCompiler != "" {
 		args = append(args, "CC="+ctx.Target.KernelCompiler)
+	}
+	if ctx.Inst.Linker != "" {
+		args = append(args, "LD="+ctx.replaceVars(ctx.Inst.Linker))
 	}
 	_, err := osutil.RunCmd(10*time.Minute, ctx.SourceDir, "make", args...)
 	return err
+}
+
+func (ctx *Context) replaceVars(str string) string {
+	str = strings.ReplaceAll(str, "${SOURCEDIR}", ctx.SourceDir)
+	str = strings.ReplaceAll(str, "${BUILDDIR}", ctx.BuildDir)
+	str = strings.ReplaceAll(str, "${ARCH}", ctx.Target.KernelArch)
+	return str
 }
 
 func releaseTag(dir string) (string, error) {

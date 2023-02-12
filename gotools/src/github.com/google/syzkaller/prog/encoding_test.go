@@ -36,7 +36,7 @@ func TestSerializeData(t *testing.T) {
 			if !p.Scan() {
 				t.Fatalf("parser does not scan")
 			}
-			data1, err := p.deserializeData()
+			data1, _, err := p.deserializeData()
 			if err != nil {
 				t.Fatalf("failed to deserialize %q -> %s: %v", data, buf.Bytes(), err)
 			}
@@ -141,44 +141,44 @@ func TestDeserialize(t *testing.T) {
 	TestDeserializeHelper(t, "test", "64", nil, []DeserializeTest{
 		{
 			In:  `test$struct(&(0x7f0000000000)={0x0, {0x0}})`,
-			Out: `test$struct(&(0x7f0000000000)) <0x0, 0x0>`,
+			Out: `test$struct(&(0x7f0000000000))`,
 		},
 		{
 			In:        `test$struct(&(0x7f0000000000)=0x0)`,
-			Out:       `test$struct(&(0x7f0000000000)) <0x0, 0x0>`,
+			Out:       `test$struct(&(0x7f0000000000))`,
 			StrictErr: "wrong int arg",
 		},
 		{
 			In:  `test$regression1(&(0x7f0000000000)=[{"000000"}, {"0000000000"}])`,
-			Out: `test$regression1(&(0x7f0000000000)=[{}, {}]) <0x0, 0x0>`,
+			Out: `test$regression1(&(0x7f0000000000)=[{}, {}])`,
 		},
 		{
 			In:  `test$regression2(&(0x7f0000000000)=[0x1, 0x2, 0x3, 0x4, 0x5, 0x6])`,
-			Out: `test$regression2(&(0x7f0000000000)=[0x1, 0x2, 0x3, 0x4]) <0x0, 0x0>`,
+			Out: `test$regression2(&(0x7f0000000000)=[0x1, 0x2, 0x3, 0x4])`,
 		},
 		{
 			In:        `test_excessive_args1(0x0, 0x1, {0x1, &(0x7f0000000000)=[0x1, 0x2]})`,
-			Out:       `test_excessive_args1() <0x0, 0x0>`,
+			Out:       `test_excessive_args1()`,
 			StrictErr: "excessive syscall arguments",
 		},
 		{
 			In:        `test_excessive_args2(0x0, 0x1, {0x1, &(0x7f0000000000)={0x1, 0x2}})`,
-			Out:       `test_excessive_args2(0x0) <0x0, 0x0>`,
+			Out:       `test_excessive_args2(0x0)`,
 			StrictErr: "excessive syscall arguments",
 		},
 		{
 			In:        `test_excessive_args2(0x0, 0x1, {0x1, &(0x7f0000000000)=nil})`,
-			Out:       `test_excessive_args2(0x0) <0x0, 0x0>`,
+			Out:       `test_excessive_args2(0x0)`,
 			StrictErr: "excessive syscall arguments",
 		},
 		{
 			In:        `test_excessive_args2(0x0, &(0x7f0000000000), 0x0)`,
-			Out:       `test_excessive_args2(0x0) <0x0, 0x0>`,
+			Out:       `test_excessive_args2(0x0)`,
 			StrictErr: "excessive syscall arguments",
 		},
 		{
 			In:        `test$excessive_fields1(&(0x7f0000000000)={0x1, &(0x7f0000000000)=[{0x0}, 0x2]}, {0x1, 0x2, [0x1, 0x2]})`,
-			Out:       `test$excessive_fields1(&(0x7f0000000000)={0x1}) <0x0, 0x0>`,
+			Out:       `test$excessive_fields1(&(0x7f0000000000)={0x1})`,
 			StrictErr: "excessive struct excessive_fields fields",
 		},
 		{
@@ -186,56 +186,56 @@ func TestDeserialize(t *testing.T) {
 		},
 		{
 			In:        `test$excessive_fields1(r0)`,
-			Out:       `test$excessive_fields1(&(0x7f0000000000)) <0x0, 0x0>`,
+			Out:       `test$excessive_fields1(&(0x7f0000000000))`,
 			StrictErr: "undeclared variable r0",
 		},
 		{
 			In:        `test_excessive_args2(r1)`,
-			Out:       `test_excessive_args2(0x0) <0x0, 0x0>`,
+			Out:       `test_excessive_args2(0x0)`,
 			StrictErr: "undeclared variable r1",
 		},
 		{
 			In:        `test_excessive_args2({0x0, 0x1})`,
-			Out:       `test_excessive_args2(0x0) <0x0, 0x0>`,
+			Out:       `test_excessive_args2(0x0)`,
 			StrictErr: "wrong struct arg",
 		},
 		{
 			In:        `test_excessive_args2([0x0], 0x0)`,
-			Out:       `test_excessive_args2(0x0) <0x0, 0x0>`,
+			Out:       `test_excessive_args2(0x0)`,
 			StrictErr: "wrong array arg",
 		},
 		{
 			In:        `test_excessive_args2(@foo)`,
-			Out:       `test_excessive_args2(0x0) <0x0, 0x0>`,
+			Out:       `test_excessive_args2(0x0)`,
 			StrictErr: "wrong union arg",
 		},
 		{
 			In:        `test_excessive_args2('foo')`,
-			Out:       `test_excessive_args2(0x0) <0x0, 0x0>`,
+			Out:       `test_excessive_args2(0x0)`,
 			StrictErr: "wrong string arg",
 		},
 		{
 			In:        `test_excessive_args2(&(0x7f0000000000)={0x0, 0x1})`,
-			Out:       `test_excessive_args2(0x0) <0x0, 0x0>`,
+			Out:       `test_excessive_args2(0x0)`,
 			StrictErr: "wrong addr arg",
 		},
 		{
 			In:  `test_excessive_args2(nil)`,
-			Out: `test_excessive_args2(0x0) <0x0, 0x0>`,
+			Out: `test_excessive_args2(0x0)`,
 		},
 		{
 			In:        `test$type_confusion1(&(0x7f0000000000)=@unknown)`,
-			Out:       `test$type_confusion1(&(0x7f0000000000)) <0x0, 0x0>`,
+			Out:       `test$type_confusion1(&(0x7f0000000000))`,
 			StrictErr: "wrong union option",
 		},
 		{
 			In:        `test$type_confusion1(&(0x7f0000000000)=@unknown={0x0, 'abc'}, 0x0)`,
-			Out:       `test$type_confusion1(&(0x7f0000000000)) <0x0, 0x0>`,
+			Out:       `test$type_confusion1(&(0x7f0000000000))`,
 			StrictErr: "wrong union option",
 		},
 		{
 			In:        `test$excessive_fields1(&(0x7f0000000000)=0x0)`,
-			Out:       `test$excessive_fields1(&(0x7f0000000000)) <0x0, 0x0>`,
+			Out:       `test$excessive_fields1(&(0x7f0000000000))`,
 			StrictErr: "wrong int arg",
 		},
 		{
@@ -246,15 +246,15 @@ func TestDeserialize(t *testing.T) {
 		},
 		{
 			In:  `test$excessive_fields1(0xfffffffffffffffd)`,
-			Out: `test$excessive_fields1(0x0) <0x0, 0x0>`,
+			Out: `test$excessive_fields1(0x0)`,
 		},
 		{
 			In:  `test$excessive_fields1(0xfffffffffffffffc)`,
-			Out: `test$excessive_fields1(0xffffffffffffffff) <0x0, 0x0>`,
+			Out: `test$excessive_fields1(0xffffffffffffffff)`,
 		},
 		{
 			In:  `test$auto0(AUTO, &AUTO={AUTO, AUTO, 0x1}, AUTO, 0x0)`,
-			Out: `test$auto0(0x42, &(0x7f0000000040)={0xc, 0x43, 0x1}, 0xc, 0x0) <0x0, 0x0>`,
+			Out: `test$auto0(0x42, &(0x7f0000000040)={0xc, 0x43, 0x1}, 0xc, 0x0)`,
 		},
 		{
 			In:  `test$auto0(AUTO, &AUTO={AUTO, AUTO, AUTO}, AUTO, 0x0)`,
@@ -262,28 +262,28 @@ func TestDeserialize(t *testing.T) {
 		},
 		{
 			In:  `test$str0(&AUTO="303100090a0d7022273a")`,
-			Out: `test$str0(&(0x7f0000000040)='01\x00\t\n\rp\"\':') <0x0, 0x0>`,
+			Out: `test$str0(&(0x7f0000000040)='01\x00\t\n\rp\"\':')`,
 		},
 		{
 			In:  `test$blob0(&AUTO="303100090a0d7022273a")`,
-			Out: `test$blob0(&(0x7f0000000040)='01\x00\t\n\rp\"\':') <0x0, 0x0>`,
+			Out: `test$blob0(&(0x7f0000000040)='01\x00\t\n\rp\"\':')`,
 		},
 		{
 			In:  `test$blob0(&AUTO="3031000a0d7022273a01")`,
-			Out: `test$blob0(&(0x7f0000000040)="3031000a0d7022273a01") <0x0, 0x0>`,
+			Out: `test$blob0(&(0x7f0000000040)="3031000a0d7022273a01")`,
 		},
 		{
 			In:        `test$out_const(&(0x7f0000000000)=0x2)`,
-			Out:       `test$out_const(&(0x7f0000000000)) <0x0, 0x0>`,
+			Out:       `test$out_const(&(0x7f0000000000))`,
 			StrictErr: `out arg const[1, const] has non-default value: 2`,
 		},
 		{
 			In:  `test$str1(&(0x7f0000000000)='foo\x00')`,
-			Out: `test$str1(&(0x7f0000000000)) <0x0, 0x0>`,
+			Out: `test$str1(&(0x7f0000000000))`,
 		},
 		{
 			In:        `test$str1(&(0x7f0000000000)='bar\x00')`,
-			Out:       `test$str1(&(0x7f0000000000)) <0x0, 0x0>`,
+			Out:       `test$str1(&(0x7f0000000000))`,
 			StrictErr: `bad string value "bar\x00", expect ["foo\x00"]`,
 		},
 		{
@@ -291,26 +291,49 @@ func TestDeserialize(t *testing.T) {
 		},
 		{
 			In:        `test$str2(&(0x7f0000000000)='baz\x00')`,
-			Out:       `test$str2(&(0x7f0000000000)='foo\x00') <0x0, 0x0>`,
+			Out:       `test$str2(&(0x7f0000000000)='foo\x00')`,
 			StrictErr: `bad string value "baz\x00", expect ["foo\x00" "bar\x00"]`,
 		},
 		{
 			In:  `test$opt2(&(0x7f0000000000))`,
-			Out: `test$opt2(0x0) <0x0, 0x0>`,
+			Out: `test$opt2(0x0)`,
 		},
 		{
 			In:        `test$opt2(&(0x7f0000000001))`,
-			Out:       `test$opt2(0x0) <0x0, 0x0>`,
+			Out:       `test$opt2(0x0)`,
 			StrictErr: `unaligned vma address 0x1`,
 		},
 		{
 			In:  `test$opt2(&(0x7f0000000000)=nil)`,
-			Out: `test$opt2(0x0) <0x0, 0x0>`,
+			Out: `test$opt2(0x0)`,
 		},
 		{
 			In:        `test$opt2(&(0x7f0000000000)='foo')`,
-			Out:       `test$opt2(0x0) <0x0, 0x0>`,
+			Out:       `test$opt2(0x0)`,
 			StrictErr: `non-nil argument for nil type`,
+		},
+		{
+			In:        `test$opt2(0x0) (non_existing_prop: 123)`,
+			Out:       `test$opt2(0x0)`,
+			StrictErr: `unknown call property: non_existing_prop`,
+		},
+		{
+			In:        `test$opt2(0x0) (fail_nth: zzz)`,
+			Out:       `test$opt2(0x0)`,
+			StrictErr: `invalid int value: zzz`,
+		},
+		{
+			In:        `test$opt2(0x0) (non_existing_prop: 123, fail_nth: 1)`,
+			Out:       `test$opt2(0x0) (fail_nth: 1)`,
+			StrictErr: `unknown call property: non_existing_prop`,
+		},
+		{
+			In:  `test$opt2(0x0) (fail_nth: 0)`,
+			Out: `test$opt2(0x0)`,
+		},
+		{
+			In:  `test$str2(&(0x7f0000000000)="$eJwqrqzKTszJSS0CBAAA//8TyQPi`,
+			Err: `want ", got EOF`,
 		},
 	})
 }
@@ -319,11 +342,18 @@ func TestSerializeDeserialize(t *testing.T) {
 	TestDeserializeHelper(t, "test", "64", nil, []DeserializeTest{
 		{
 			In:  `serialize0(&(0x7f0000408000)={"6861736800000000000000000000", "48490000"})`,
-			Out: `serialize0(&(0x7f0000408000)={'hash\x00', 'HI\x00'}) <0x0, 0x0>`,
+			Out: `serialize0(&(0x7f0000408000)={'hash\x00', 'HI\x00'})`,
 		},
 		{
 			In:  `serialize1(&(0x7f0000000000)="0000000000000000", 0x8)`,
-			Out: `serialize1(&(0x7f0000000000)=""/8, 0x8) <0x0, 0x0>`,
+			Out: `serialize1(&(0x7f0000000000)=""/8, 0x8)`,
+		},
+		{
+			In:  `serialize2(&(0x7f0000000000)="$c3l6a2FsbGVy")`,
+			Out: `serialize2(&(0x7f0000000000)='syzkaller')`,
+		},
+		{
+			In: `serialize3(&(0x7f0000000000)="$eJwqrqzKTszJSS0CBAAA//8TyQPi")`,
 		},
 	})
 }
@@ -384,6 +414,60 @@ func testSerializeDeserialize(t *testing.T, p0 *Prog, data0, data1 []byte) (bool
 	return true, 0, 0
 }
 
+func TestSerializeCallProps(t *testing.T) {
+	target := initTargetTest(t, "test", "64")
+	type SerializeCallPropsTest struct {
+		prog  string
+		props []CallProps
+	}
+
+	tests := []SerializeCallPropsTest{
+		{
+			"serialize0(0x0)\n",
+			[]CallProps{{}},
+		},
+		{
+			"serialize0(0x0) ()\n",
+			[]CallProps{{}},
+		},
+		{
+			"serialize0(0x0) (fail_nth: 5)\n",
+			[]CallProps{{5, false, 0}},
+		},
+		{
+			"serialize0(0x0) (fail_nth)\n",
+			nil,
+		},
+		{
+			"serialize0(0x0) (fail_nth: \"5\")\n",
+			nil,
+		},
+		{
+			"serialize0(0x0) (async)\n",
+			[]CallProps{{0, true, 0}},
+		},
+		{
+			"serialize0(0x0) (async, rerun: 10)\n",
+			[]CallProps{{0, true, 10}},
+		},
+	}
+
+	for _, test := range tests {
+		p, err := target.Deserialize([]byte(test.prog), Strict)
+		if test.props != nil && err != nil {
+			t.Fatal(err)
+		} else if test.props == nil && err == nil {
+			t.Errorf("expected an error, but got none\n%s", test.prog)
+		}
+
+		for i, props := range test.props {
+			if !reflect.DeepEqual(props, p.Calls[i].Props) {
+				t.Errorf("%v-th call props differ: %v != %v", i, props, p.Calls[i].Props)
+			}
+		}
+	}
+}
+
 func TestDeserializeComments(t *testing.T) {
 	target := initTargetTest(t, "test", "64")
 	p, err := target.Deserialize([]byte(`
@@ -422,24 +506,5 @@ serialize0(0x0)
 	}
 	if !reflect.DeepEqual(p.Comments, wantComments) {
 		t.Errorf("bad program comments %q\nwant: %q", p.Comments, wantComments)
-	}
-}
-
-func TestInspectThreaded(t *testing.T) {
-	target := initTargetTest(t, "test", "64")
-	p, err := target.Deserialize([]byte(`
-serialize0(0x0) <0x0, 0x0>
-serialize0(0x0) <0x0, 0x1>
-serialize0(0x0) <0x0, 0x3>
-serialize0(0x0) <0x1, 0x2>
-serialize0(0x0) <0x1, 0x3>
-#-- 0x2, 0x0, 0x0
-#-- 0x4, 0x0, 0x1
-`), Strict)
-	if err != nil {
-		t.Errorf("bad program: %v", err)
-	}
-	if !p.Threaded {
-		t.Errorf("bad program: not threaded")
 	}
 }

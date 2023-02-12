@@ -1,3 +1,0 @@
-ssb_pso_writer(do_sleep bool8, disable_irq bool8)
-ssb_pso_reader(do_sleep bool8, disable_irq bool8)
-pso_clear()

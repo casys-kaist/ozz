@@ -39,40 +39,49 @@ func init() {
 }
 
 type Config struct {
-	Count       int    `json:"count"`        // number of VMs to use
-	MachineType string `json:"machine_type"` // GCE machine type (e.g. "n1-highcpu-2")
-	GCSPath     string `json:"gcs_path"`     // GCS path to upload image
-	GCEImage    string `json:"gce_image"`    // pre-created GCE image to use
-	Preemptible bool   `json:"preemptible"`  // use preemptible VMs if available (defaults to true)
+	Count         int    `json:"count"`          // number of VMs to use
+	ZoneID        string `json:"zone_id"`        // GCE zone (if it's different from that of syz-manager)
+	MachineType   string `json:"machine_type"`   // GCE machine type (e.g. "n1-highcpu-2")
+	GCSPath       string `json:"gcs_path"`       // GCS path to upload image
+	GCEImage      string `json:"gce_image"`      // pre-created GCE image to use
+	Preemptible   bool   `json:"preemptible"`    // use preemptible VMs if available (defaults to true)
+	DisplayDevice bool   `json:"display_device"` // enable a virtual display device
 }
 
 type Pool struct {
-	env *vmimpl.Env
-	cfg *Config
-	GCE *gce.Context
+	env            *vmimpl.Env
+	cfg            *Config
+	GCE            *gce.Context
+	consoleReadCmd string // optional: command to read non-standard kernel console
 }
 
 type instance struct {
-	env      *vmimpl.Env
-	cfg      *Config
-	GCE      *gce.Context
-	debug    bool
-	name     string
-	ip       string
-	gceKey   string // per-instance private ssh key associated with the instance
-	sshKey   string // ssh key
-	sshUser  string
-	closed   chan bool
-	consolew io.WriteCloser
+	env            *vmimpl.Env
+	cfg            *Config
+	GCE            *gce.Context
+	debug          bool
+	name           string
+	ip             string
+	gceKey         string // per-instance private ssh key associated with the instance
+	sshKey         string // ssh key
+	sshUser        string
+	closed         chan bool
+	consolew       io.WriteCloser
+	consoleReadCmd string // optional: command to read non-standard kernel console
 }
 
 func ctor(env *vmimpl.Env) (vmimpl.Pool, error) {
+	return Ctor(env, "")
+}
+
+func Ctor(env *vmimpl.Env, consoleReadCmd string) (*Pool, error) {
 	if env.Name == "" {
 		return nil, fmt.Errorf("config param name is empty (required for GCE)")
 	}
 	cfg := &Config{
-		Count:       1,
-		Preemptible: true,
+		Count:         1,
+		Preemptible:   true,
+		DisplayDevice: true,
 	}
 	if err := config.LoadData(env.Config, cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse gce vm config: %v", err)
@@ -97,7 +106,7 @@ func ctor(env *vmimpl.Env) (vmimpl.Pool, error) {
 		return nil, fmt.Errorf("both image and gce_image are specified")
 	}
 
-	GCE, err := gce.NewContext()
+	GCE, err := gce.NewContext(cfg.ZoneID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init gce: %v", err)
 	}
@@ -120,9 +129,10 @@ func ctor(env *vmimpl.Env) (vmimpl.Pool, error) {
 		}
 	}
 	pool := &Pool{
-		cfg: cfg,
-		env: env,
-		GCE: GCE,
+		cfg:            cfg,
+		env:            env,
+		GCE:            GCE,
+		consoleReadCmd: consoleReadCmd,
 	}
 	return pool, nil
 }
@@ -135,7 +145,7 @@ func (pool *Pool) Create(workdir string, index int) (vmimpl.Instance, error) {
 	name := fmt.Sprintf("%v-%v", pool.env.Name, index)
 	// Create SSH key for the instance.
 	gceKey := filepath.Join(workdir, "key")
-	keygen := osutil.Command("ssh-keygen", "-t", "rsa", "-b", "2048", "-N", "", "-C", "syzkaller", "-f", gceKey)
+	keygen := osutil.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", "syzkaller", "-f", gceKey)
 	if out, err := keygen.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("failed to execute ssh-keygen: %v\n%s", err, out)
 	}
@@ -150,7 +160,7 @@ func (pool *Pool) Create(workdir string, index int) (vmimpl.Instance, error) {
 	}
 	log.Logf(0, "creating instance: %v", name)
 	ip, err := pool.GCE.CreateInstance(name, pool.cfg.MachineType, pool.cfg.GCEImage,
-		string(gceKeyPub), pool.cfg.Preemptible)
+		string(gceKeyPub), pool.cfg.Preemptible, pool.cfg.DisplayDevice)
 	if err != nil {
 		return nil, err
 	}
@@ -179,16 +189,17 @@ func (pool *Pool) Create(workdir string, index int) (vmimpl.Instance, error) {
 	}
 	ok = true
 	inst := &instance{
-		env:     pool.env,
-		cfg:     pool.cfg,
-		debug:   pool.env.Debug,
-		GCE:     pool.GCE,
-		name:    name,
-		ip:      ip,
-		gceKey:  gceKey,
-		sshKey:  sshKey,
-		sshUser: sshUser,
-		closed:  make(chan bool),
+		env:            pool.env,
+		cfg:            pool.cfg,
+		debug:          pool.env.Debug,
+		GCE:            pool.GCE,
+		name:           name,
+		ip:             ip,
+		gceKey:         gceKey,
+		sshKey:         sshKey,
+		sshUser:        sshUser,
+		closed:         make(chan bool),
+		consoleReadCmd: pool.consoleReadCmd,
 	}
 	return inst, nil
 }
@@ -221,9 +232,16 @@ func (inst *instance) Run(timeout time.Duration, stop <-chan bool, command strin
 		return nil, nil, err
 	}
 
-	conAddr := fmt.Sprintf("%v.%v.%v.syzkaller.port=1@ssh-serialport.googleapis.com",
-		inst.GCE.ProjectID, inst.GCE.ZoneID, inst.name)
-	conArgs := append(vmimpl.SSHArgs(inst.debug, inst.gceKey, 9600), conAddr)
+	var conArgs []string
+	if inst.consoleReadCmd == "" {
+		conAddr := fmt.Sprintf("%v.%v.%v.syzkaller.port=1@ssh-serialport.googleapis.com",
+			inst.GCE.ProjectID, inst.GCE.ZoneID, inst.name)
+		conArgs = append(vmimpl.SSHArgs(inst.debug, inst.gceKey, 9600), conAddr)
+		// TODO: remove this later (see also a comment in getSerialPortOutput).
+		conArgs = append(conArgs, "-o", "HostKeyAlgorithms=+ssh-rsa")
+	} else {
+		conArgs = inst.sshArgs(inst.consoleReadCmd)
+	}
 	con := osutil.Command("ssh", conArgs...)
 	con.Env = []string{}
 	con.Stdout = conWpipe
@@ -308,13 +326,13 @@ func (inst *instance) Run(timeout time.Duration, stop <-chan bool, command strin
 			} else if merr, ok := err.(vmimpl.MergerError); ok && merr.R == conRpipe {
 				// Console connection must never fail. If it does, it's either
 				// instance preemption or a GCE bug. In either case, not a kernel bug.
-				log.Logf(1, "%v: gce console connection failed with %v", inst.name, merr.Err)
+				log.Logf(0, "%v: gce console connection failed with %v", inst.name, merr.Err)
 				err = vmimpl.ErrTimeout
 			} else {
 				// Check if the instance was terminated due to preemption or host maintenance.
 				time.Sleep(5 * time.Second) // just to avoid any GCE races
 				if !inst.GCE.IsInstanceRunning(inst.name) {
-					log.Logf(1, "%v: ssh exited but instance is not running", inst.name)
+					log.Logf(0, "%v: ssh exited but instance is not running", inst.name)
 					err = vmimpl.ErrTimeout
 				}
 			}
@@ -400,6 +418,9 @@ func (pool *Pool) getSerialPortOutput(name, gceKey string) ([]byte, error) {
 	conAddr := fmt.Sprintf("%v.%v.%v.syzkaller.port=1.replay-lines=10000@ssh-serialport.googleapis.com",
 		pool.GCE.ProjectID, pool.GCE.ZoneID, name)
 	conArgs := append(vmimpl.SSHArgs(pool.env.Debug, gceKey, 9600), conAddr)
+	// TODO(blackgnezdo): Remove this once ssh-serialport.googleapis.com stops using
+	// host key algorithm: ssh-rsa.
+	conArgs = append(conArgs, "-o", "HostKeyAlgorithms=+ssh-rsa")
 	con := osutil.Command("ssh", conArgs...)
 	con.Env = []string{}
 	con.Stdout = conWpipe

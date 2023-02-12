@@ -8,14 +8,18 @@ import (
 )
 
 func (p *Prog) Clone() *Prog {
-	p1 := &Prog{
-		Target:    p.Target,
-		Calls:     make([]*Call, len(p.Calls)),
-		Threaded:  p.Threaded,
-		Contender: Contender{Calls: append([]int{}, p.Contender.Calls...)},
-	}
 	newargs := make(map[*ResultArg]*ResultArg)
-	for ci, c := range p.Calls {
+	p1 := &Prog{
+		Target: p.Target,
+		Calls:  cloneCalls(p.Calls, newargs),
+	}
+	p1.debugValidate()
+	return p1
+}
+
+func cloneCalls(origCalls []*Call, newargs map[*ResultArg]*ResultArg) []*Call {
+	calls := make([]*Call, len(origCalls))
+	for ci, c := range origCalls {
 		c1 := new(Call)
 		c1.Meta = c.Meta
 		if c.Ret != nil {
@@ -25,28 +29,10 @@ func (p *Prog) Clone() *Prog {
 		for ai, arg := range c.Args {
 			c1.Args[ai] = clone(arg, newargs)
 		}
-		c1.Thread, c1.Epoch = c.Thread, c.Epoch
-		p1.Calls[ci] = c1
+		c1.Props = c.Props
+		calls[ci] = c1
 	}
-	scheduleClone(p, p1)
-	p1.debugValidate()
-	return p1
-}
-
-func scheduleClone(p, p1 *Prog) {
-	for _, pnt := range p.Schedule.points {
-		pnt1 := Point{
-			addr:  pnt.addr,
-			order: pnt.order,
-		}
-		for ci, c := range p.Calls {
-			if pnt.call == c {
-				pnt1.call = p1.Calls[ci]
-				break
-			}
-		}
-		p1.Schedule.points = append(p1.Schedule.points, pnt1)
-	}
+	return calls
 }
 
 func clone(arg Arg, newargs map[*ResultArg]*ResultArg) Arg {
@@ -86,15 +72,20 @@ func clone(arg Arg, newargs map[*ResultArg]*ResultArg) Arg {
 		*a1 = *a
 		arg1 = a1
 		if a1.Res != nil {
-			r := newargs[a1.Res]
-			a1.Res = r
+			r := a1.Res
+			if newargs != nil {
+				r = newargs[a1.Res]
+				a1.Res = r
+			}
 			if r.uses == nil {
 				r.uses = make(map[*ResultArg]bool)
 			}
 			r.uses[a1] = true
 		}
 		a1.uses = nil // filled when we clone the referent
-		newargs[a] = a1
+		if newargs != nil {
+			newargs[a] = a1
+		}
 	default:
 		panic(fmt.Sprintf("bad arg kind: %#v", arg))
 	}

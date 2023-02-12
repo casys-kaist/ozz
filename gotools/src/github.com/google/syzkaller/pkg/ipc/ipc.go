@@ -17,7 +17,6 @@ import (
 	"unsafe"
 
 	"github.com/google/syzkaller/pkg/cover"
-	"github.com/google/syzkaller/pkg/interleaving"
 	"github.com/google/syzkaller/pkg/osutil"
 	"github.com/google/syzkaller/pkg/signal"
 	"github.com/google/syzkaller/prog"
@@ -43,25 +42,24 @@ const (
 	FlagEnableDevlinkPCI                         // setup devlink PCI device
 	FlagEnableVhciInjection                      // setup and use /dev/vhci for hci packet injection
 	FlagEnableWifi                               // setup and use mac80211_hwsim for wifi emulation
+	FlagDelayKcovMmap                            // manage kcov memory in an optimized way
+	FlagEnableNicVF                              // setup NIC VF device
 )
 
 // Per-exec flags for ExecOpts.Flags.
 type ExecFlags uint64
 
 const (
-	FlagCollectCover         ExecFlags = 1 << iota // collect coverage
+	FlagCollectSignal        ExecFlags = 1 << iota // collect feedback signals
+	FlagCollectCover                               // collect coverage
 	FlagDedupCover                                 // deduplicate coverage in executor
-	FlagInjectFault                                // inject a fault in this execution (see ExecOpts)
 	FlagCollectComps                               // collect KCOV comparisons
 	FlagThreaded                                   // use multiple threads to mitigate blocked syscalls
-	FlagCollide                                    // collide syscalls to provoke data races
 	FlagEnableCoverageFilter                       // setup and use bitmap to do coverage filter
 )
 
 type ExecOpts struct {
-	Flags     ExecFlags
-	FaultCall int // call index for fault injection (0-based)
-	FaultNth  int // fault n-th operation in the call (0-based)
+	Flags ExecFlags
 }
 
 // Config is the configuration for Env.
@@ -73,7 +71,8 @@ type Config struct {
 	UseForkServer bool // use extended protocol with handshake
 
 	// Flags are configuation flags, defined above.
-	Flags EnvFlags
+	Flags      EnvFlags
+	SandboxArg int
 
 	Timeouts targets.Timeouts
 }
@@ -85,7 +84,6 @@ const (
 	CallFinished                            // finished executing (rather than blocked forever)
 	CallBlocked                             // finished but blocked during execution
 	CallFaultInjected                       // fault was injected into this call
-	CallRetry
 )
 
 type CallInfo struct {
@@ -93,17 +91,8 @@ type CallInfo struct {
 	Signal []uint32 // feedback signal, filled if FlagSignal is set
 	Cover  []uint32 // per-call coverage, filled if FlagSignal is set and cover == true,
 	// if dedup == false, then cov effectively contains a trace, otherwise duplicates are removed
-	Comps  prog.CompMap // per-call comparison operands
-	Access interleaving.SerialAccess
-	Errno  int // call errno (0 if the call was successful)
-	// information about what happened for each schedpoint
-	SchedpointOutcome []SchedpointOutcome
-	ConcurrencyInfo
-}
-
-type ConcurrencyInfo struct {
-	Thread uint64
-	Epoch  uint64
+	Comps prog.CompMap // per-call comparison operands
+	Errno int          // call errno (0 if the call was successful)
 }
 
 type ProgInfo struct {
@@ -202,7 +191,7 @@ func MakeEnv(config *Config, pid int) (*Env, error) {
 		out:     outmem,
 		inFile:  inf,
 		outFile: outf,
-		bin:     strings.Split(config.Executor, " "),
+		bin:     append(strings.Split(config.Executor, " "), "exec"),
 		pid:     pid,
 		config:  config,
 	}
@@ -302,7 +291,7 @@ func (env *Env) Exec(opts *ExecOpts, p *prog.Prog) (output []byte, info *ProgInf
 		return
 	}
 
-	info, err0 = env.parseOutput(p)
+	info, err0 = env.parseOutput(p, opts)
 	if info != nil && env.config.Flags&FlagSignal == 0 {
 		addFallbackSignal(p, info)
 	}
@@ -336,7 +325,7 @@ func addFallbackSignal(p *prog.Prog, info *ProgInfo) {
 	}
 }
 
-func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
+func (env *Env) parseOutput(p *prog.Prog, opts *ExecOpts) (*ProgInfo, error) {
 	out := env.out
 	ncmd, ok := readUint32(&out)
 	if !ok {
@@ -351,6 +340,9 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 		reply := *(*callReply)(unsafe.Pointer(&out[0]))
 		out = out[unsafe.Sizeof(callReply{}):]
 		var inf *CallInfo
+		if reply.magic != outMagic {
+			return nil, fmt.Errorf("bad reply magic 0x%x", reply.magic)
+		}
 		if reply.index != extraReplyIndex {
 			if int(reply.index) >= len(info.Calls) {
 				return nil, fmt.Errorf("bad call %v index %v/%v", i, reply.index, len(info.Calls))
@@ -364,10 +356,6 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 			}
 			inf.Errno = int(reply.errno)
 			inf.Flags = CallFlags(reply.flags)
-			inf.ConcurrencyInfo = ConcurrencyInfo{
-				Thread: p.Calls[reply.index].Thread,
-				Epoch:  p.Calls[reply.index].Epoch,
-			}
 		} else {
 			extraParts = append(extraParts, CallInfo{})
 			inf = &extraParts[len(extraParts)-1]
@@ -380,41 +368,36 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 			return nil, fmt.Errorf("call %v/%v/%v: cover overflow: %v/%v",
 				i, reply.index, reply.num, reply.coverSize, len(out))
 		}
-		if inf.Access, ok = readReadFromCoverages(&out, reply.rfCoverSize, inf); !ok {
-			return nil, fmt.Errorf("call %v/%v%v: rfcover overflow: %v/%v",
-				i, reply.index, reply.num, reply.rfCoverSize, len(out))
-		}
-		if p.Threaded && !p.IsContender(int(reply.index)) {
-			// If p is threaded, and the call is not a contender, we
-			// don't need to keep Accesses.
-			inf.Access = nil
-		}
 		comps, err := readComps(&out, reply.compsSize)
 		if err != nil {
 			return nil, err
 		}
 		inf.Comps = comps
-		if inf.SchedpointOutcome, ok = readFootprint(&out, reply.footprintSize); !ok {
-			return nil, fmt.Errorf("call %v/%v%v: footprint: %v/%v",
-				i, reply.index, reply.num, reply.footprintSize, len(out))
-		}
 	}
 	if len(extraParts) == 0 {
 		return info, nil
 	}
-	info.Extra = convertExtra(extraParts)
+	info.Extra = convertExtra(extraParts, opts.Flags&FlagDedupCover > 0)
 	return info, nil
 }
 
-func convertExtra(extraParts []CallInfo) CallInfo {
+func convertExtra(extraParts []CallInfo, dedupCover bool) CallInfo {
 	var extra CallInfo
-	extraCover := make(cover.Cover)
+	if dedupCover {
+		extraCover := make(cover.Cover)
+		for _, part := range extraParts {
+			extraCover.Merge(part.Cover)
+		}
+		extra.Cover = extraCover.Serialize()
+	} else {
+		for _, part := range extraParts {
+			extra.Cover = append(extra.Cover, part.Cover...)
+		}
+	}
 	extraSignal := make(signal.Signal)
 	for _, part := range extraParts {
-		extraCover.Merge(part.Cover)
 		extraSignal.Merge(signal.FromRaw(part.Signal, 0))
 	}
-	extra.Cover = extraCover.Serialize()
 	extra.Signal = make([]uint32, len(extraSignal))
 	i := 0
 	for s := range extraSignal {
@@ -504,54 +487,6 @@ func readUint32Array(outp *[]byte, size uint32) ([]uint32, bool) {
 	return res, true
 }
 
-func readReadFromCoverages(outp *[]byte, size uint32, inf *CallInfo) (interleaving.SerialAccess, bool) {
-	array, ok := readUint32Array(outp, size*5)
-	if !ok {
-		return nil, false
-	}
-	if len(array)%5 != 0 {
-		return nil, false
-	}
-	var res interleaving.SerialAccess
-	for i := 0; i < len(array); i += 5 {
-		res = append(res, interleaving.Access{
-			Inst:      array[i],
-			Addr:      array[i+1],
-			Size:      array[i+2],
-			Typ:       array[i+3],
-			Timestamp: array[i+4],
-			Thread:    inf.Thread,
-			// Epoch: inf.Epoch,
-		})
-	}
-	return res, true
-}
-
-type SchedpointOutcome struct {
-	Order     uint32
-	Footprint Footprint
-}
-
-type Footprint uint32
-
-func readFootprint(outp *[]byte, size uint32) ([]SchedpointOutcome, bool) {
-	array, ok := readUint32Array(outp, size*2)
-	if !ok {
-		return nil, false
-	}
-	if len(array)%2 != 0 {
-		return nil, false
-	}
-	res := make([]SchedpointOutcome, 0, size)
-	for i := 0; i < len(array); i += 2 {
-		res = append(res, SchedpointOutcome{
-			Order:     array[i],
-			Footprint: Footprint(array[i+1]),
-		})
-	}
-	return res, true
-}
-
 type command struct {
 	pid      int
 	config   *Config
@@ -559,7 +494,7 @@ type command struct {
 	cmd      *exec.Cmd
 	dir      string
 	readDone chan []byte
-	exited   chan struct{}
+	exited   chan error
 	inrp     *os.File
 	outwp    *os.File
 	outmem   []byte
@@ -571,9 +506,10 @@ const (
 )
 
 type handshakeReq struct {
-	magic uint64
-	flags uint64 // env flags
-	pid   uint64
+	magic      uint64
+	flags      uint64 // env flags
+	pid        uint64
+	sandboxArg uint64
 }
 
 type handshakeReply struct {
@@ -585,8 +521,6 @@ type executeReq struct {
 	envFlags         uint64 // env flags
 	execFlags        uint64 // exec flags
 	pid              uint64
-	faultCall        uint64
-	faultNth         uint64
 	syscallTimeoutMS uint64
 	programTimeoutMS uint64
 	slowdownScale    uint64
@@ -604,6 +538,7 @@ type executeReply struct {
 }
 
 type callReply struct {
+	magic      uint32
 	index      uint32 // call index in the program
 	num        uint32 // syscall number (for cross-checking)
 	errno      uint32
@@ -611,10 +546,6 @@ type callReply struct {
 	signalSize uint32
 	coverSize  uint32
 	compsSize  uint32
-	// Read-from coverage
-	rfCoverSize uint32
-	// Footprint of each schedpoint
-	footprintSize uint32
 	// signal/cover/comps follow
 }
 
@@ -675,7 +606,6 @@ func makeCommand(pid int, bin []string, config *Config, inFile, outFile *os.File
 	c.outwp = outwp
 
 	c.readDone = make(chan []byte, 1)
-	c.exited = make(chan struct{})
 
 	cmd := osutil.Command(bin[0], bin[1:]...)
 	if inFile != nil && outFile != nil {
@@ -717,7 +647,15 @@ func makeCommand(pid int, bin []string, config *Config, inFile, outFile *os.File
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start executor binary: %v", err)
 	}
+	c.exited = make(chan error, 1)
 	c.cmd = cmd
+	go func(c *command) {
+		err := c.cmd.Wait()
+		c.exited <- err
+		close(c.exited)
+		// Avoid a livelock if cmd.Stderr has been leaked to another alive process.
+		rp.SetDeadline(time.Now().Add(5 * time.Second))
+	}(c)
 	wp.Close()
 	// Note: we explicitly close inwp before calling handshake even though we defer it above.
 	// If we don't do it and executor exits before writing handshake reply,
@@ -751,9 +689,10 @@ func (c *command) close() {
 // handshake sends handshakeReq and waits for handshakeReply.
 func (c *command) handshake() error {
 	req := &handshakeReq{
-		magic: inMagic,
-		flags: uint64(c.config.Flags),
-		pid:   uint64(c.pid),
+		magic:      inMagic,
+		flags:      uint64(c.config.Flags),
+		pid:        uint64(c.pid),
+		sandboxArg: uint64(c.config.SandboxArg),
 	}
 	reqData := (*[unsafe.Sizeof(*req)]byte)(unsafe.Pointer(req))[:]
 	if _, err := c.outwp.Write(reqData); err != nil {
@@ -797,14 +736,7 @@ func (c *command) handshakeError(err error) error {
 }
 
 func (c *command) wait() error {
-	err := c.cmd.Wait()
-	select {
-	case <-c.exited:
-		// c.exited closed by an earlier call to wait.
-	default:
-		close(c.exited)
-	}
-	return err
+	return <-c.exited
 }
 
 func (c *command) exec(opts *ExecOpts, progData []byte) (output []byte, hanged bool, err0 error) {
@@ -813,8 +745,6 @@ func (c *command) exec(opts *ExecOpts, progData []byte) (output []byte, hanged b
 		envFlags:         uint64(c.config.Flags),
 		execFlags:        uint64(opts.Flags),
 		pid:              uint64(c.pid),
-		faultCall:        uint64(opts.FaultCall),
-		faultNth:         uint64(opts.FaultNth),
 		syscallTimeoutMS: uint64(c.config.Timeouts.Syscall / time.Millisecond),
 		programTimeoutMS: uint64(c.config.Timeouts.Program / time.Millisecond),
 		slowdownScale:    uint64(c.config.Timeouts.Scale),
@@ -865,8 +795,6 @@ func (c *command) exec(opts *ExecOpts, progData []byte) (output []byte, hanged b
 			exitStatus = int(reply.status)
 			break
 		}
-		// NOTE: In this project (i.e., relrazzer), below codes will
-		// never be executed.
 		callReply := &callReply{}
 		callReplyData := (*[unsafe.Sizeof(*callReply)]byte)(unsafe.Pointer(callReply))[:]
 		if _, err := io.ReadFull(c.inrp, callReplyData); err != nil {

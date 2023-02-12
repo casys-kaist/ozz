@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <errno.h>
 #include <limits.h>
-#include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stddef.h>
@@ -22,20 +21,14 @@
 
 #include "defs.h"
 
-#include "hypercall.h"
-
 #if defined(__GNUC__)
 #define SYSCALLAPI
 #define NORETURN __attribute__((noreturn))
-#define ALIGNED(N) __attribute__((aligned(N)))
 #define PRINTF(fmt, args) __attribute__((format(printf, fmt, args)))
-#define INPUT_DATA_ALIGNMENT 64 << 10
 #else
 // Assuming windows/cl.
 #define SYSCALLAPI WINAPI
 #define NORETURN __declspec(noreturn)
-#define INPUT_DATA_ALIGNMENT 4 << 10
-#define ALIGNED(N) __declspec(align(N)) // here we are not aligning the value because of msvc reporting the value as an illegal value
 #define PRINTF(fmt, args)
 #define __thread __declspec(thread)
 #endif
@@ -45,12 +38,6 @@
 #endif
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-
-enum cov_type {
-	code_coverage = 0,
-	read_from_coverage,
-	nr_cov_type,
-};
 
 // uint64 is impossible to printf without using the clumsy and verbose "%" PRId64.
 // So we define and use uint64. Note: pkg/csource does s/uint64/uint64/.
@@ -75,33 +62,19 @@ typedef unsigned char uint8;
 // Note: zircon max fd is 256.
 // Some common_OS.h files know about this constant for RLIMIT_NOFILE.
 const int kMaxFd = 250;
-const int kMaxThreads = 4;
-const int kMaxSchedule = 128;
-const int kMaxVector = 32;
-const int kMaxFallbackThreads = 3;
-const int kMaxPendingThreads = 1;
+const int kMaxThreads = 32;
 const int kInPipeFd = kMaxFd - 1; // remapped from stdin
 const int kOutPipeFd = kMaxFd - 2; // remapped from stdout
-const int kCoverFd = kOutPipeFd - (kMaxThreads * kMaxFallbackThreads) * nr_cov_type;
+const int kCoverFd = kOutPipeFd - kMaxThreads;
+const int kExtraCoverFd = kCoverFd - 1;
 const int kMaxArgs = 9;
-const int kMaxCPU = 8;
-#define __mask(n) (1 << (n))
-const int kCPUMask[kMaxCPU] = {
-    __mask(0),
-    __mask(1),
-    __mask(2),
-    __mask(3),
-    __mask(4),
-    __mask(5),
-    __mask(6),
-    __mask(7),
-};
-__attribute__((unused))
-const int kCPUMaskAll = 0xff;
 const int kCoverSize = 256 << 10;
 const int kFailStatus = 67;
 
-const int kSSBSwitch = 503;
+// Two approaches of dealing with kcov memory.
+const int kCoverOptimizedCount = 12; // the number of kcov instances to be opened inside main()
+const int kCoverOptimizedPreMmap = 3; // this many will be mmapped inside main(), others - when needed.
+const int kCoverDefaultCount = 6; // otherwise we only init kcov instances inside main()
 
 // Logical error (e.g. invalid input program), use as an assert() alternative.
 // If such error happens 10+ times in a row, it will be detected as a bug by syz-fuzzer.
@@ -113,13 +86,15 @@ static NORETURN PRINTF(2, 3) void failmsg(const char* err, const char* msg, ...)
 // Just exit (e.g. due to temporal ENOMEM error).
 static NORETURN PRINTF(1, 2) void exitf(const char* msg, ...);
 static NORETURN void doexit(int status);
+#if !GOOS_fuchsia
+static NORETURN void doexit_thread(int status);
+#endif
 
 // Print debug output that is visible when running syz-manager/execprog with -debug flag.
 // Debug output is supposed to be relatively high-level (syscalls executed, return values, timing, etc)
 // and is intended mostly for end users. If you need to debug lower-level details, use debug_verbose
 // function and temporary enable it in your build by changing #if 0 below.
 // This function does not add \n at the end of msg as opposed to the previous functions.
-static PRINTF(1, 2) void debug_noprefix(const char* msg, ...);
 static PRINTF(1, 2) void debug(const char* msg, ...);
 void debug_dump_data(const char* data, int length);
 
@@ -127,19 +102,6 @@ void debug_dump_data(const char* data, int length);
 #define debug_verbose(...) debug(__VA_ARGS__)
 #else
 #define debug_verbose(...) (void)0
-#endif
-
-#define _DEBUG
-#ifdef _DEBUG
-#define WARN_ON_NOT_NULL(exp, name)                                                 \
-	{                                                                           \
-		unsigned long _ret = exp;                                           \
-		if (_ret != 0)                                                      \
-			debug("[WARN] %s returns non-zero, ret=%lu\n", name, _ret); \
-	}
-#else
-#define WARN_ON_NOT_NULL(exp, name) \
-	exp
 #endif
 
 static void receive_execute();
@@ -155,17 +117,42 @@ static void reply_handshake();
 #endif
 
 #if SYZ_EXECUTOR_USES_SHMEM
-const int kMaxOutput = 16 << 20;
+// The output region is the only thing in executor process for which consistency matters.
+// If it is corrupted ipc package will fail to parse its contents and panic.
+// But fuzzer constantly invents new ways of how to corrupt the region,
+// so we map the region at a (hopefully) hard to guess address with random offset,
+// surrounded by unmapped pages.
+// The address chosen must also work on 32-bit kernels with 1GB user address space.
+const uint64 kOutputBase = 0x1b2bc20000ull;
+
+#if SYZ_EXECUTOR_USES_FORK_SERVER
+// Allocating (and forking) virtual memory for each executed process is expensive, so we only mmap
+// the amount we might possibly need for the specific received prog.
+const int kMaxOutputComparisons = 14 << 20; // executions with comparsions enabled are usually < 1% of all executions
+const int kMaxOutputCoverage = 6 << 20; // coverage is needed in ~ up to 1/3 of all executions (depending on corpus rotation)
+const int kMaxOutputSignal = 4 << 20;
+const int kMinOutput = 256 << 10; // if we don't need to send signal, the output is rather short.
+const int kInitialOutput = kMinOutput; // the minimal size to be allocated in the parent process
+#else
+// We don't fork and allocate the memory only once, so prepare for the worst case.
+const int kInitialOutput = 14 << 20;
+#endif
+
+// TODO: allocate a smaller amount of memory in the parent once we merge the patches that enable
+// prog execution with neither signal nor coverage. Likely 64kb will be enough in that case.
+
 const int kInFd = 3;
 const int kOutFd = 4;
 static uint32* output_data;
 static uint32* output_pos;
+static int output_size;
+static void mmap_output(int size);
 static uint32* write_output(uint32 v);
 static uint32* write_output_64(uint64 v);
 static void write_completed(uint32 completed);
 static uint32 hash(uint32 a);
 static bool dedup(uint32 sig);
-#endif
+#endif // if SYZ_EXECUTOR_USES_SHMEM
 
 uint64 start_time_ms = 0;
 
@@ -182,24 +169,19 @@ static bool flag_net_reset;
 static bool flag_cgroups;
 static bool flag_close_fds;
 static bool flag_devlink_pci;
+static bool flag_nic_vf;
 static bool flag_vhci_injection;
 static bool flag_wifi;
+static bool flag_delay_kcov_mmap;
 
 static bool flag_collect_cover;
+static bool flag_collect_signal;
 static bool flag_dedup_cover;
-// NOTE: We always enable flag_threaded
 static bool flag_threaded;
-// NOTE: We don't make use of flag_collide anymore
-static bool flag_collide;
 static bool flag_coverage_filter;
 
 // If true, then executor should write the comparisons data to fuzzer.
 static bool flag_comparisons;
-
-// Inject fault into flag_fault_nth-th operation in flag_fault_call-th syscall.
-static bool flag_fault;
-static int flag_fault_call;
-static int flag_fault_nth;
 
 // Tunable timeouts, received with execute_req.
 static uint64 syscall_timeout_ms;
@@ -215,7 +197,7 @@ const int kMaxCommands = 1000; // prog package knows about this constant (prog.e
 const uint64 instr_eof = -1;
 const uint64 instr_copyin = -2;
 const uint64 instr_copyout = -3;
-const uint64 instr_epoch = -4;
+const uint64 instr_setprops = -4;
 
 const uint64 arg_const = 0;
 const uint64 arg_result = 1;
@@ -230,14 +212,11 @@ const uint64 binary_format_stroct = 4;
 
 const uint64 no_copyout = -1;
 
-static int global_epoch;
 static int running;
-static bool collide;
 uint32 completed;
 bool is_kernel_64_bit = true;
 
-ALIGNED(INPUT_DATA_ALIGNMENT)
-static char input_data[kMaxInput];
+static char* input_data;
 
 // Checksum kinds.
 static const uint64 arg_csum_inet = 0;
@@ -258,7 +237,7 @@ struct call_t {
 struct cover_t {
 	int fd;
 	uint32 size;
-	enum cov_type type;
+	uint32 mmap_alloc_size;
 	char* data;
 	char* data_end;
 	// Note: On everything but darwin the first value in data is the count of
@@ -276,62 +255,32 @@ struct cover_t {
 	intptr_t pc_offset;
 };
 
-struct schedule_t {
-	uint64_t thread;
-	uint64_t addr;
-	uint64_t order;
-	uint64_t filter;
-};
-
 struct thread_t {
 	int id;
 	bool created;
 	event_t ready;
 	event_t done;
-	event_t start;
 	uint64* copyout_pos;
 	uint64 copyout_index;
-	bool colliding;
 	bool executing;
 	int call_index;
 	int call_num;
 	int num_args;
 	intptr_t args[kMaxArgs];
-	int epoch;
-	uint64 num_sched;
-	schedule_t sched[kMaxSchedule];
-	uint64 num_filter;
-	uint64 footprint[kMaxSchedule];
-	bool retry;
+	call_props_t call_props;
 	intptr_t res;
 	uint32 reserrno;
 	bool fault_injected;
 	cover_t cov;
-	cover_t rfcov;
 	bool soft_fail_state;
-	int cpu;
-	bool pending;
 };
 
-struct thread_set_t {
-	// threads running a call
-	struct thread_t set[kMaxFallbackThreads];
-	// threads pending a call
-	struct thread_t pended[kMaxPendingThreads];
-	int blocked;
-	int pending;
-};
-
-static thread_set_t threads[kMaxThreads];
+static thread_t threads[kMaxThreads];
 static thread_t* last_scheduled;
 // Threads use this variable to access information about themselves.
 static __thread struct thread_t* current_thread;
 
-// #define __EXTRA_RFCOV // TODO: Do we need to make use of extra rfcov?
 static cover_t extra_cov;
-#ifdef __EXTRA_RFCOV
-static cover_t extra_rfcov;
-#endif
 
 struct res_t {
 	bool executed;
@@ -347,6 +296,7 @@ struct handshake_req {
 	uint64 magic;
 	uint64 flags; // env flags
 	uint64 pid;
+	uint64 sandbox_arg;
 };
 
 struct handshake_reply {
@@ -358,8 +308,6 @@ struct execute_req {
 	uint64 env_flags;
 	uint64 exec_flags;
 	uint64 pid;
-	uint64 fault_call;
-	uint64 fault_nth;
 	uint64 syscall_timeout_ms;
 	uint64 program_timeout_ms;
 	uint64 slowdown_scale;
@@ -377,10 +325,10 @@ const uint32 call_flag_executed = 1 << 0;
 const uint32 call_flag_finished = 1 << 1;
 const uint32 call_flag_blocked = 1 << 2;
 const uint32 call_flag_fault_injected = 1 << 3;
-const uint32 call_flag_retry = 1 << 4;
 
 struct call_reply {
 	execute_reply header;
+	uint32 magic;
 	uint32 call_index;
 	uint32 call_num;
 	uint32 reserrno;
@@ -420,22 +368,14 @@ struct feature_t {
 	void (*setup)();
 };
 
-static thread_t* get_thread(int thread);
-static void prepare_thread(thread_t* th, int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos);
-static thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos);
-static thread_t* pending_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos);
+static thread_t* schedule_call(int call_index, int call_num, uint64 copyout_index, uint64 num_args, uint64* args, uint64* pos, call_props_t call_props);
 static void handle_completion(thread_t* th);
-static thread_t* unhand_worker_thread(thread_t* th);
 static void copyout_call_results(thread_t* th);
 static void write_call_output(thread_t* th, bool finished);
 static void write_extra_output();
 static void execute_call(thread_t* th);
-static void setup_schedule(int num_sched, schedule_t* sched);
-static bool clear_schedule(int num_sched, uint64* num_filter, uint64* footprint);
-static int lookup_available_cpu(int id);
-static void coverage_pre_call(thread_t* th);
-static void coverage_post_call(thread_t* th);
-static void thread_create(thread_t* th, int id);
+static void thread_create(thread_t* th, int id, bool need_coverage);
+static void thread_mmap_cover(thread_t* th);
 static void* worker_thread(void* arg);
 static uint64 read_input(uint64** input_posp, bool peek = false);
 static uint64 read_arg(uint64** input_posp);
@@ -446,10 +386,6 @@ static void copyin(char* addr, uint64 val, uint64 size, uint64 bf, uint64 bf_off
 static bool copyout(char* addr, uint64 size, uint64* res);
 static void setup_control_pipes();
 static void setup_features(char** enable, int n);
-static void setup_affinity_mask(int mask);
-static bool __run_in_epoch(uint32 epoch, uint32 global);
-static bool run_in_epoch(thread_t* th);
-static void feed_flush_vector(unsigned long* vector, int size);
 
 #include "syscalls.h"
 
@@ -474,6 +410,10 @@ static void feed_flush_vector(unsigned long* vector, int size);
 #include "cov_filter.h"
 
 #include "test.h"
+
+#if SYZ_HAVE_SANDBOX_ANDROID
+static uint64 sandbox_arg = 0;
+#endif
 
 int main(int argc, char** argv)
 {
@@ -504,33 +444,37 @@ int main(int argc, char** argv)
 	if (argc == 2 && strcmp(argv[1], "test") == 0)
 		return run_tests();
 
+	if (argc < 2 || strcmp(argv[1], "exec") != 0) {
+		fprintf(stderr, "unknown command");
+		return 1;
+	}
+
 	start_time_ms = current_time_ms();
 
 	os_init(argc, argv, (char*)SYZ_DATA_OFFSET, SYZ_NUM_PAGES * SYZ_PAGE_SIZE);
-	current_thread = get_thread(0);
-	setup_affinity_mask(kCPUMask[0]);
+	current_thread = &threads[0];
 
 #if SYZ_EXECUTOR_USES_SHMEM
-	if (mmap(&input_data[0], kMaxInput, PROT_READ, MAP_PRIVATE | MAP_FIXED, kInFd, 0) != &input_data[0])
+	void* mmap_out = mmap(NULL, kMaxInput, PROT_READ, MAP_PRIVATE, kInFd, 0);
+#else
+	void* mmap_out = mmap(NULL, kMaxInput, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+#endif
+	if (mmap_out == MAP_FAILED)
 		fail("mmap of input file failed");
-	// The output region is the only thing in executor process for which consistency matters.
-	// If it is corrupted ipc package will fail to parse its contents and panic.
-	// But fuzzer constantly invents new ways of how to currupt the region,
-	// so we map the region at a (hopefully) hard to guess address with random offset,
-	// surrounded by unmapped pages.
-	// The address chosen must also work on 32-bit kernels with 1GB user address space.
-	void* preferred = (void*)(0x1b2bc20000ull + (1 << 20) * (getpid() % 128));
-	output_data = (uint32*)mmap(preferred, kMaxOutput,
-				    PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, kOutFd, 0);
-	if (output_data != preferred)
-		fail("mmap of output file failed");
+	input_data = static_cast<char*>(mmap_out);
 
+#if SYZ_EXECUTOR_USES_SHMEM
+	mmap_output(kInitialOutput);
 	// Prevent test programs to mess with these fds.
 	// Due to races in collider mode, a program can e.g. ftruncate one of these fds,
 	// which will cause fuzzer to crash.
 	close(kInFd);
+#if !SYZ_EXECUTOR_USES_FORK_SERVER
 	close(kOutFd);
 #endif
+	// For SYZ_EXECUTOR_USES_FORK_SERVER, close(kOutFd) is invoked in the forked child,
+	// after the program has been received.
+#endif // if  SYZ_EXECUTOR_USES_SHMEM
 
 	use_temporary_dir();
 	install_segv_handler();
@@ -541,31 +485,29 @@ int main(int argc, char** argv)
 	receive_execute();
 #endif
 	if (flag_coverage) {
-		for (int i = 0; i < kMaxThreads; i++) {
-			thread_set_t* set = &threads[i];
-			// No need to init covers for pending
-			// threads. We don't run a call in pending
-			// threads.
-			for (int j = 0; j < kMaxFallbackThreads; j++) {
-				thread_t* th = &set->set[j];
-				int fd = kCoverFd + ((i * kMaxFallbackThreads) + j) * nr_cov_type;
-				cover_init(&th->cov, fd, code_coverage);
-				cover_init(&th->rfcov, fd + 1, read_from_coverage);
+		int create_count = kCoverDefaultCount, mmap_count = create_count;
+		if (flag_delay_kcov_mmap) {
+			create_count = kCoverOptimizedCount;
+			mmap_count = kCoverOptimizedPreMmap;
+		}
+		if (create_count > kMaxThreads)
+			create_count = kMaxThreads;
+		for (int i = 0; i < create_count; i++) {
+			threads[i].cov.fd = kCoverFd + i;
+			cover_open(&threads[i].cov, false);
+			if (i < mmap_count) {
+				// Pre-mmap coverage collection for some threads. This should be enough for almost
+				// all programs, for the remaning few ones coverage will be set up when it's needed.
+				thread_mmap_cover(&threads[i]);
 			}
 		}
+		extra_cov.fd = kExtraCoverFd;
 		cover_open(&extra_cov, true);
+		cover_mmap(&extra_cov);
 		cover_protect(&extra_cov);
-#ifdef __EXTRA_RFCOV
-		extra_rfcov.type = read_from_coverage
-		    cover_open(&extra_rfcov, true);
-		cover_protect(&extra_rfcov);
-#endif
 		if (flag_extra_coverage) {
 			// Don't enable comps because we don't use them in the fuzzer yet.
 			cover_enable(&extra_cov, false, true);
-#ifdef __EXTRA_RFCOV
-			cover_enable(&extra_rfcov, false, false);
-#endif
 		}
 		char sep = '/';
 #if GOOS_windows
@@ -593,7 +535,7 @@ int main(int argc, char** argv)
 #endif
 #if SYZ_HAVE_SANDBOX_ANDROID
 	else if (flag_sandbox_android)
-		status = do_sandbox_android();
+		status = do_sandbox_android(sandbox_arg);
 #endif
 	else
 		fail("unknown sandbox type");
@@ -617,6 +559,33 @@ int main(int argc, char** argv)
 	return status;
 #endif
 }
+
+#if SYZ_EXECUTOR_USES_SHMEM
+// This method can be invoked as many times as one likes - MMAP_FIXED can overwrite the previous
+// mapping without any problems. The only precondition - kOutFd must not be closed.
+static void mmap_output(int size)
+{
+	if (size <= output_size)
+		return;
+	if (size % SYZ_PAGE_SIZE != 0)
+		failmsg("trying to mmap output area that is not divisible by page size", "page=%d,area=%d", SYZ_PAGE_SIZE, size);
+	uint32* mmap_at = NULL;
+	if (output_data == NULL) {
+		// It's the first time we map output region - generate its location.
+		output_data = mmap_at = (uint32*)(kOutputBase + (1 << 20) * (getpid() % 128));
+	} else {
+		// We are expanding the mmapped region. Adjust the parameters to avoid mmapping already
+		// mmapped area as much as possible.
+		// There exists a mremap call that could have helped, but it's purely Linux-specific.
+		mmap_at = (uint32*)((char*)(output_data) + output_size);
+	}
+	void* result = mmap(mmap_at, size - output_size,
+			    PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, kOutFd, output_size);
+	if (result != mmap_at)
+		failmsg("mmap of output file failed", "want %p, got %p", mmap_at, result);
+	output_size = size;
+}
+#endif
 
 void setup_control_pipes()
 {
@@ -645,7 +614,7 @@ void parse_env_flags(uint64 flags)
 		flag_sandbox_android = true;
 	else
 		flag_sandbox_none = true;
-	flag_extra_coverage = false;
+	flag_extra_coverage = flags & (1 << 5);
 	flag_net_injection = flags & (1 << 6);
 	flag_net_devices = flags & (1 << 7);
 	flag_net_reset = flags & (1 << 8);
@@ -654,6 +623,8 @@ void parse_env_flags(uint64 flags)
 	flag_devlink_pci = flags & (1 << 11);
 	flag_vhci_injection = flags & (1 << 12);
 	flag_wifi = flags & (1 << 13);
+	flag_delay_kcov_mmap = flags & (1 << 14);
+	flag_nic_vf = flags & (1 << 15);
 }
 
 #if SYZ_EXECUTOR_USES_FORK_SERVER
@@ -665,6 +636,9 @@ void receive_handshake()
 		failmsg("handshake read failed", "read=%d", n);
 	if (req.magic != kInMagic)
 		failmsg("bad handshake magic", "magic=0x%llx", req.magic);
+#if SYZ_HAVE_SANDBOX_ANDROID
+	sandbox_arg = req.sandbox_arg;
+#endif
 	parse_env_flags(req.flags);
 	procid = req.pid;
 }
@@ -694,25 +668,18 @@ void receive_execute()
 	syscall_timeout_ms = req.syscall_timeout_ms;
 	program_timeout_ms = req.program_timeout_ms;
 	slowdown_scale = req.slowdown_scale;
-	flag_collect_cover = req.exec_flags & (1 << 0);
-	flag_dedup_cover = req.exec_flags & (1 << 1);
-	flag_fault = req.exec_flags & (1 << 2);
-	// flag_comparisions might be useful but we don't use it at
-	// this point.
-	flag_comparisons = false;
-	// NOTE: We always enable flag_threaded
-	flag_threaded = true;
-	// NOTE: We don't make use of flag_collide anymore
-	flag_collide = false;
-	flag_coverage_filter = req.exec_flags & (1 << 6);
-	flag_fault_call = req.fault_call;
-	flag_fault_nth = req.fault_nth;
-	debug("[%llums] exec opts: procid=%llu threaded=%d collide=%d cover=%d comps=%d dedup=%d fault=%d/%d/%d"
+	flag_collect_signal = req.exec_flags & (1 << 0);
+	flag_collect_cover = req.exec_flags & (1 << 1);
+	flag_dedup_cover = req.exec_flags & (1 << 2);
+	flag_comparisons = req.exec_flags & (1 << 3);
+	flag_threaded = req.exec_flags & (1 << 4);
+	flag_coverage_filter = req.exec_flags & (1 << 5);
+
+	debug("[%llums] exec opts: procid=%llu threaded=%d cover=%d comps=%d dedup=%d signal=%d"
 	      " timeouts=%llu/%llu/%llu prog=%llu filter=%d\n",
-	      current_time_ms() - start_time_ms, procid, flag_threaded, flag_collide,
-	      flag_collect_cover, flag_comparisons, flag_dedup_cover, flag_fault,
-	      flag_fault_call, flag_fault_nth, syscall_timeout_ms, program_timeout_ms, slowdown_scale,
-	      req.prog_size, flag_coverage_filter);
+	      current_time_ms() - start_time_ms, procid, flag_threaded, flag_collect_cover,
+	      flag_comparisons, flag_dedup_cover, flag_collect_signal, syscall_timeout_ms,
+	      program_timeout_ms, slowdown_scale, req.prog_size, flag_coverage_filter);
 	if (syscall_timeout_ms == 0 || program_timeout_ms <= syscall_timeout_ms || slowdown_scale == 0)
 		failmsg("bad timeouts", "syscall=%llu, program=%llu, scale=%llu",
 			syscall_timeout_ms, program_timeout_ms, slowdown_scale);
@@ -725,7 +692,7 @@ void receive_execute()
 		fail("need_prog: no program");
 	uint64 pos = 0;
 	for (;;) {
-		ssize_t rv = read(kInPipeFd, input_data + pos, sizeof(input_data) - pos);
+		ssize_t rv = read(kInPipeFd, input_data + pos, kMaxInput - pos);
 		if (rv < 0)
 			fail("read failed");
 		pos += rv;
@@ -734,6 +701,11 @@ void receive_execute()
 	}
 	if (pos != req.prog_size)
 		failmsg("bad input size", "size=%lld, want=%lld", pos, req.prog_size);
+}
+
+bool cover_collection_required()
+{
+	return flag_coverage && (flag_collect_signal || flag_collect_cover || flag_comparisons);
 }
 
 #if GOOS_akaros
@@ -757,140 +729,36 @@ void reply_execute(int status)
 		fail("control pipe write failed");
 }
 
-static void prepare_schedule(void)
+#if SYZ_EXECUTOR_USES_SHMEM
+void realloc_output_data()
 {
-	bool need_prepare = false;
-	int num_schedpoints = 0;
-	int num_cpus = 0;
-	for (int i = 0; i < kMaxThreads; i++) {
-		thread_t* th = get_thread(i);
-		if (!th->created || !event_isset(&th->ready) || th->num_sched == 0 || !run_in_epoch(th))
-			continue;
-		num_cpus++;
-		num_schedpoints += th->num_sched;
-		need_prepare = true;
-	}
-	if (!need_prepare)
-		return;
-	WARN_ON_NOT_NULL(hypercall(HCALL_PREPARE, num_schedpoints, num_cpus, 0), "HCALL_PREPARE");
+#if SYZ_EXECUTOR_USES_FORK_SERVER
+	if (flag_comparisons)
+		mmap_output(kMaxOutputComparisons);
+	else if (flag_collect_cover)
+		mmap_output(kMaxOutputCoverage);
+	else if (flag_collect_signal)
+		mmap_output(kMaxOutputSignal);
+	if (close(kOutFd) < 0)
+		fail("failed to close kOutFd");
+#endif
 }
-
-void resume_pending_call(int thread, thread_t* pended)
-{
-	debug("resume a call %d@%d\n", thread, pended->epoch);
-	pended->pending = false;
-	schedule_call(pended->call_index, pended->call_num, pended->colliding, pended->copyout_index,
-		      pended->num_args, (uint64*)pended->args, thread, pended->epoch, pended->num_sched, pended->sched, pended->copyout_pos);
-}
-
-void resume_pending_calls()
-{
-	for (int i = 0; i < kMaxThreads; i++) {
-		thread_set_t* set = &threads[i];
-		if (set->pending == 0)
-			continue;
-		int idx;
-		for (idx = 0; idx < kMaxPendingThreads; idx++)
-			if (set->pended[idx].pending)
-				break;
-		if (idx == kMaxPendingThreads)
-			// This should be an error
-			continue;
-		thread_t* th = &set->pended[idx];
-		if (!run_in_epoch(th))
-			continue;
-		resume_pending_call(i, th);
-	}
-}
-
-// start_epoch() assumes schedule_call() gracefully handles a blocking
-// thread, and the forefront thread can execute an assigned call.
-void start_epoch()
-{
-	uint64_t timeout = 0;
-	// Signal threads that are ready to execute. Each thread will
-	// reset th->ready after th->start is set.
-	debug("start epoch %d\n", global_epoch);
-	prepare_schedule();
-	for (int i = 0; i < kMaxThreads; i++) {
-		thread_t* th = get_thread(i);
-		if (th->created && event_isset(&th->ready)) {
-			if (event_isset(&th->start) || event_isset(&th->done) || !th->executing)
-				failmsg("bad thread state in start_epoch", "start=%d done=%d executing=%d",
-					event_isset(&th->start), event_isset(&th->done), th->executing);
-			const call_t* call = &syscalls[th->call_num];
-			if (timeout < call->attrs.timeout)
-				timeout = call->attrs.timeout;
-			event_set(&th->start);
-		}
-	}
-
-	uint64 timeout_ms = syscall_timeout_ms + timeout * slowdown_scale;
-	if (flag_debug && timeout_ms < 1000)
-		timeout_ms = 1000;
-
-	// handle completion for all threads if any
-	for (int i = 0; i < kMaxThreads; i++) {
-		thread_t* th = get_thread(i);
-		if (!th->created)
-			continue;
-		if (th->executing) {
-			// Let's wait more if calls are racing.
-			int scheduling_scale = (th->num_sched != 0 ? 3 : 1);
-			if (event_timedwait(&th->done, timeout_ms * scheduling_scale) && run_in_epoch(th))
-				handle_completion(th);
-			else
-				// since we waited for this syscall
-				// for a some amount of time, we don't
-				// need to wait later syscalls long.
-				timeout_ms = 1;
-		}
-	}
-	global_epoch++;
-}
-
-void wait_epoch(thread_t* th)
-{
-	do {
-		debug("wait epoch %d\n", th->epoch);
-		event_wait(&th->start);
-		event_reset(&th->start);
-	} while (!run_in_epoch(th));
-}
-
-bool __run_in_epoch(uint32 epoch, uint32 global)
-{
-	return epoch <= global;
-}
-
-bool run_in_epoch(thread_t* th)
-{
-	// return true if th can execute a call in the global epoch
-	return __run_in_epoch(th->epoch, global_epoch);
-}
+#endif // if SYZ_EXECUTOR_USES_SHMEM
 
 // execute_one executes program stored in input_data.
 void execute_one()
 {
-	WARN_ON_NOT_NULL(hypercall(HCALL_RESET, 0, 0, 0), "HCALL_RESET");
-	// Duplicate global collide variable on stack.
-	// Fuzzer once come up with ioctl(fd, FIONREAD, 0x920000),
-	// where 0x920000 was exactly collide address, so every iteration reset collide to 0.
-	bool colliding = false;
 #if SYZ_EXECUTOR_USES_SHMEM
+	realloc_output_data();
 	output_pos = output_data;
 	write_output(0); // Number of executed syscalls (updated later).
-#endif
+#endif // if SYZ_EXECUTOR_USES_SHMEM
 	uint64 start = current_time_ms();
-
-retry:
 	uint64* input_pos = (uint64*)input_data;
 
-	if (flag_coverage && !colliding) {
+	if (cover_collection_required()) {
 		if (!flag_threaded)
-			// XXX: In this project, flag_threaded is
-			// always true, so we can safely remove this if block
-			cover_enable(&get_thread(0)->cov, flag_comparisons, false);
+			cover_enable(&threads[0].cov, flag_comparisons, false);
 		if (flag_extra_coverage)
 			cover_reset(&extra_cov);
 	}
@@ -898,40 +766,13 @@ retry:
 	int call_index = 0;
 	uint64 prog_extra_timeout = 0;
 	uint64 prog_extra_cover_timeout = 0;
-	int filter_size, vector_size;
-	int filter[kMaxSchedule] = {
-	    0,
-	};
-	unsigned long vector[kMaxVector] = {
-	    0,
-	};
-
-	filter_size = (int)read_input(&input_pos);
-	for (int i = 0; i < filter_size; i++) {
-		int f = (int)read_input(&input_pos);
-		if (i >= kMaxSchedule)
-			continue;
-		filter[i] = f;
-	}
-	if (filter_size > kMaxSchedule)
-		filter_size = kMaxSchedule;
-
-	vector_size = (int)read_input(&input_pos);
-	for (int i = 0; i < vector_size; i++) {
-		int e = (int)read_input(&input_pos);
-		vector[i] = e;
-	}
-	feed_flush_vector(vector, vector_size);
+	call_props_t call_props;
+	memset(&call_props, 0, sizeof(call_props));
 
 	for (;;) {
 		uint64 call_num = read_input(&input_pos);
 		if (call_num == instr_eof)
 			break;
-		if (call_num == instr_epoch) {
-			resume_pending_calls();
-			start_epoch();
-			continue;
-		}
 		if (call_num == instr_copyin) {
 			char* addr = (char*)read_input(&input_pos);
 			uint64 typ = read_input(&input_pos);
@@ -1017,6 +858,10 @@ retry:
 			// The copyout will happen when/if the call completes.
 			continue;
 		}
+		if (call_num == instr_setprops) {
+			read_call_props_t(call_props, read_input(&input_pos, false));
+			continue;
+		}
 
 		// Normal syscall.
 		if (call_num >= ARRAY_SIZE(syscalls))
@@ -1039,29 +884,42 @@ retry:
 			args[i] = read_arg(&input_pos);
 		for (uint64 i = num_args; i < kMaxArgs; i++)
 			args[i] = 0;
-		uint64 thread = read_input(&input_pos);
-		uint64 epoch = read_input(&input_pos);
-		uint64 num_sched = read_input(&input_pos);
-		schedule_t sched[kMaxSchedule];
-		for (uint64 i = 0; i < num_sched; i++) {
-			uint64 thread, addr, order;
-			thread = read_input(&input_pos);
-			addr = read_input(&input_pos);
-			order = read_input(&input_pos);
-			if (i >= kMaxSchedule)
-				continue;
-			sched[i].thread = thread;
-			sched[i].addr = addr;
-			sched[i].order = order;
-			sched[i].filter = (order < kMaxSchedule ? filter[order] : 1);
+		thread_t* th = schedule_call(call_index++, call_num, copyout_index,
+					     num_args, args, input_pos, call_props);
+
+		if (call_props.async && flag_threaded) {
+			// Don't wait for an async call to finish. We'll wait at the end.
+			// If we're not in the threaded mode, just ignore the async flag - during repro simplification syzkaller
+			// will anyway try to make it non-threaded.
+		} else if (flag_threaded) {
+			// Wait for call completion.
+			uint64 timeout_ms = syscall_timeout_ms + call->attrs.timeout * slowdown_scale;
+			// This is because of printing pre/post call. Ideally we print everything in the main thread
+			// and then remove this (would also avoid intermixed output).
+			if (flag_debug && timeout_ms < 1000)
+				timeout_ms = 1000;
+			if (event_timedwait(&th->done, timeout_ms))
+				handle_completion(th);
+
+			// Check if any of previous calls have completed.
+			for (int i = 0; i < kMaxThreads; i++) {
+				th = &threads[i];
+				if (th->executing && event_isset(&th->done))
+					handle_completion(th);
+			}
+		} else {
+			// Execute directly.
+			if (th != &threads[0])
+				fail("using non-main thread in non-thread mode");
+			event_reset(&th->ready);
+			execute_call(th);
+			event_set(&th->done);
+			handle_completion(th);
 		}
-		if (num_sched > kMaxSchedule)
-			num_sched = kMaxSchedule;
-		schedule_call(call_index++, call_num, colliding, copyout_index,
-			      num_args, args, thread, epoch, num_sched, sched, input_pos);
+		memset(&call_props, 0, sizeof(call_props));
 	}
 
-	if (!colliding && !collide && running > 0) {
+	if (running > 0) {
 		// Give unfinished syscalls some additional time.
 		last_scheduled = 0;
 		uint64 wait_start = current_time_ms();
@@ -1070,31 +928,20 @@ retry:
 		wait_end = std::max(wait_end, wait_start + prog_extra_timeout);
 		while (running > 0 && current_time_ms() <= wait_end) {
 			sleep_ms(1 * slowdown_scale);
-			// Do not handle completion of pending
-			// threads. they don't run a call.
 			for (int i = 0; i < kMaxThreads; i++) {
-				thread_set_t* set = &threads[i];
-				for (int j = 0; j < kMaxFallbackThreads; j++) {
-					thread_t* th = &set->set[j];
-					if (!th->created)
-						continue;
-					if (th->executing && event_isset(&th->done))
-						handle_completion(th);
-				}
+				thread_t* th = &threads[i];
+				if (th->executing && event_isset(&th->done))
+					handle_completion(th);
 			}
 		}
 		// Write output coverage for unfinished calls.
 		if (running > 0) {
 			for (int i = 0; i < kMaxThreads; i++) {
-				thread_set_t* set = &threads[i];
-				// Pending threads don't run a call
-				for (int j = 0; j < kMaxFallbackThreads; j++) {
-					thread_t* th = &set->set[j];
-					if (th->executing) {
-						if (flag_coverage)
-							cover_collect(&th->cov);
-						write_call_output(th, false);
-					}
+				thread_t* th = &threads[i];
+				if (th->executing) {
+					if (cover_collection_required())
+						cover_collect(&th->cov);
+					write_call_output(th, false);
 				}
 			}
 		}
@@ -1104,46 +951,38 @@ retry:
 	close_fds();
 #endif
 
-	if (!colliding && !collide) {
+	write_extra_output();
+	// Check for new extra coverage in small intervals to avoid situation
+	// that we were killed on timeout before we write any.
+	// Check for extra coverage is very cheap, effectively a memory load.
+	const uint64 kSleepMs = 100;
+	for (uint64 i = 0; i < prog_extra_cover_timeout / kSleepMs; i++) {
+		sleep_ms(kSleepMs);
 		write_extra_output();
-		// Check for new extra coverage in small intervals to avoid situation
-		// that we were killed on timeout before we write any.
-		// Check for extra coverage is very cheap, effectively a memory load.
-		const uint64 kSleepMs = 100;
-		for (uint64 i = 0; i < prog_extra_cover_timeout / kSleepMs; i++) {
-			sleep_ms(kSleepMs);
-			write_extra_output();
+	}
+}
+
+thread_t* schedule_call(int call_index, int call_num, uint64 copyout_index, uint64 num_args, uint64* args, uint64* pos, call_props_t call_props)
+{
+	// Find a spare thread to execute the call.
+	int i = 0;
+	for (; i < kMaxThreads; i++) {
+		thread_t* th = &threads[i];
+		if (!th->created)
+			thread_create(th, i, cover_collection_required());
+		if (event_isset(&th->done)) {
+			if (th->executing)
+				handle_completion(th);
+			break;
 		}
 	}
-
-	if (flag_collide && !flag_fault && !colliding && !collide) {
-		debug("enabling collider\n");
-		collide = colliding = true;
-		goto retry;
-	}
-}
-
-void feed_flush_vector(unsigned long* vector, int size)
-{
-#define SYS_FEEDINPUT 500
-	syscall(SYS_FEEDINPUT, vector, size);
-}
-
-// Get a thread to run a call
-// NOTE: get_thread() should be called in the main thread get_thread()
-// does not care that the forefront thread is blocked or not.
-thread_t* get_thread(int thread)
-{
-	thread_set_t* set = &threads[thread];
-	int idx = set->blocked;
-	if (idx >= kMaxFallbackThreads)
-		exitf("out of threads (id #%d)\n", thread);
-	return &set->set[idx];
-}
-
-void prepare_thread(thread_t* th, int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos)
-{
-	th->colliding = colliding;
+	if (i == kMaxThreads)
+		exitf("out of threads");
+	thread_t* th = &threads[i];
+	if (event_isset(&th->ready) || !event_isset(&th->done) || th->executing)
+		failmsg("bad thread state in schedule", "ready=%d done=%d executing=%d",
+			event_isset(&th->ready), event_isset(&th->done), th->executing);
+	last_scheduled = th;
 	th->copyout_pos = pos;
 	th->copyout_index = copyout_index;
 	event_reset(&th->done);
@@ -1151,65 +990,9 @@ void prepare_thread(thread_t* th, int call_index, int call_num, bool colliding, 
 	th->call_index = call_index;
 	th->call_num = call_num;
 	th->num_args = num_args;
+	th->call_props = call_props;
 	for (int i = 0; i < kMaxArgs; i++)
 		th->args[i] = args[i];
-	th->epoch = epoch;
-	th->num_sched = num_sched;
-	for (uint64 i = 0; i < num_sched; i++)
-		th->sched[i] = sched[i];
-}
-
-thread_t* pending_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos)
-{
-	thread_set_t* set = &threads[thread];
-	if (set->pending == kMaxPendingThreads)
-		// We reach the maximum number of pending calls. Drop
-		// the call.
-		return NULL;
-	int idx = set->pending++;
-	thread_t* th = &set->pended[idx];
-	prepare_thread(th, call_index, call_num, colliding, copyout_index,
-		       num_args, args, epoch, num_sched, sched, pos);
-	th->pending = true;
-	return th;
-}
-
-thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos)
-{
-	debug("schedule a call to thread %llu@%llu\n", thread, epoch);
-	if (!__run_in_epoch(epoch, global_epoch)) {
-		// It is too early to schedule this call. Let's
-		// pending the call
-		debug("pending a call %llu@%llu\n", thread, epoch);
-		return pending_call(call_index, call_num, colliding, copyout_index, num_args, args, thread, epoch, num_sched, sched, pos);
-	}
-	thread_t* th = get_thread(thread);
-	if (!th->created)
-		thread_create(th, thread);
-	if (th->executing) {
-		if (event_isset(&th->done))
-			// The worker thread notify the main thread
-			// that it has been finished. The main thread
-			// can handle the completion.
-			handle_completion(th);
-		else
-			// The worker thread is either blocked or
-			// still executing the call. Drop the worker
-			// thread so remaining calls can be executed
-			// normally.
-			th = unhand_worker_thread(th);
-	}
-	if (th == NULL)
-		// unhand_worker_thread failed to find a fallback
-		// thread. drop the call.
-		return NULL;
-	if (event_isset(&th->ready) || !event_isset(&th->done) || th->executing)
-		failmsg("bad thread state in schedule", "ready=%d done=%d executing=%d",
-			event_isset(&th->ready), event_isset(&th->done), th->executing);
-	last_scheduled = th;
-	prepare_thread(th, call_index, call_num, colliding, copyout_index,
-		       num_args, args, epoch, num_sched, sched, pos);
-
 	event_set(&th->ready);
 	running++;
 	return th;
@@ -1217,147 +1000,80 @@ thread_t* schedule_call(int call_index, int call_num, bool colliding, uint64 cop
 
 #if SYZ_EXECUTOR_USES_SHMEM
 template <typename cover_data_t>
-void write_code_coverage_signal(cover_t* cov, uint32* signal_count_pos, uint32* cover_count_pos)
+void write_coverage_signal(cover_t* cov, uint32* signal_count_pos, uint32* cover_count_pos)
 {
 	// Write out feedback signals.
 	// Currently it is code edges computed as xor of two subsequent basic block PCs.
 	cover_data_t* cover_data = (cover_data_t*)(cov->data + cov->data_offset);
-	uint32 nsig = 0;
-	cover_data_t prev_pc = 0;
-	bool prev_filter = true;
-	for (uint32 i = 0; i < cov->size; i++) {
-		cover_data_t pc = cover_data[i] + cov->pc_offset;
-		uint32 sig = pc;
-		if (use_cover_edges(pc))
-			sig ^= hash(prev_pc);
-		bool filter = coverage_filter(pc);
-		// Ignore the edge only if both current and previous PCs are filtered out
-		// to capture all incoming and outcoming edges into the interesting code.
-		bool ignore = !filter && !prev_filter;
-		prev_pc = pc;
-		prev_filter = filter;
-		if (ignore || dedup(sig))
-			continue;
-		write_output(sig);
-		nsig++;
+	if (flag_collect_signal) {
+		uint32 nsig = 0;
+		cover_data_t prev_pc = 0;
+		bool prev_filter = true;
+		for (uint32 i = 0; i < cov->size; i++) {
+			cover_data_t pc = cover_data[i] + cov->pc_offset;
+			uint32 sig = pc;
+			if (use_cover_edges(pc))
+				sig ^= hash(prev_pc);
+			bool filter = coverage_filter(pc);
+			// Ignore the edge only if both current and previous PCs are filtered out
+			// to capture all incoming and outcoming edges into the interesting code.
+			bool ignore = !filter && !prev_filter;
+			prev_pc = pc;
+			prev_filter = filter;
+			if (ignore || dedup(sig))
+				continue;
+			write_output(sig);
+			nsig++;
+		}
+		// Write out number of signals.
+		*signal_count_pos = nsig;
 	}
-	// Write out number of signals.
-	*signal_count_pos = nsig;
 
-	if (!flag_collect_cover)
-		return;
-	// Write out real coverage (basic block PCs).
-	uint32 cover_size = cov->size;
-	if (flag_dedup_cover) {
-		cover_data_t* end = cover_data + cover_size;
-		cover_unprotect(cov);
-		std::sort(cover_data, end);
-		cover_size = std::unique(cover_data, end) - cover_data;
-		cover_protect(cov);
+	if (flag_collect_cover) {
+		// Write out real coverage (basic block PCs).
+		uint32 cover_size = cov->size;
+		if (flag_dedup_cover) {
+			cover_data_t* end = cover_data + cover_size;
+			cover_unprotect(cov);
+			std::sort(cover_data, end);
+			cover_size = std::unique(cover_data, end) - cover_data;
+			cover_protect(cov);
+		}
+		// Truncate PCs to uint32 assuming that they fit into 32-bits.
+		// True for x86_64 and arm64 without KASLR.
+		for (uint32 i = 0; i < cover_size; i++)
+			write_output(cover_data[i] + cov->pc_offset);
+		*cover_count_pos = cover_size;
 	}
-	// Truncate PCs to uint32 assuming that they fit into 32-bits.
-	// True for x86_64 and arm64 without KASLR.
-	for (uint32 i = 0; i < cover_size; i++)
-		write_output(cover_data[i] + cov->pc_offset);
-	*cover_count_pos = cover_size;
 }
+#endif // if SYZ_EXECUTOR_USES_SHMEM
 
-template <typename cover_data_t>
-void write_read_from_coverage_signal(cover_t* cov, uint32* signal_count_pos, uint32* cover_count_pos)
-{
-	if (signal_count_pos)
-		// The signal for read-from coverage is not well
-		// defined yet. Just ignore it.
-		failmsg("bad signal_count_pos in write_read_from_coverage_signal",
-			"signal_count_pos=%p", signal_count_pos);
-
-	uint32 cover_size = cov->size;
-	struct kmemcov_access* cover_data = &((struct kmemcov_access*)cov->data)[1];
-	for (uint32 i = 0; i < cover_size; i++) {
-		// Truncate all fields into uint32. This is fine for
-		// inst, size, type, and timestamp, but truncating
-		// addr may introduce the possibility that for two
-		// memory accesses that did not access the same memory
-		// object, our fuzzer thinks they did access the same
-		// memory object. Well, whatever, this is a fuzzer.
-		write_output(cover_data[i].inst);
-		write_output(cover_data[i].addr);
-		write_output(cover_data[i].size);
-		write_output(cover_data[i].type);
-		write_output(cover_data[i].timestamp);
-	}
-	*cover_count_pos = cover_size;
-}
-
-template <typename cover_data_t>
-void write_coverage_signal(cover_t* cov, uint32* signal_count_pos, uint32* cover_count_pos)
-{
-	if (cov->type == code_coverage)
-		write_code_coverage_signal<cover_data_t>(cov, signal_count_pos, cover_count_pos);
-	else
-		write_read_from_coverage_signal<cover_data_t>(cov, signal_count_pos, cover_count_pos);
-}
-#endif
-
-// NOTE: handle_completion() should be called in the main thread
 void handle_completion(thread_t* th)
 {
-#if 0
-	debug("handle_completion: th #%2d\n", th->id);
-#endif
 	if (event_isset(&th->ready) || !event_isset(&th->done) || !th->executing)
 		failmsg("bad thread state in completion", "ready=%d done=%d executing=%d",
 			event_isset(&th->ready), event_isset(&th->done), th->executing);
 	if (th->res != (intptr_t)-1)
 		copyout_call_results(th);
-	if (!collide && !th->colliding) {
-		write_call_output(th, true);
-		write_extra_output();
-	}
-	th->retry = false;
+
+	write_call_output(th, true);
+	write_extra_output();
 	th->executing = false;
 	running--;
 	if (running < 0) {
 		// This fires periodically for the past 2 years (see issue #502).
-		fprintf(stderr, "running=%d collide=%d completed=%d flag_threaded=%d flag_collide=%d current=%d\n",
-			running, collide, completed, flag_threaded, flag_collide, th->id);
+		fprintf(stderr, "running=%d completed=%d flag_threaded=%d current=%d\n",
+			running, completed, flag_threaded, th->id);
 		for (int i = 0; i < kMaxThreads; i++) {
-			thread_set_t* set = &threads[i];
-			for (int j = 0; j < kMaxFallbackThreads; j++) {
-				thread_t* th1 = &set->set[j];
-				fprintf(stderr, "th #%2d: created=%d executing=%d colliding=%d"
-						" ready=%d done=%d call_index=%d res=%lld reserrno=%d\n",
-					i, th1->created, th1->executing, th1->colliding,
-					event_isset(&th1->ready), event_isset(&th1->done),
-					th1->call_index, (uint64)th1->res, th1->reserrno);
-			}
+			thread_t* th1 = &threads[i];
+			fprintf(stderr, "th #%2d: created=%d executing=%d"
+					" ready=%d done=%d call_index=%d res=%lld reserrno=%d\n",
+				i, th1->created, th1->executing,
+				event_isset(&th1->ready), event_isset(&th1->done),
+				th1->call_index, (uint64)th1->res, th1->reserrno);
 		}
 		exitf("negative running");
 	}
-}
-
-// NOTE: unhand_worker_thread() should be called in the main thread
-thread_t* unhand_worker_thread(thread_t* th)
-{
-	if (!event_isset(&th->done)) {
-		// The main thread needs to schedule a new call to th,
-		// while th is still executing a previous call. Assume
-		// that th is blocked, and find the next fallback
-		// thread to replace the previous one.
-		int idx, id = th->id;
-		thread_set_t* set = &threads[id];
-		if (set->blocked == kMaxFallbackThreads) {
-			debug("failed to unhand the worker thread %d (out of threads), drop the call\n", id);
-			return NULL;
-		}
-		idx = ++set->blocked;
-		debug("unhand the worker thread %d, blocked=%d\n", id, set->blocked);
-		th = &set->set[idx];
-		if (th->created)
-			failmsg("bad thread state in get_thread", "created=%d", th->created);
-		thread_create(th, id);
-	}
-	return th;
 }
 
 void copyout_call_results(thread_t* th)
@@ -1397,14 +1113,13 @@ void write_call_output(thread_t* th, bool finished)
 	uint32 reserrno = 999;
 	const bool blocked = finished && th != last_scheduled;
 	uint32 call_flags = call_flag_executed | (blocked ? call_flag_blocked : 0);
-	uint32 num_filter = (uint32)th->num_filter;
 	if (finished) {
 		reserrno = th->res != -1 ? 0 : th->reserrno;
 		call_flags |= call_flag_finished |
 			      (th->fault_injected ? call_flag_fault_injected : 0);
 	}
-	call_flags |= (th->retry ? call_flag_retry : 0);
 #if SYZ_EXECUTOR_USES_SHMEM
+	write_output(kOutMagic);
 	write_output(th->call_index);
 	write_output(th->call_num);
 	write_output(reserrno);
@@ -1412,8 +1127,6 @@ void write_call_output(thread_t* th, bool finished)
 	uint32* signal_count_pos = write_output(0); // filled in later
 	uint32* cover_count_pos = write_output(0); // filled in later
 	uint32* comps_count_pos = write_output(0); // filled in later
-	uint32* rfcover_count_pos = write_output(0); // filled in later
-	write_output(num_filter);
 
 	if (flag_comparisons) {
 		// Collect only the comparisons
@@ -1435,18 +1148,11 @@ void write_call_output(thread_t* th, bool finished)
 		}
 		// Write out number of comparisons.
 		*comps_count_pos = comps_size;
-	} else if (flag_coverage) {
-		if (is_kernel_64_bit) {
+	} else if (flag_collect_signal || flag_collect_cover) {
+		if (is_kernel_64_bit)
 			write_coverage_signal<uint64>(&th->cov, signal_count_pos, cover_count_pos);
-			write_coverage_signal<uint64>(&th->rfcov, NULL, rfcover_count_pos);
-		} else {
-			// XXX: We support only 64 bit kernel.
+		else
 			write_coverage_signal<uint32>(&th->cov, signal_count_pos, cover_count_pos);
-		}
-	}
-	for (int i = 0; i < (int)num_filter; i++) {
-		write_output((uint32)th->sched[i].order);
-		write_output((uint32)th->footprint[i]);
 	}
 	debug_verbose("out #%u: index=%u num=%u errno=%d finished=%d blocked=%d sig=%u cover=%u comps=%u\n",
 		      completed, th->call_index, th->call_num, reserrno, finished, blocked,
@@ -1458,6 +1164,7 @@ void write_call_output(thread_t* th, bool finished)
 	reply.header.magic = kOutMagic;
 	reply.header.done = 0;
 	reply.header.status = 0;
+	reply.magic = kOutMagic;
 	reply.call_index = th->call_index;
 	reply.call_num = th->call_num;
 	reply.reserrno = reserrno;
@@ -1469,17 +1176,18 @@ void write_call_output(thread_t* th, bool finished)
 		fail("control pipe call write failed");
 	debug_verbose("out: index=%u num=%u errno=%d finished=%d blocked=%d\n",
 		      th->call_index, th->call_num, reserrno, finished, blocked);
-#endif
+#endif // if SYZ_EXECUTOR_USES_SHMEM
 }
 
 void write_extra_output()
 {
 #if SYZ_EXECUTOR_USES_SHMEM
-	if (!flag_coverage || !flag_extra_coverage || flag_comparisons)
+	if (!cover_collection_required() || !flag_extra_coverage || flag_comparisons)
 		return;
 	cover_collect(&extra_cov);
 	if (!extra_cov.size)
 		return;
+	write_output(kOutMagic);
 	write_output(-1); // call index
 	write_output(-1); // call num
 	write_output(999); // errno
@@ -1495,48 +1203,46 @@ void write_extra_output()
 	debug_verbose("extra: sig=%u cover=%u\n", *signal_count_pos, *cover_count_pos);
 	completed++;
 	write_completed(completed);
-#endif
+#endif // if SYZ_EXECUTOR_USES_SHMEM
 }
 
-void thread_create(thread_t* th, int id)
+void thread_create(thread_t* th, int id, bool need_coverage)
 {
-	debug("creating a thread %d\n", id);
 	th->created = true;
 	th->id = id;
 	th->executing = false;
-	th->cov.data_offset = is_kernel_64_bit ? sizeof(uint64_t) : sizeof(uint32_t);
-	th->cov.pc_offset = 0;
+	// Lazily set up coverage collection.
+	// It is assumed that actually it's already initialized - with a few rare exceptions.
+	if (need_coverage) {
+		if (!th->cov.fd)
+			exitf("out of opened kcov threads");
+		thread_mmap_cover(th);
+	}
 	event_init(&th->ready);
 	event_init(&th->done);
-	event_init(&th->start);
 	event_set(&th->done);
 	if (flag_threaded)
 		thread_start(worker_thread, th);
 }
 
+void thread_mmap_cover(thread_t* th)
+{
+	if (th->cov.data != NULL)
+		return;
+	cover_mmap(&th->cov);
+	cover_protect(&th->cov);
+}
+
 void* worker_thread(void* arg)
 {
 	thread_t* th = (thread_t*)arg;
-	threadid = th->id;
 	current_thread = th;
-	th->cpu = lookup_available_cpu(th->id);
-	setup_affinity_mask(kCPUMask[th->cpu]);
-	if (flag_coverage) {
+	if (cover_collection_required())
 		cover_enable(&th->cov, flag_comparisons, false);
-		cover_enable(&th->rfcov, false, false);
-	}
 	for (;;) {
 		event_wait(&th->ready);
-		// The main thread will notify th to start the
-		// execution. Worker threads can reset th->ready only
-		// after the notification.
-		wait_epoch(th);
 		event_reset(&th->ready);
-		// Turn on the ssb switch
-		syscall(kSSBSwitch);
 		execute_call(th);
-		// Then turn off the ssb switch
-		syscall(kSSBSwitch);
 		event_set(&th->done);
 	}
 	return 0;
@@ -1545,33 +1251,31 @@ void* worker_thread(void* arg)
 void execute_call(thread_t* th)
 {
 	const call_t* call = &syscalls[th->call_num];
-	debug("call #%d@%d [%llums] -> %s(",
-	      th->id, th->epoch, current_time_ms() - start_time_ms, call->name);
+	debug("#%d [%llums] -> %s(",
+	      th->id, current_time_ms() - start_time_ms, call->name);
 	for (int i = 0; i < th->num_args; i++) {
 		if (i != 0)
-			debug_noprefix(", ");
-		debug_noprefix("0x%llx", (uint64)th->args[i]);
+			debug(", ");
+		debug("0x%llx", (uint64)th->args[i]);
 	}
-	debug_noprefix(")\n");
+	debug(")\n");
 
 	int fail_fd = -1;
 	th->soft_fail_state = false;
-	if (flag_fault && th->call_index == flag_fault_call) {
-		if (collide)
-			fail("both collide and fault injection are enabled");
-		fail_fd = inject_fault(flag_fault_nth);
+	if (th->call_props.fail_nth > 0) {
+		if (th->call_props.rerun > 0)
+			fail("both fault injection and rerun are enabled for the same call");
+		fail_fd = inject_fault(th->call_props.fail_nth);
 		th->soft_fail_state = true;
 	}
 
+	if (flag_coverage)
+		cover_reset(&th->cov);
 	// For pseudo-syscalls and user-space functions NONFAILING can abort before assigning to th->res.
 	// Arrange for res = -1 and errno = EFAULT result for such case.
 	th->res = -1;
 	errno = EFAULT;
-	setup_schedule(th->num_sched, th->sched);
-	coverage_pre_call(th);
 	NONFAILING(th->res = execute_syscall(call, th->args));
-	coverage_post_call(th);
-	th->retry = clear_schedule(th->num_sched, &th->num_filter, th->footprint);
 	th->reserrno = errno;
 	// Our pseudo-syscalls may misbehave.
 	if ((th->res == -1 && th->reserrno == 0) || call->attrs.ignore_return)
@@ -1579,91 +1283,32 @@ void execute_call(thread_t* th)
 	// Reset the flag before the first possible fail().
 	th->soft_fail_state = false;
 
+	if (flag_coverage) {
+		cover_collect(&th->cov);
+		if (th->cov.size >= kCoverSize)
+			failmsg("too much cover", "thr=%d, cov=%u", th->id, th->cov.size);
+	}
 	th->fault_injected = false;
 
-	if (flag_fault && th->call_index == flag_fault_call)
+	if (th->call_props.fail_nth > 0)
 		th->fault_injected = fault_injected(fail_fd);
 
-	debug("call #%d@%d [%llums] <- %s=0x%llx errno=%d ",
-	      th->id, th->epoch, current_time_ms() - start_time_ms, call->name, (uint64)th->res, th->reserrno);
+	// If required, run the syscall some more times.
+	// But let's still return res, errno and coverage from the first execution.
+	for (int i = 0; i < th->call_props.rerun; i++)
+		NONFAILING(execute_syscall(call, th->args));
+
+	debug("#%d [%llums] <- %s=0x%llx",
+	      th->id, current_time_ms() - start_time_ms, call->name, (uint64)th->res);
+	if (th->res == (intptr_t)-1)
+		debug(" errno=%d", th->reserrno);
 	if (flag_coverage)
-		debug_noprefix("cover=%u rfcov=%u", th->cov.size, th->rfcov.size);
-	if (flag_fault && th->call_index == flag_fault_call)
-		debug_noprefix("fault=%d ", th->fault_injected);
-	debug_noprefix("\n");
-	setup_affinity_mask(kCPUMask[th->cpu]);
-}
-
-void setup_schedule(int num_sched, schedule_t* sched)
-{
-	if (num_sched == 0)
-		return;
-	debug("installing breakpoint bp=%d\n", num_sched);
-	for (int i = 0; i < num_sched; i++) {
-		WARN_ON_NOT_NULL(hypercall(HCALL_INSTALL_BP, sched[i].addr,
-					   sched[i].order, sched[i].filter),
-				 "HCALL_INSTALL_BP");
-	}
-
-	int attempt = 10;
-	uint64 res = hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
-	while (res == (uint64)(-EAGAIN) && --attempt) {
-		sleep_ms(10);
-		res = hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
-	}
-	if (res != 0)
-		debug("failed to setup a schedule: %llx\n", res);
-}
-
-bool clear_schedule(int num_sched, uint64* num_filter, uint64* footprint)
-{
-	if (num_sched == 0)
-		return false;
-
-	uint64_t count;
-	uint64_t retry;
-	unsigned long ret;
-
-	WARN_ON_NOT_NULL(hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0), "HCALL_DEACTIVATE_BP");
-	WARN_ON_NOT_NULL((ret = hypercall(HCALL_FOOTPRINT_BP, (unsigned long)&count, (unsigned long)footprint,
-					  (unsigned long)&retry)),
-			 "HCALL_FOOTPRINT_BP");
-	if (ret != 0)
-		count = 0;
-	if ((int)count > num_sched)
-		debug("[WARN] count > num_sched, count=%d, num_sched=%d\n", (int)count, num_sched);
-	*num_filter = count;
-	WARN_ON_NOT_NULL(hypercall(HCALL_CLEAR_BP, 0, 0, 0), "HCALL_CLEAR_BP");
-	return !!retry;
-}
-
-int lookup_available_cpu(int id)
-{
-	// TODO: Currently, we are testing to trigger CVE-2017-2636
-	// with only one worker process, so it is okay to statically
-	// assign a thread to a cpu. This limits the number of
-	// processes, so fix this.
-	return id + 1;
-}
-
-void coverage_pre_call(thread_t* th)
-{
-	if (!flag_coverage)
-		return;
-	cover_reset(&th->cov);
-	cover_reset(&th->rfcov);
-}
-
-void coverage_post_call(thread_t* th)
-{
-	if (!flag_coverage)
-		return;
-	cover_collect(&th->cov);
-	if (th->cov.size >= kCoverSize)
-		failmsg("too much cover", "thr=%d, cov=%u", th->id, th->cov.size);
-	cover_collect(&th->rfcov);
-	if (th->cov.size >= kCoverSize)
-		failmsg("too much rf cover", "thr=%d, cov=%u", th->id, th->rfcov.size);
+		debug(" cover=%u", th->cov.size);
+	if (th->call_props.fail_nth > 0)
+		debug(" fault=%d", th->fault_injected);
+	if (th->call_props.rerun > 0)
+		debug(" rerun=%d", th->call_props.rerun);
+	debug("\n");
 }
 
 #if SYZ_EXECUTOR_USES_SHMEM
@@ -1697,7 +1342,7 @@ static bool dedup(uint32 sig)
 	dedup_table[sig % dedup_table_size] = sig;
 	return false;
 }
-#endif
+#endif // if SYZ_EXECUTOR_USES_SHMEM
 
 template <typename T>
 void copyin_int(char* addr, uint64 val, uint64 bf, uint64 bf_off, uint64 bf_len)
@@ -1872,18 +1517,18 @@ uint64 read_input(uint64** input_posp, bool peek)
 #if SYZ_EXECUTOR_USES_SHMEM
 uint32* write_output(uint32 v)
 {
-	if (output_pos < output_data || (char*)output_pos >= (char*)output_data + kMaxOutput)
+	if (output_pos < output_data || (char*)output_pos >= (char*)output_data + output_size)
 		failmsg("output overflow", "pos=%p region=[%p:%p]",
-			output_pos, output_data, (char*)output_data + kMaxOutput);
+			output_pos, output_data, (char*)output_data + output_size);
 	*output_pos = v;
 	return output_pos++;
 }
 
 uint32* write_output_64(uint64 v)
 {
-	if (output_pos < output_data || (char*)(output_pos + 1) >= (char*)output_data + kMaxOutput)
+	if (output_pos < output_data || (char*)(output_pos + 1) >= (char*)output_data + output_size)
 		failmsg("output overflow", "pos=%p region=[%p:%p]",
-			output_pos, output_data, (char*)output_data + kMaxOutput);
+			output_pos, output_data, (char*)output_data + output_size);
 	*(uint64*)output_pos = v;
 	output_pos += 2;
 	return output_pos;
@@ -1893,7 +1538,7 @@ void write_completed(uint32 completed)
 {
 	__atomic_store_n(output_data, completed, __ATOMIC_RELEASE);
 }
-#endif
+#endif // if SYZ_EXECUTOR_USES_SHMEM
 
 #if SYZ_EXECUTOR_USES_SHMEM
 void kcov_comparison_t::write()
@@ -1944,7 +1589,7 @@ bool kcov_comparison_t::ignore() const
 		// First of all, we want avert fuzzer from our output region.
 		// Without this fuzzer manages to discover and corrupt it.
 		uint64 out_start = (uint64)output_data;
-		uint64 out_end = out_start + kMaxOutput;
+		uint64 out_end = out_start + output_size;
 		if (arg1 >= out_start && arg1 <= out_end)
 			return true;
 		if (arg2 >= out_start && arg2 <= out_end)
@@ -1983,15 +1628,20 @@ bool kcov_comparison_t::operator<(const struct kcov_comparison_t& other) const
 	// We don't check for PC equality now, because it is not used.
 	return arg2 < other.arg2;
 }
-#endif
+#endif // if SYZ_EXECUTOR_USES_SHMEM
 
 void setup_features(char** enable, int n)
 {
 	// This does any one-time setup for the requested features on the machine.
 	// Note: this can be called multiple times and must be idempotent.
 	flag_debug = true;
+#if SYZ_HAVE_SETUP_EXT
+	// This can be defined in common_ext.h.
+	setup_ext();
+#endif
 #if SYZ_HAVE_FEATURES
 	setup_sysctl();
+	setup_cgroups();
 #endif
 	for (int i = 0; i < n; i++) {
 		bool found = false;
@@ -2007,17 +1657,6 @@ void setup_features(char** enable, int n)
 		if (!found)
 			failmsg("setup features: unknown feature", "feature=%s", enable[i]);
 	}
-}
-
-void setup_affinity_mask(int mask)
-{
-	cpu_set_t set;
-	CPU_ZERO(&set);
-	for (int i = 0; i < kMaxCPU; i++)
-		if (mask & (1 << i))
-			CPU_SET(i, &set);
-	if (sched_setaffinity(0, sizeof(set), &set))
-		fail("sched_setaffinity failed");
 }
 
 void failmsg(const char* err, const char* msg, ...)
@@ -2064,26 +1703,12 @@ void exitf(const char* msg, ...)
 	doexit(0);
 }
 
-void debug_noprefix(const char* msg, ...)
-{
-	if (!flag_debug)
-		return;
-	int err = errno;
-	va_list args;
-	va_start(args, msg);
-	vfprintf(stderr, msg, args);
-	va_end(args);
-	fflush(stderr);
-	errno = err;
-}
-
 void debug(const char* msg, ...)
 {
 	if (!flag_debug)
 		return;
 	int err = errno;
 	va_list args;
-	fprintf(stderr, "[EXEC-%02lld/%02d] ", procid, threadid);
 	va_start(args, msg);
 	vfprintf(stderr, msg, args);
 	va_end(args);
@@ -2096,15 +1721,11 @@ void debug_dump_data(const char* data, int length)
 	if (!flag_debug)
 		return;
 	int i = 0;
-	fprintf(stderr, "[EXEC-%02lld/%02d] ", procid, threadid);
 	for (; i < length; i++) {
-		debug_noprefix("%02x ", data[i] & 0xff);
-		if (i % 16 == 15) {
-			debug_noprefix("\n");
-			if (i != length - 1)
-				debug_noprefix("             ");
-		}
+		debug("%02x ", data[i] & 0xff);
+		if (i % 16 == 15)
+			debug("\n");
 	}
 	if (i % 16 != 0)
-		debug_noprefix("\n");
+		debug("\n");
 }

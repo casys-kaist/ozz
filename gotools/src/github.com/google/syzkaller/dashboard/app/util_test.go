@@ -25,21 +25,23 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/syzkaller/dashboard/dashapi"
 	"golang.org/x/net/context"
-	"google.golang.org/appengine"
-	"google.golang.org/appengine/aetest"
-	db "google.golang.org/appengine/datastore"
-	aemail "google.golang.org/appengine/mail"
-	"google.golang.org/appengine/user"
+	"google.golang.org/appengine/v2/aetest"
+	db "google.golang.org/appengine/v2/datastore"
+	"google.golang.org/appengine/v2/log"
+	aemail "google.golang.org/appengine/v2/mail"
+	"google.golang.org/appengine/v2/user"
 )
 
 type Ctx struct {
-	t          *testing.T
-	inst       aetest.Instance
-	ctx        context.Context
-	mockedTime time.Time
-	emailSink  chan *aemail.Message
-	client     *apiClient
-	client2    *apiClient
+	t            *testing.T
+	inst         aetest.Instance
+	ctx          context.Context
+	mockedTime   time.Time
+	emailSink    chan *aemail.Message
+	contextVars  map[interface{}]interface{}
+	client       *apiClient
+	client2      *apiClient
+	publicClient *apiClient
 }
 
 var skipDevAppserverTests = func() bool {
@@ -66,22 +68,24 @@ func NewCtx(t *testing.T) *Ctx {
 		t.Fatal(err)
 	}
 	c := &Ctx{
-		t:          t,
-		inst:       inst,
-		ctx:        appengine.NewContext(r),
-		mockedTime: time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC),
-		emailSink:  make(chan *aemail.Message, 100),
+		t:           t,
+		inst:        inst,
+		mockedTime:  time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC),
+		contextVars: make(map[interface{}]interface{}),
+		emailSink:   make(chan *aemail.Message, 100),
 	}
 	c.client = c.makeClient(client1, password1, true)
 	c.client2 = c.makeClient(client2, password2, true)
-	registerContext(r, c)
+	c.publicClient = c.makeClient(clientPublicEmail, keyPublicEmail, true)
+	c.ctx = registerRequest(r, c).Context()
+
 	return c
 }
 
 func (c *Ctx) expectOK(err error) {
 	if err != nil {
 		c.t.Helper()
-		c.t.Fatal(err)
+		c.t.Fatalf("expected OK, got error: %v", err)
 	}
 }
 
@@ -95,15 +99,23 @@ func (c *Ctx) expectFail(msg string, err error) {
 	}
 }
 
-func (c *Ctx) expectForbidden(err error) {
+func (c *Ctx) expectFailureStatus(err error, code int) {
 	c.t.Helper()
 	if err == nil {
-		c.t.Fatalf("expected to fail as 403, but it does not")
+		c.t.Fatalf("expected to fail as %d, but it does not", code)
 	}
 	httpErr, ok := err.(HTTPError)
-	if !ok || httpErr.Code != http.StatusForbidden {
-		c.t.Fatalf("expected to fail as 403, but it failed as %v", err)
+	if !ok || httpErr.Code != code {
+		c.t.Fatalf("expected to fail as %d, but it failed as %v", code, err)
 	}
+}
+
+func (c *Ctx) expectForbidden(err error) {
+	c.expectFailureStatus(err, http.StatusForbidden)
+}
+
+func (c *Ctx) expectBadReqest(err error) {
+	c.expectFailureStatus(err, http.StatusBadRequest)
 }
 
 func (c *Ctx) expectEQ(got, want interface{}) {
@@ -150,25 +162,33 @@ func caller(skip int) string {
 }
 
 func (c *Ctx) Close() {
+	defer c.inst.Close()
 	if !c.t.Failed() {
 		// To avoid per-day reporting limits for left-over emails.
 		c.advanceTime(25 * time.Hour)
 		// Ensure that we can render main page and all bugs in the final test state.
-		c.expectOK(c.GET("/test1"))
-		c.expectOK(c.GET("/test2"))
-		c.expectOK(c.GET("/test1/fixed"))
-		c.expectOK(c.GET("/test2/fixed"))
-		c.expectOK(c.GET("/admin"))
+		_, err := c.GET("/test1")
+		c.expectOK(err)
+		_, err = c.GET("/test2")
+		c.expectOK(err)
+		_, err = c.GET("/test1/fixed")
+		c.expectOK(err)
+		_, err = c.GET("/test2/fixed")
+		c.expectOK(err)
+		_, err = c.GET("/admin")
+		c.expectOK(err)
 		var bugs []*Bug
 		keys, err := db.NewQuery("Bug").GetAll(c.ctx, &bugs)
 		if err != nil {
 			c.t.Errorf("ERROR: failed to query bugs: %v", err)
 		}
 		for _, key := range keys {
-			c.expectOK(c.GET(fmt.Sprintf("/bug?id=%v", key.StringID())))
+			_, err = c.GET(fmt.Sprintf("/bug?id=%v", key.StringID()))
+			c.expectOK(err)
 		}
 		// No pending emails (tests need to consume them).
-		c.expectOK(c.GET("/email_poll"))
+		_, err = c.GET("/email_poll")
+		c.expectOK(err)
 		for len(c.emailSink) != 0 {
 			c.t.Errorf("ERROR: leftover email: %v", (<-c.emailSink).Body)
 		}
@@ -179,7 +199,6 @@ func (c *Ctx) Close() {
 		}
 	}
 	unregisterContext(c)
-	c.inst.Close()
 }
 
 func (c *Ctx) advanceTime(d time.Duration) {
@@ -187,29 +206,48 @@ func (c *Ctx) advanceTime(d time.Duration) {
 }
 
 // GET sends admin-authorized HTTP GET request to the app.
-func (c *Ctx) GET(url string) error {
-	_, err := c.httpRequest("GET", url, "", AccessAdmin)
-	return err
+func (c *Ctx) GET(url string) ([]byte, error) {
+	return c.AuthGET(AccessAdmin, url)
 }
 
 // AuthGET sends HTTP GET request to the app with the specified authorization.
 func (c *Ctx) AuthGET(access AccessLevel, url string) ([]byte, error) {
-	return c.httpRequest("GET", url, "", access)
+	w, err := c.httpRequest("GET", url, "", access)
+	if err != nil {
+		return nil, err
+	}
+	return w.Body.Bytes(), nil
 }
 
-// POST sends admin-authorized HTTP POST request to the app.
-func (c *Ctx) POST(url, body string) error {
-	_, err := c.httpRequest("POST", url, body, AccessAdmin)
-	return err
+// POST sends admin-authorized HTTP POST requestd to the app.
+func (c *Ctx) POST(url, body string) ([]byte, error) {
+	w, err := c.httpRequest("POST", url, body, AccessAdmin)
+	if err != nil {
+		return nil, err
+	}
+	return w.Body.Bytes(), nil
 }
 
-func (c *Ctx) httpRequest(method, url, body string, access AccessLevel) ([]byte, error) {
+// ContentType returns the response Content-Type header value.
+func (c *Ctx) ContentType(url string) (string, error) {
+	w, err := c.httpRequest("HEAD", url, "", AccessAdmin)
+	if err != nil {
+		return "", err
+	}
+	values := w.Header()["Content-Type"]
+	if len(values) == 0 {
+		return "", fmt.Errorf("no Content-Type")
+	}
+	return values[0], nil
+}
+
+func (c *Ctx) httpRequest(method, url, body string, access AccessLevel) (*httptest.ResponseRecorder, error) {
 	c.t.Logf("%v: %v", method, url)
 	r, err := c.inst.NewRequest(method, url, strings.NewReader(body))
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	registerContext(r, c)
+	r = registerRequest(r, c)
 	if access == AccessAdmin || access == AccessUser {
 		user := &user.User{
 			Email:      "user@syzkaller.com",
@@ -226,7 +264,7 @@ func (c *Ctx) httpRequest(method, url, body string, access AccessLevel) ([]byte,
 	if w.Code != http.StatusOK {
 		return nil, HTTPError{w.Code, w.Body.String(), w.Result().Header}
 	}
-	return w.Body.Bytes(), nil
+	return w, nil
 }
 
 type HTTPError struct {
@@ -306,7 +344,8 @@ func (c *Ctx) checkURLContents(url string, want []byte) {
 }
 
 func (c *Ctx) pollEmailBug() *aemail.Message {
-	c.expectOK(c.GET("/email_poll"))
+	_, err := c.GET("/email_poll")
+	c.expectOK(err)
 	if len(c.emailSink) == 0 {
 		c.t.Helper()
 		c.t.Fatal("got no emails")
@@ -315,12 +354,18 @@ func (c *Ctx) pollEmailBug() *aemail.Message {
 }
 
 func (c *Ctx) expectNoEmail() {
-	c.expectOK(c.GET("/email_poll"))
+	_, err := c.GET("/email_poll")
+	c.expectOK(err)
 	if len(c.emailSink) != 0 {
 		msg := <-c.emailSink
 		c.t.Helper()
 		c.t.Fatalf("got unexpected email: %v\n%s", msg.Subject, msg.Body)
 	}
+}
+
+func (c *Ctx) updRetestReproJobs() {
+	_, err := c.GET("/retest_repros")
+	c.expectOK(err)
 }
 
 type apiClient struct {
@@ -330,7 +375,12 @@ type apiClient struct {
 
 func (c *Ctx) makeClient(client, key string, failOnErrors bool) *apiClient {
 	doer := func(r *http.Request) (*http.Response, error) {
-		registerContext(r, c)
+		r = registerRequest(r, c)
+		newCtx := r.Context()
+		for key, val := range c.contextVars {
+			newCtx = context.WithValue(newCtx, key, val)
+		}
+		r = r.WithContext(newCtx)
 		w := httptest.NewRecorder()
 		http.DefaultServeMux.ServeHTTP(w, r)
 		res := &http.Response{
@@ -406,19 +456,23 @@ func (client *apiClient) updateBug(extID string, status dashapi.BugStatus, dup s
 	client.expectTrue(reply.OK)
 }
 
-func (client *apiClient) pollJobs(manager string) *dashapi.JobPollResp {
+func (client *apiClient) pollSpecificJobs(manager string, jobs dashapi.ManagerJobs) *dashapi.JobPollResp {
 	req := &dashapi.JobPollReq{
 		Managers: map[string]dashapi.ManagerJobs{
-			manager: {
-				TestPatches: true,
-				BisectCause: true,
-				BisectFix:   true,
-			},
+			manager: jobs,
 		},
 	}
 	resp, err := client.JobPoll(req)
 	client.expectOK(err)
 	return resp
+}
+
+func (client *apiClient) pollJobs(manager string) *dashapi.JobPollResp {
+	return client.pollSpecificJobs(manager, dashapi.ManagerJobs{
+		TestPatches: true,
+		BisectCause: true,
+		BisectFix:   true,
+	})
 }
 
 func (client *apiClient) pollAndFailBisectJob(manager string) {
@@ -436,7 +490,9 @@ type (
 	EmailOptMessageID int
 	EmailOptSubject   string
 	EmailOptFrom      string
+	EmailOptOrigFrom  string
 	EmailOptCC        []string
+	EmailOptSender    string
 )
 
 func (c *Ctx) incomingEmail(to, body string, opts ...interface{}) {
@@ -444,6 +500,8 @@ func (c *Ctx) incomingEmail(to, body string, opts ...interface{}) {
 	subject := "crash1"
 	from := "default@sender.com"
 	cc := []string{"test@syzkaller.com", "bugs@syzkaller.com", "bugs2@syzkaller.com"}
+	sender := ""
+	origFrom := ""
 	for _, o := range opts {
 		switch opt := o.(type) {
 		case EmailOptMessageID:
@@ -452,9 +510,16 @@ func (c *Ctx) incomingEmail(to, body string, opts ...interface{}) {
 			subject = string(opt)
 		case EmailOptFrom:
 			from = string(opt)
+		case EmailOptSender:
+			sender = string(opt)
 		case EmailOptCC:
 			cc = []string(opt)
+		case EmailOptOrigFrom:
+			origFrom = fmt.Sprintf("\nX-Original-From: %v", string(opt))
 		}
+	}
+	if sender == "" {
+		sender = from
 	}
 	email := fmt.Sprintf(`Sender: %v
 Date: Tue, 15 Aug 2017 14:59:00 -0700
@@ -462,12 +527,14 @@ Message-ID: <%v>
 Subject: %v
 From: %v
 Cc: %v
-To: %v
+To: %v%v
 Content-Type: text/plain
 
 %v
-`, from, id, subject, from, strings.Join(cc, ","), to, body)
-	c.expectOK(c.POST("/_ah/mail/", email))
+`, sender, id, subject, from, strings.Join(cc, ","), to, origFrom, body)
+	log.Infof(c.ctx, "sending %s", email)
+	_, err := c.POST("/_ah/mail/", email)
+	c.expectOK(err)
 }
 
 func initMocks() {
@@ -479,30 +546,42 @@ func initMocks() {
 		getRequestContext(c).emailSink <- msg
 		return nil
 	}
+	maxCrashes = func() int {
+		// dev_appserver is very slow, so let's make tests smaller.
+		const maxCrashesDuringTest = 20
+		return maxCrashesDuringTest
+	}
 }
 
 // Machinery to associate mocked time with requests.
 type RequestMapping struct {
-	c   context.Context
+	id  int
 	ctx *Ctx
 }
 
 var (
 	requestMu       sync.Mutex
+	requestNum      int
 	requestContexts []RequestMapping
 )
 
-func registerContext(r *http.Request, c *Ctx) {
+func registerRequest(r *http.Request, c *Ctx) *http.Request {
 	requestMu.Lock()
 	defer requestMu.Unlock()
-	requestContexts = append(requestContexts, RequestMapping{appengine.NewContext(r), c})
+
+	requestNum++
+	newContext := context.WithValue(r.Context(), requestIDKey, requestNum)
+	newRequest := r.WithContext(newContext)
+	requestContexts = append(requestContexts, RequestMapping{requestNum, c})
+	return newRequest
 }
 
 func getRequestContext(c context.Context) *Ctx {
 	requestMu.Lock()
 	defer requestMu.Unlock()
+	reqID := getRequestID(c)
 	for _, m := range requestContexts {
-		if reflect.DeepEqual(c, m.c) {
+		if m.id == reqID {
 			return m.ctx
 		}
 	}
@@ -521,4 +600,14 @@ func unregisterContext(c *Ctx) {
 		n++
 	}
 	requestContexts = requestContexts[:n]
+}
+
+const requestIDKey = "test_request_id"
+
+func getRequestID(c context.Context) int {
+	val, ok := c.Value(requestIDKey).(int)
+	if !ok {
+		panic("the context did not come from a test")
+	}
+	return val
 }

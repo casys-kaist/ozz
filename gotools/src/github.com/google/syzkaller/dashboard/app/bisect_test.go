@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/syzkaller/dashboard/dashapi"
 	"github.com/google/syzkaller/pkg/email"
-	db "google.golang.org/appengine/datastore"
+	db "google.golang.org/appengine/v2/datastore"
 )
 
 // nolint: funlen
@@ -80,11 +80,6 @@ func TestBisectCause(t *testing.T) {
 			"syncfs(3)"))
 	c.expectEQ(pollResp.ReproC, []byte("int main() { return 3; }"))
 
-	// Since we did not reply, we should get the same response.
-	c.advanceTime(5 * 24 * time.Hour)
-	pollResp2 := c.client2.pollJobs(build.Manager)
-	c.expectEQ(pollResp, pollResp2)
-
 	// Bisection failed with an error.
 	done := &dashapi.JobDoneReq{
 		ID:    pollResp.ID,
@@ -95,6 +90,7 @@ func TestBisectCause(t *testing.T) {
 	c.expectNoEmail()
 
 	// BisectCause #2
+	pollResp2 := pollResp
 	pollResp = c.client2.pollJobs(build.Manager)
 	c.expectNE(pollResp.ID, pollResp2.ID)
 	c.expectEQ(pollResp.ReproOpts, []byte("repro opts 2"))
@@ -302,7 +298,7 @@ https://goo.gl/tpsmEJ#testing-patches`,
 			msg := c.pollEmailBug()
 			if i < 3 {
 				c.expectEQ(msg.Subject, subjects[i])
-				c.expectTrue(strings.Contains(msg.Body, "Sending this report upstream."))
+				c.expectTrue(strings.Contains(msg.Body, "Sending this report to the next reporting stage."))
 			} else {
 				c.expectEQ(msg.Subject, "[syzbot] "+subjects[i])
 				c.expectTrue(strings.Contains(msg.Body, "syzbot found the following issue on"))
@@ -316,8 +312,6 @@ https://goo.gl/tpsmEJ#testing-patches`,
 	c.expectEQ(pollResp.Type, dashapi.JobBisectFix)
 	c.expectEQ(pollResp.ReproOpts, []byte("repro opts 2"))
 	c.advanceTime(5 * 24 * time.Hour)
-	pollResp2 = c.client2.pollJobs(build.Manager)
-	c.expectEQ(pollResp, pollResp2)
 	done = &dashapi.JobDoneReq{
 		ID:    pollResp.ID,
 		Log:   []byte("bisect log 2"),
@@ -545,6 +539,54 @@ https://goo.gl/tpsmEJ#testing-patches`,
 	}
 }
 
+func TestUnreliableBisect(t *testing.T) {
+	c := NewCtx(t)
+	defer c.Close()
+
+	build := testBuild(1)
+	c.client2.UploadBuild(build)
+	// Upload a crash that has only a syz repro.
+	crash := testCrashWithRepro(build, 1)
+	crash.ReproC = nil
+	c.client2.ReportCrash(crash)
+	_ = c.client2.pollEmailBug()
+
+	pollResp := c.client2.pollJobs(build.Manager)
+	jobID := pollResp.ID
+	done := &dashapi.JobDoneReq{
+		ID:    jobID,
+		Build: *build,
+		Log:   []byte("bisect log"),
+		Flags: dashapi.BisectResultRelease,
+		Commits: []dashapi.Commit{
+			{
+				Hash:       "111111111111111111111111",
+				Title:      "Linux 4.10",
+				Author:     "abcd@kernel.org",
+				AuthorName: "Abcd Efgh",
+				CC:         []string{"reviewer1@kernel.org", "reviewer2@kernel.org"},
+				Date:       time.Date(2000, 2, 9, 4, 5, 6, 7, time.UTC),
+			},
+		},
+	}
+	done.Build.ID = jobID
+	c.expectOK(c.client2.JobDone(done))
+
+	// The bisection result is unreliable - it shouldn't be reported.
+	c.expectNoEmail()
+
+	// Upload a crash with a C repro.
+	crash2 := testCrashWithRepro(build, 1)
+	c.client2.ReportCrash(crash2)
+
+	// Make sure it doesn't mention bisection and doesn't include the emails from it.
+	msg := c.pollEmailBug()
+	c.expectEQ(msg.To, []string{"test@syzkaller.com"})
+	c.expectEQ(msg.Subject, crash.Title)
+	c.expectTrue(strings.Contains(msg.Body, "syzbot has found a reproducer for the following issue"))
+	c.expectTrue(!strings.Contains(msg.Body, "bisection"))
+}
+
 func TestBisectWrong(t *testing.T) {
 	// Test bisection results with BisectResultMerge/BisectResultNoop flags set.
 	// If any of these set, the result must not be reported separately,
@@ -635,7 +677,7 @@ func TestBisectWrong(t *testing.T) {
 			// Auto-upstreamming.
 			c.advanceTime(31 * 24 * time.Hour)
 			msg := c.pollEmailBug()
-			c.expectTrue(strings.Contains(msg.Body, "Sending this report upstream"))
+			c.expectTrue(strings.Contains(msg.Body, "Sending this report to the next reporting stage."))
 			msg = c.pollEmailBug()
 			c.expectTrue(strings.Contains(msg.Body, "syzbot found the following issue on:"))
 			if i == 0 {
@@ -988,7 +1030,7 @@ func TestBugBisectionResults(t *testing.T) {
 		msg := c.client2.pollEmailBug()
 		c.expectTrue(strings.Contains(msg.Body, "syzbot has bisected this issue to:"))
 		msg = c.client2.pollEmailBug()
-		c.expectTrue(strings.Contains(msg.Body, "Sending this report upstream."))
+		c.expectTrue(strings.Contains(msg.Body, "Sending this report to the next reporting stage."))
 		msg = c.client2.pollEmailBug()
 		c.expectTrue(strings.Contains(msg.Body, "syzbot found the following issue"))
 	}
@@ -1034,7 +1076,7 @@ func TestBugBisectionResults(t *testing.T) {
 
 	// Ensure expected results show up on web UI
 	url := fmt.Sprintf("/bug?id=%v", keys[0].StringID())
-	content, err := c.httpRequest("GET", url, "", AccessAdmin)
+	content, err := c.GET(url)
 	c.expectEQ(err, nil)
 	c.expectTrue(bytes.Contains(content, []byte("Cause bisection: introduced by")))
 	c.expectTrue(bytes.Contains(content, []byte("kernel: add a bug")))
@@ -1091,7 +1133,7 @@ func TestBugBisectionStatus(t *testing.T) {
 	c.expectEQ(err, nil)
 	c.expectEQ(len(bugs), 1)
 	url := fmt.Sprintf("/%v", bugs[0].Namespace)
-	content, err := c.httpRequest("GET", url, "", AccessAdmin)
+	content, err := c.GET(url)
 	c.expectEQ(err, nil)
 	c.expectTrue(bytes.Contains(content, []byte("done")))
 
@@ -1101,7 +1143,7 @@ func TestBugBisectionStatus(t *testing.T) {
 		msg := c.client2.pollEmailBug()
 		c.expectTrue(strings.Contains(msg.Body, "syzbot has bisected this issue to:"))
 		msg = c.client2.pollEmailBug()
-		c.expectTrue(strings.Contains(msg.Body, "Sending this report upstream."))
+		c.expectTrue(strings.Contains(msg.Body, "Sending this report to the next reporting stage."))
 		msg = c.client2.pollEmailBug()
 		c.expectTrue(strings.Contains(msg.Body, "syzbot found the following issue"))
 	}
@@ -1136,7 +1178,7 @@ func TestBugBisectionStatus(t *testing.T) {
 		},
 	}
 	c.expectOK(c.client2.JobDone(done))
-	content, err = c.httpRequest("GET", url, "", AccessAdmin)
+	content, err = c.GET(url)
 	c.expectEQ(err, nil)
 	c.expectTrue(bytes.Contains(content, []byte("done")))
 

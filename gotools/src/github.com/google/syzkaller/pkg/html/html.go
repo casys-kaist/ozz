@@ -1,25 +1,20 @@
 // Copyright 2018 syzkaller project authors. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 
-//go:generate ./gen.sh
-
 package html
 
 import (
 	"fmt"
 	"html/template"
+	"net/url"
+	"reflect"
 	"strings"
 	texttemplate "text/template"
 	"time"
 
 	"github.com/google/syzkaller/dashboard/dashapi"
+	"github.com/google/syzkaller/pkg/vcs"
 )
-
-func CreatePage(page string) *template.Template {
-	const headTempl = `<style type="text/css" media="screen">%v</style><script>%v</script>`
-	page = strings.Replace(page, "{{HEAD}}", fmt.Sprintf(headTempl, style, js), 1)
-	return template.Must(template.New("").Funcs(Funcs).Parse(page))
-}
 
 func CreateGlob(glob string) *template.Template {
 	return template.Must(template.New("").Funcs(Funcs).ParseGlob(glob))
@@ -46,6 +41,8 @@ var Funcs = template.FuncMap{
 	"formatCommitTableTitle": formatCommitTableTitle,
 	"formatList":             formatStringList,
 	"selectBisect":           selectBisect,
+	"dereference":            dereferencePointer,
+	"commitLink":             commitLink,
 }
 
 func selectBisect(rep *dashapi.BugReport) *dashapi.BisectResult {
@@ -179,4 +176,33 @@ func formatCommitTableTitle(v string) string {
 
 func formatStringList(list []string) string {
 	return strings.Join(list, ", ")
+}
+
+func dereferencePointer(v interface{}) interface{} {
+	reflectValue := reflect.ValueOf(v)
+	if !reflectValue.IsNil() && reflectValue.Kind() == reflect.Ptr {
+		elem := reflectValue.Elem()
+		if elem.CanInterface() {
+			return elem.Interface()
+		}
+	}
+	return v
+}
+
+func commitLink(repo, commit string) string {
+	return vcs.CommitLink(repo, commit)
+}
+
+func AmendURL(baseURL, key, value string) string {
+	if baseURL == "" {
+		return ""
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	values := parsed.Query()
+	values.Set(key, value)
+	parsed.RawQuery = values.Encode()
+	return parsed.String()
 }

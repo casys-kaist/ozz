@@ -147,7 +147,7 @@ func (comp *compiler) generateTypes(syscalls []*prog.Syscall) []prog.Type {
 	// Replace all Type's in the descriptions with Ref's
 	// and prepare a sorted array of corresponding real types.
 	proxies := make(map[string]*typeProxy)
-	prog.ForeachTypePost(syscalls, func(typ prog.Type, ctx prog.TypeCtx) {
+	prog.ForeachTypePost(syscalls, func(typ prog.Type, ctx *prog.TypeCtx) {
 		if _, ok := typ.(prog.Ref); ok {
 			return
 		}
@@ -195,7 +195,7 @@ func (comp *compiler) generateTypes(syscalls []*prog.Syscall) []prog.Type {
 func (comp *compiler) layoutTypes(syscalls []*prog.Syscall) {
 	// Calculate struct/union/array sizes, add padding to structs, mark bitfields.
 	padded := make(map[prog.Type]bool)
-	prog.ForeachTypePost(syscalls, func(typ prog.Type, _ prog.TypeCtx) {
+	prog.ForeachTypePost(syscalls, func(typ prog.Type, _ *prog.TypeCtx) {
 		comp.layoutType(typ, padded)
 	})
 }
@@ -379,7 +379,8 @@ func (comp *compiler) layoutStructFields(t *prog.StructType, varlen, packed bool
 	t.Fields = comp.finalizeStructFields(t, newFields, varlen, structAlign, byteOffset, bitOffset)
 }
 
-func (comp *compiler) finalizeStructFields(t *prog.StructType, fields []prog.Field, varlen bool, structAlign, byteOffset, bitOffset uint64) []prog.Field {
+func (comp *compiler) finalizeStructFields(t *prog.StructType, fields []prog.Field, varlen bool,
+	structAlign, byteOffset, bitOffset uint64) []prog.Field {
 	if bitOffset != 0 {
 		pad := roundup(bitOffset, 8) / 8
 		byteOffset += pad
@@ -456,7 +457,7 @@ func genPad(size uint64) prog.Field {
 func (comp *compiler) genFieldArray(fields []*ast.Field, argSizes []uint64) ([]prog.Field, int) {
 	outOverlay := -1
 	for i, f := range fields {
-		attrs := comp.parseAttrs(fieldAttrs, f, f.Attrs)
+		attrs := comp.parseAttrs(structFieldAttrs, f, f.Attrs)
 		if attrs[attrOutOverlay] > 0 {
 			outOverlay = i
 		}
@@ -476,7 +477,7 @@ func (comp *compiler) genFieldArray(fields []*ast.Field, argSizes []uint64) ([]p
 }
 
 func (comp *compiler) genFieldDir(f *ast.Field) (prog.Dir, bool) {
-	attrs := comp.parseAttrs(fieldAttrs, f, f.Attrs)
+	attrs := comp.parseAttrs(structFieldAttrs, f, f.Attrs)
 	switch {
 	case attrs[attrIn] != 0:
 		return prog.DirIn, true

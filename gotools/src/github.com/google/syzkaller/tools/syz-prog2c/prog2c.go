@@ -21,14 +21,12 @@ var (
 	flagArch       = flag.String("arch", runtime.GOARCH, "target arch")
 	flagBuild      = flag.Bool("build", false, "also build the generated program")
 	flagThreaded   = flag.Bool("threaded", false, "create threaded program")
-	flagCollide    = flag.Bool("collide", false, "create collide program")
 	flagRepeat     = flag.Int("repeat", 1, "repeat program that many times (<=0 - infinitely)")
 	flagProcs      = flag.Int("procs", 1, "number of parallel processes")
 	flagSlowdown   = flag.Int("slowdown", 1, "execution slowdown caused by emulation/instrumentation")
-	flagSandbox    = flag.String("sandbox", "", "sandbox to use (none, setuid, namespace)")
+	flagSandbox    = flag.String("sandbox", "", "sandbox to use (none, setuid, namespace, android)")
+	flagSandboxArg = flag.Int("sandbox_arg", 0, "argument for executor to customize its behavior")
 	flagProg       = flag.String("prog", "", "file with program to convert (required)")
-	flagFaultCall  = flag.Int("fault_call", -1, "inject fault into this call (0-based)")
-	flagFaultNth   = flag.Int("fault_nth", 0, "inject fault on n-th operation (0-based)")
 	flagHandleSegv = flag.Bool("segv", false, "catch and ignore SIGSEGV")
 	flagUseTmpDir  = flag.Bool("tmpdir", false, "create a temporary dir and execute inside it")
 	flagTrace      = flag.Bool("trace", false, "trace syscall results")
@@ -74,15 +72,12 @@ func main() {
 	}
 	opts := csource.Options{
 		Threaded:      *flagThreaded,
-		Collide:       *flagCollide,
 		Repeat:        *flagRepeat != 1,
 		RepeatTimes:   *flagRepeat,
 		Procs:         *flagProcs,
 		Slowdown:      *flagSlowdown,
 		Sandbox:       *flagSandbox,
-		Fault:         *flagFaultCall >= 0,
-		FaultCall:     *flagFaultCall,
-		FaultNth:      *flagFaultNth,
+		SandboxArg:    *flagSandboxArg,
 		Leak:          *flagLeak,
 		NetInjection:  features["tun"].Enabled,
 		NetDevices:    features["net_dev"].Enabled,
@@ -92,10 +87,12 @@ func main() {
 		CloseFDs:      features["close_fds"].Enabled,
 		KCSAN:         features["kcsan"].Enabled,
 		DevlinkPCI:    features["devlink_pci"].Enabled,
+		NicVF:         features["nic_vf"].Enabled,
 		USB:           features["usb"].Enabled,
 		VhciInjection: features["vhci"].Enabled,
 		Wifi:          features["wifi"].Enabled,
 		IEEE802154:    features["ieee802154"].Enabled,
+		Sysctl:        features["sysctl"].Enabled,
 		UseTmpDir:     *flagUseTmpDir,
 		HandleSegv:    *flagHandleSegv,
 		Repro:         *flagRepro,

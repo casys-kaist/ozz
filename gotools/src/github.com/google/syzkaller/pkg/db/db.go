@@ -19,7 +19,6 @@ import (
 	"os"
 
 	"github.com/google/syzkaller/pkg/hash"
-	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/pkg/osutil"
 	"github.com/google/syzkaller/prog"
 )
@@ -38,7 +37,10 @@ type Record struct {
 	Seq uint64
 }
 
-func Open(filename string) (*DB, error) {
+// Open opens the specified database file.
+// If the database is corrupted and reading failed, then it returns an non-nil db
+// with whatever records were recovered and a non-nil error at the same time.
+func Open(filename string, repair bool) (*DB, error) {
 	db := &DB{
 		filename: filename,
 	}
@@ -46,14 +48,19 @@ func Open(filename string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.Version, db.Records, db.uncompacted = deserializeDB(bufio.NewReader(f))
-	f.Close()
-	if len(db.Records) == 0 || db.uncompacted/10*9 > len(db.Records) {
-		if err := db.compact(); err != nil {
-			return nil, err
-		}
+	defer f.Close()
+	var deserializeErr error
+	db.Version, db.Records, db.uncompacted, deserializeErr = deserializeDB(bufio.NewReader(f))
+	// Deserialization error is considered a "soft" error if repair == true,
+	// but compact below ensures that the file is at least writable.
+	if deserializeErr != nil && !repair {
+		return nil, deserializeErr
 	}
-	return db, nil
+	f.Close() // compact will rewrite the file, so close our descriptor
+	if err := db.compact(); err != nil {
+		return nil, err
+	}
+	return db, deserializeErr
 }
 
 func (db *DB) Save(key string, val []byte, seq uint64) {
@@ -176,11 +183,11 @@ func serializeRecord(w *bytes.Buffer, key string, val []byte, seq uint64) {
 	}
 }
 
-func deserializeDB(r *bufio.Reader) (version uint64, records map[string]Record, uncompacted int) {
+func deserializeDB(r *bufio.Reader) (version uint64, records map[string]Record, uncompacted int, err0 error) {
 	records = make(map[string]Record)
 	ver, err := deserializeHeader(r)
 	if err != nil {
-		log.Logf(0, "failed to deserialize database header: %v", err)
+		err0 = fmt.Errorf("failed to deserialize database header: %v", err)
 		return
 	}
 	version = ver
@@ -190,7 +197,7 @@ func deserializeDB(r *bufio.Reader) (version uint64, records map[string]Record, 
 			return
 		}
 		if err != nil {
-			log.Logf(0, "failed to deserialize database record: %v", err)
+			err0 = fmt.Errorf("failed to deserialize database record: %v", err)
 			return
 		}
 		uncompacted++
@@ -269,7 +276,7 @@ func deserializeRecord(r *bufio.Reader) (key string, val []byte, seq uint64, err
 // Create creates a new database in the specified file with the specified records.
 func Create(filename string, version uint64, records []Record) error {
 	os.Remove(filename)
-	db, err := Open(filename)
+	db, err := Open(filename, true)
 	if err != nil {
 		return fmt.Errorf("failed to open database file: %v", err)
 	}
@@ -289,7 +296,7 @@ func ReadCorpus(filename string, target *prog.Target) (progs []*prog.Prog, err e
 	if filename == "" {
 		return
 	}
-	db, err := Open(filename)
+	db, err := Open(filename, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database file: %v", err)
 	}

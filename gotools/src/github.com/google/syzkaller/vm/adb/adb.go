@@ -8,6 +8,7 @@ package adb
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -15,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,9 +31,14 @@ func init() {
 	vmimpl.Register("adb", ctor, false)
 }
 
+type Device struct {
+	Serial  string `json:"serial"`  // device serial to connect
+	Console string `json:"console"` // console device name (e.g. "/dev/pts/0")
+}
+
 type Config struct {
-	Adb     string   `json:"adb"`     // adb binary name ("adb" by default)
-	Devices []string `json:"devices"` // list of adb device IDs to use
+	Adb     string            `json:"adb"`     // adb binary name ("adb" by default)
+	Devices []json.RawMessage `json:"devices"` // list of adb devices to use
 
 	// Ensure that a device battery level is at 20+% before fuzzing.
 	// Sometimes we observe that a device can't charge during heavy fuzzing
@@ -60,6 +67,25 @@ type instance struct {
 	debug   bool
 }
 
+var (
+	androidSerial = "^[0-9A-Z]+$"
+	ipAddress     = `^(?:localhost|(?:[0-9]{1,3}\.){3}[0-9]{1,3})\:(?:[0-9]{1,5})$` // cuttlefish or remote_device_proxy
+)
+
+func loadDevice(data []byte) (*Device, error) {
+	devObj := &Device{}
+	var devStr string
+	err1 := config.LoadData(data, devObj)
+	err2 := config.LoadData(data, &devStr)
+	if err1 != nil && err2 != nil {
+		return nil, fmt.Errorf("failed to parse adb vm config: %v %v", err1, err2)
+	}
+	if err2 == nil {
+		devObj.Serial = devStr
+	}
+	return devObj, nil
+}
+
 func ctor(env *vmimpl.Env) (vmimpl.Pool, error) {
 	cfg := &Config{
 		Adb:          "adb",
@@ -75,10 +101,15 @@ func ctor(env *vmimpl.Env) (vmimpl.Pool, error) {
 	if len(cfg.Devices) == 0 {
 		return nil, fmt.Errorf("no adb devices specified")
 	}
-	devRe := regexp.MustCompile("[0-9A-F]+")
+	// Device should be either regular serial number, or a valid Cuttlefish ID.
+	devRe := regexp.MustCompile(fmt.Sprintf("%s|%s", androidSerial, ipAddress))
 	for _, dev := range cfg.Devices {
-		if !devRe.MatchString(dev) {
-			return nil, fmt.Errorf("invalid adb device id '%v'", dev)
+		device, err := loadDevice(dev)
+		if err != nil {
+			return nil, err
+		}
+		if !devRe.MatchString(device.Serial) {
+			return nil, fmt.Errorf("invalid adb device id '%v'", device.Serial)
 		}
 	}
 	if env.Debug {
@@ -96,12 +127,17 @@ func (pool *Pool) Count() int {
 }
 
 func (pool *Pool) Create(workdir string, index int) (vmimpl.Instance, error) {
+	device, err := loadDevice(pool.cfg.Devices[index])
+	if err != nil {
+		return nil, err
+	}
 	inst := &instance{
-		cfg:    pool.cfg,
-		adbBin: pool.cfg.Adb,
-		device: pool.cfg.Devices[index],
-		closed: make(chan bool),
-		debug:  pool.env.Debug,
+		cfg:     pool.cfg,
+		adbBin:  pool.cfg.Adb,
+		device:  device.Serial,
+		console: device.Console,
+		closed:  make(chan bool),
+		debug:   pool.env.Debug,
 	}
 	closeInst := inst
 	defer func() {
@@ -112,15 +148,22 @@ func (pool *Pool) Create(workdir string, index int) (vmimpl.Instance, error) {
 	if err := inst.repair(); err != nil {
 		return nil, err
 	}
-	inst.console = findConsole(inst.adbBin, inst.device)
+	if inst.console == "" {
+		inst.console = findConsole(inst.adbBin, inst.device)
+	}
+	log.Logf(0, "associating adb device %v with console %v", inst.device, inst.console)
 	if pool.cfg.BatteryCheck {
 		if err := inst.checkBatteryLevel(); err != nil {
 			return nil, err
 		}
 	}
 	// Remove temp files from previous runs.
-	if _, err := inst.adb("shell", "rm -Rf /data/syzkaller*"); err != nil {
-		return nil, err
+	// rm chokes on bad symlinks so we must remove them first
+	if _, err := inst.adb("shell", "ls /data/syzkaller*"); err == nil {
+		if _, err := inst.adb("shell", "find /data/syzkaller* -type l -exec unlink {} \\;"+
+			" && rm -Rf /data/syzkaller*"); err != nil {
+			return nil, err
+		}
 	}
 	inst.adb("shell", "echo 0 > /proc/sys/kernel/kptr_restrict")
 	closeInst = nil
@@ -132,6 +175,20 @@ var (
 	consoleToDev   = make(map[string]string)
 	devToConsole   = make(map[string]string)
 )
+
+func parseAdbOutToInt(out []byte) int {
+	val := 0
+	for _, c := range out {
+		if c >= '0' && c <= '9' {
+			val = val*10 + int(c) - '0'
+			continue
+		}
+		if val != 0 {
+			break
+		}
+	}
+	return val
+}
 
 // findConsole returns console file associated with the dev device (e.g. /dev/ttyUSB0).
 // This code was tested with Suzy-Q and Android Serial Cable (ASC). For Suzy-Q see:
@@ -158,7 +215,6 @@ func findConsole(adb, dev string) string {
 	}
 	devToConsole[dev] = con
 	consoleToDev[con] = dev
-	log.Logf(0, "associating adb device %v with console %v", dev, con)
 	return con
 }
 
@@ -252,15 +308,53 @@ func (inst *instance) Forward(port int) (string, error) {
 }
 
 func (inst *instance) adb(args ...string) ([]byte, error) {
+	return inst.adbWithTimeout(time.Minute, args...)
+}
+
+func (inst *instance) adbWithTimeout(timeout time.Duration, args ...string) ([]byte, error) {
 	if inst.debug {
 		log.Logf(0, "executing adb %+v", args)
 	}
 	args = append([]string{"-s", inst.device}, args...)
-	out, err := osutil.RunCmd(time.Minute, "", inst.adbBin, args...)
+	out, err := osutil.RunCmd(timeout, "", inst.adbBin, args...)
 	if inst.debug {
 		log.Logf(0, "adb returned")
 	}
 	return out, err
+}
+
+func (inst *instance) waitForBootCompletion() {
+	// ADB connects to a phone and starts syz-fuzzer while the phone is still booting.
+	// This enables syzkaller to create a race condition which in certain cases doesn't
+	// allow the phone to finalize initialization.
+	// To determine whether a system has booted and started all system processes and
+	// services we wait for a process named 'com.android.systemui' to start. It's possible
+	// that in the future a new devices which doesn't have 'systemui' process will be fuzzed
+	// with adb, in this case this code should be modified with a new process name to search for.
+	log.Logf(2, "waiting for boot completion")
+
+	sleepTime := 5
+	sleepDuration := time.Duration(sleepTime) * time.Second
+	maxWaitTime := 60 * 3 // 3 minutes to wait until boot completion
+	maxRetries := maxWaitTime / sleepTime
+	i := 0
+	for ; i < maxRetries; i++ {
+		time.Sleep(sleepDuration)
+
+		if out, err := inst.adb("shell", "pgrep systemui | wc -l"); err == nil {
+			count := parseAdbOutToInt(out)
+			if count != 0 {
+				log.Logf(0, "boot completed")
+				break
+			}
+		} else {
+			log.Logf(0, "failed to execute command 'pgrep systemui | wc -l', %v", err)
+			break
+		}
+	}
+	if i == maxRetries {
+		log.Logf(0, "failed to determine boot completion, can't find 'com.android.systemui' process")
+	}
 }
 
 func (inst *instance) repair() error {
@@ -292,6 +386,18 @@ func (inst *instance) repair() error {
 	// Switch to root for userdebug builds.
 	inst.adb("root")
 	inst.waitForSSH()
+	inst.waitForBootCompletion()
+
+	// Mount debugfs.
+	if _, err := inst.adb("shell", "ls /sys/kernel/debug/kcov"); err != nil {
+		log.Logf(2, "debugfs was unmounted mounting")
+		// This prop only exist on Android 12+
+		inst.adb("shell", "setprop persist.dbg.keep_debugfs_mounted 1")
+		if _, err := inst.adb("shell", "mount -t debugfs debugfs /sys/kernel/debug "+
+			"&& chmod 0755 /sys/kernel/debug"); err != nil {
+			return err
+		}
+	}
 	if inst.cfg.StartupScript != "" {
 		if err := inst.runScript(inst.cfg.StartupScript); err != nil {
 			return err
@@ -318,16 +424,15 @@ func (inst *instance) runScript(script string) error {
 }
 
 func (inst *instance) waitForSSH() error {
-	var err error
-	for i := 0; i < 300; i++ {
-		if !vmimpl.SleepInterruptible(time.Second) {
-			return fmt.Errorf("shutdown in progress")
-		}
-		if _, err = inst.adb("shell", "pwd"); err == nil {
-			return nil
-		}
+	if !vmimpl.SleepInterruptible(time.Second) {
+		return fmt.Errorf("shutdown in progress")
 	}
-	return fmt.Errorf("instance is dead and unrepairable: %v", err)
+
+	if _, err := inst.adbWithTimeout(10*time.Minute, "wait-for-device"); err != nil {
+		return fmt.Errorf("instance is dead and unrepairable: %v", err)
+	}
+
+	return nil
 }
 
 func (inst *instance) checkBatteryLevel() error {
@@ -373,16 +478,7 @@ func (inst *instance) getBatteryLevel(numRetry int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	val := 0
-	for _, c := range out {
-		if c >= '0' && c <= '9' {
-			val = val*10 + int(c) - '0'
-			continue
-		}
-		if val != 0 {
-			break
-		}
-	}
+	val := parseAdbOutToInt(out)
 	if val == 0 {
 		return 0, fmt.Errorf("failed to parse 'dumpsys battery' output: %s", out)
 	}
@@ -401,11 +497,26 @@ func (inst *instance) Copy(hostSrc string) (string, error) {
 	return vmDst, nil
 }
 
+// Check if the device is cuttlefish on remote vm.
+func isRemoteCuttlefish(dev string) (bool, string) {
+	if !strings.Contains(dev, ":") {
+		return false, ""
+	}
+	ip := strings.Split(dev, ":")[0]
+	if ip == "localhost" || ip == "0.0.0.0" || ip == "127.0.0.1" {
+		return false, ip
+	}
+	return true, ip
+}
+
 func (inst *instance) Run(timeout time.Duration, stop <-chan bool, command string) (
 	<-chan []byte, <-chan error, error) {
 	var tty io.ReadCloser
 	var err error
-	if inst.console == "adb" {
+
+	if ok, ip := isRemoteCuttlefish(inst.device); ok {
+		tty, err = vmimpl.OpenRemoteKernelLog(ip, inst.console)
+	} else if inst.console == "adb" {
 		tty, err = vmimpl.OpenAdbConsole(inst.adbBin, inst.device)
 	} else {
 		tty, err = vmimpl.OpenConsole(inst.console)

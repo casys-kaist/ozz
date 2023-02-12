@@ -8,7 +8,9 @@ import (
 	"testing"
 )
 
+// nolint:gocyclo
 func TestMinimize(t *testing.T) {
+	// nolint: lll
 	tests := []struct {
 		os              string
 		arch            string
@@ -148,6 +150,95 @@ func TestMinimize(t *testing.T) {
 			func(p *Prog, callIndex int) bool { return len(p.Calls) == 1 },
 			"minimize$0(0x1, 0xffffffffffffffff)\n",
 			-1,
+		},
+		// Clear unneeded fault injection.
+		{
+			"linux", "amd64",
+			"pipe2(0x0, 0x0) (fail_nth: 5)\n",
+			-1,
+			func(p *Prog, callIndex int) bool {
+				return len(p.Calls) == 1 && p.Calls[0].Meta.Name == "pipe2"
+			},
+			"pipe2(0x0, 0x0)\n",
+			-1,
+		},
+		// Keep important fault injection.
+		{
+			"linux", "amd64",
+			"pipe2(0x0, 0x0) (fail_nth: 5)\n",
+			-1,
+			func(p *Prog, callIndex int) bool {
+				return len(p.Calls) == 1 && p.Calls[0].Meta.Name == "pipe2" && p.Calls[0].Props.FailNth == 5
+			},
+			"pipe2(0x0, 0x0) (fail_nth: 5)\n",
+			-1,
+		},
+		// Clear unneeded async flag.
+		{
+			"linux", "amd64",
+			"pipe2(0x0, 0x0) (async)\n",
+			-1,
+			func(p *Prog, callIndex int) bool {
+				return len(p.Calls) == 1 && p.Calls[0].Meta.Name == "pipe2"
+			},
+			"pipe2(0x0, 0x0)\n",
+			-1,
+		},
+		// Keep important async flag.
+		{
+			"linux", "amd64",
+			"pipe2(0x0, 0x0) (async)\n",
+			-1,
+			func(p *Prog, callIndex int) bool {
+				return len(p.Calls) == 1 && p.Calls[0].Meta.Name == "pipe2" && p.Calls[0].Props.Async
+			},
+			"pipe2(0x0, 0x0) (async)\n",
+			-1,
+		},
+		// Clear unneeded rerun.
+		{
+			"linux", "amd64",
+			"pipe2(0x0, 0x0) (rerun: 100)\n",
+			-1,
+			func(p *Prog, callIndex int) bool {
+				return len(p.Calls) == 1 && p.Calls[0].Meta.Name == "pipe2"
+			},
+			"pipe2(0x0, 0x0)\n",
+			-1,
+		},
+		// Keep important rerun.
+		{
+			"linux", "amd64",
+			"pipe2(0x0, 0x0) (rerun: 100)\n",
+			-1,
+			func(p *Prog, callIndex int) bool {
+				return len(p.Calls) == 1 && p.Calls[0].Meta.Name == "pipe2" && p.Calls[0].Props.Rerun >= 100
+			},
+			"pipe2(0x0, 0x0) (rerun: 100)\n",
+			-1,
+		},
+		// Undo target.SpecialFileLenghts mutation (reduce file name length).
+		{
+			"test", "64",
+			"mutate9(&(0x7f0000000000)='./file0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\x00')\n",
+			0,
+			func(p *Prog, callIndex int) bool {
+				return p.Calls[0].Args[0].(*PointerArg).Res != nil
+			},
+			"mutate9(&(0x7f0000000000)='./file0\\x00')\n",
+			0,
+		},
+		// Ensure `no_minimize` calls are untouched.
+		{
+			"linux", "amd64",
+			"syz_mount_image$ext4(&(0x7f0000000000)='ext4\\x00', &(0x7f0000000100)='./file0\\x00', 0x0, &(0x7f0000010020), 0x1, 0x15, &(0x7f0000000200)=\"$eJwqrqzKTszJSS0CBAAA//8TyQPi\")\n",
+			0,
+			func(p *Prog, callIndex int) bool {
+				// Anything is allowed except removing a call.
+				return len(p.Calls) > 0
+			},
+			"syz_mount_image$ext4(&(0x7f0000000000)='ext4\\x00', &(0x7f0000000100)='./file0\\x00', 0x0, &(0x7f0000010020), 0x1, 0x15, &(0x7f0000000200)=\"$eJwqrqzKTszJSS0CBAAA//8TyQPi\")\n",
+			0,
 		},
 	}
 	t.Parallel()

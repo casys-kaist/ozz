@@ -250,10 +250,11 @@ static volatile long syz_usb_connect_impl(int fd, uint64 speed, uint64 dev_len,
 
 		char* response_data = NULL;
 		uint32 response_length = 0;
+		struct usb_qualifier_descriptor qual;
 		char data[4096];
 
 		if (req.u.ctrl.bmRequestType & UE_DIR_IN) {
-			if (!lookup_connect_response_in(fd, descs, (const struct usb_ctrlrequest*)&req.u.ctrl, &response_data, &response_length)) {
+			if (!lookup_connect_response_in(fd, descs, (const struct usb_ctrlrequest*)&req.u.ctrl, &qual, &response_data, &response_length)) {
 				debug("syz_usb_connect: unknown control IN request\n");
 				return -1;
 			}
@@ -268,8 +269,7 @@ static volatile long syz_usb_connect_impl(int fd, uint64 speed, uint64 dev_len,
 
 		if ((req.u.ctrl.bmRequestType & USB_TYPE_MASK) == USB_TYPE_STANDARD &&
 		    req.u.ctrl.bRequest == USB_REQ_SET_CONFIGURATION) {
-			// TODO: possibly revisit.
-		}
+		} // TODO: possibly revisit.
 
 		if (response_length > sizeof(data))
 			response_length = 0;

@@ -23,12 +23,17 @@ import (
 )
 
 type Dashboard struct {
-	Client       string
-	Addr         string
-	Key          string
-	ctor         RequestCtor
-	doer         RequestDoer
-	logger       RequestLogger
+	Client string
+	Addr   string
+	Key    string
+	ctor   RequestCtor
+	doer   RequestDoer
+	logger RequestLogger
+	// Yes, we have the ability to set custom constructor, doer and logger, but
+	// there are also cases when we just want to mock the whole request processing.
+	// Implementing that on top of http.Request/http.Response would complicate the
+	// code too much.
+	mocker       RequestMocker
 	errorHandler func(error)
 }
 
@@ -36,10 +41,17 @@ func New(client, addr, key string) (*Dashboard, error) {
 	return NewCustom(client, addr, key, http.NewRequest, http.DefaultClient.Do, nil, nil)
 }
 
+func NewMock(mocker RequestMocker) *Dashboard {
+	return &Dashboard{
+		mocker: mocker,
+	}
+}
+
 type (
 	RequestCtor   func(method, url string, body io.Reader) (*http.Request, error)
 	RequestDoer   func(req *http.Request) (*http.Response, error)
 	RequestLogger func(msg string, args ...interface{})
+	RequestMocker func(method string, req, resp interface{}) error
 )
 
 // key == "" indicates that the ambient GCE service account authority
@@ -90,6 +102,7 @@ type Build struct {
 	KernelConfig        []byte
 	Commits             []string // see BuilderPoll
 	FixCommits          []Commit
+	Assets              []NewAsset
 }
 
 type Commit struct {
@@ -134,6 +147,8 @@ func (dash *Dashboard) BuilderPoll(manager string) (*BuilderPollResp, error) {
 }
 
 // Jobs workflow:
+//   - syz-ci sends JobResetReq to indicate that no previously started jobs
+//     are any longer in progress.
 //   - syz-ci sends JobPollReq periodically to check for new jobs,
 //     request contains list of managers that this syz-ci runs.
 //   - dashboard replies with JobPollResp that contains job details,
@@ -141,6 +156,10 @@ func (dash *Dashboard) BuilderPoll(manager string) (*BuilderPollResp, error) {
 //   - when syz-ci finishes the job, it sends JobDoneReq which contains
 //     job execution result (Build, Crash or Error details),
 //     ID must match JobPollResp.ID.
+
+type JobResetReq struct {
+	Managers []string
+}
 
 type JobPollReq struct {
 	Managers map[string]ManagerJobs
@@ -170,13 +189,14 @@ type JobPollResp struct {
 }
 
 type JobDoneReq struct {
-	ID          string
-	Build       Build
-	Error       []byte
-	Log         []byte // bisection log
-	CrashTitle  string
-	CrashLog    []byte
-	CrashReport []byte
+	ID             string
+	Build          Build
+	Error          []byte
+	Log            []byte // bisection log
+	CrashTitle     string
+	CrashAltTitles []string
+	CrashLog       []byte
+	CrashReport    []byte
 	// Bisection results:
 	// If there is 0 commits:
 	//  - still happens on HEAD for fix bisection
@@ -212,6 +232,10 @@ func (dash *Dashboard) JobPoll(req *JobPollReq) (*JobPollResp, error) {
 
 func (dash *Dashboard) JobDone(req *JobDoneReq) error {
 	return dash.Query("job_done", req, nil)
+}
+
+func (dash *Dashboard) JobReset(req *JobResetReq) error {
+	return dash.Query("job_reset", req, nil)
 }
 
 type BuildErrorReq struct {
@@ -251,6 +275,12 @@ func (dash *Dashboard) UploadCommits(commits []Commit) error {
 	return dash.Query("upload_commits", &CommitPollResultReq{commits}, nil)
 }
 
+type CrashFlags int64
+
+const (
+	CrashUnderStrace CrashFlags = 1 << iota
+)
+
 // Crash describes a single kernel crash (potentially with repro).
 type Crash struct {
 	BuildID     string // refers to Build.ID
@@ -261,8 +291,11 @@ type Crash struct {
 	Maintainers []string // deprecated in favor of Recipients
 	Recipients  Recipients
 	Log         []byte
+	Flags       CrashFlags
 	Report      []byte
 	MachineInfo []byte
+	Assets      []NewAsset
+	GuiltyFiles []string
 	// The following is optional and is filled only after repro.
 	ReproOpts []byte
 	ReproSyz  []byte
@@ -355,6 +388,7 @@ type BugReport struct {
 	SyzkallerCommit   string
 	Log               []byte
 	LogLink           string
+	LogHasStrace      bool
 	Report            []byte
 	ReportLink        string
 	ReproC            []byte
@@ -376,7 +410,37 @@ type BugReport struct {
 	PatchLink      string
 	BisectCause    *BisectResult
 	BisectFix      *BisectResult
+	Assets         []Asset
+	Subsystems     []BugSubsystem
+	ReportElements *ReportElements
 }
+
+type ReportElements struct {
+	GuiltyFiles []string
+}
+
+type BugSubsystem struct {
+	Name string
+}
+
+type Asset struct {
+	Title       string
+	DownloadURL string
+	Type        AssetType
+}
+
+type AssetType string
+
+// Asset types used throughout the system.
+// DO NOT change them, this will break compatibility with DB content.
+const (
+	BootableDisk       AssetType = "bootable_disk"
+	NonBootableDisk    AssetType = "non_bootable_disk"
+	KernelObject       AssetType = "kernel_object"
+	KernelImage        AssetType = "kernel_image"
+	HTMLCoverageReport AssetType = "html_coverage_report"
+	MountInRepro       AssetType = "mount_in_repro"
+)
 
 type BisectResult struct {
 	Commit          *Commit   // for conclusive bisection
@@ -393,6 +457,7 @@ type BugUpdate struct {
 	ExtID           string
 	Link            string
 	Status          BugStatus
+	StatusReason    BugStatusReason
 	ReproLevel      ReproLevel
 	DupOf           string
 	OnHold          bool     // If set for open bugs, don't upstream this bug.
@@ -400,7 +465,13 @@ type BugUpdate struct {
 	ResetFixCommits bool     // Remove all commits (empty FixCommits means leave intact).
 	FixCommits      []string // Titles of commits that fix this bug.
 	CC              []string // Additional emails to add to CC list in future emails.
-	CrashID         int64
+
+	CrashID int64 // This is a deprecated field, left here for backward compatibility.
+
+	// The new interface that allows to report and unreport several crashes at the same time.
+	// This is not relevant for emails, but may be important for external reportings.
+	ReportCrashIDs   []int64
+	UnreportCrashIDs []int64
 }
 
 type BugUpdateReply struct {
@@ -430,6 +501,7 @@ type BugNotification struct {
 	Text        string   // meaning depends on Type
 	CC          []string // deprecated in favor of Recipients
 	Maintainers []string // deprecated in favor of Recipients
+	Link        string
 	Recipients  Recipients
 	// Public is what we want all involved people to see (e.g. if we notify about a wrong commit title,
 	// people need to see it and provide the right title). Not public is what we want to send only
@@ -452,6 +524,19 @@ type PollClosedRequest struct {
 
 type PollClosedResponse struct {
 	IDs []string
+}
+
+type TestPatchRequest struct {
+	BugID  string
+	Link   string
+	User   string
+	Repo   string
+	Branch string
+	Patch  []byte
+}
+
+type TestPatchReply struct {
+	ErrorText string
 }
 
 func (dash *Dashboard) ReportingPollBugs(typ string) (*PollBugsResponse, error) {
@@ -495,6 +580,14 @@ func (dash *Dashboard) ReportingUpdate(upd *BugUpdate) (*BugUpdateReply, error) 
 	return resp, nil
 }
 
+func (dash *Dashboard) NewTestJob(upd *TestPatchRequest) (*TestPatchReply, error) {
+	resp := new(TestPatchReply)
+	if err := dash.Query("new_test_job", upd, resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 type ManagerStatsReq struct {
 	Name string
 	Addr string
@@ -515,6 +608,35 @@ type ManagerStatsReq struct {
 
 func (dash *Dashboard) UploadManagerStats(req *ManagerStatsReq) error {
 	return dash.Query("manager_stats", req, nil)
+}
+
+// Asset lifetime:
+// 1. syz-ci uploads it to GCS and reports to the dashboard via add_build_asset.
+// 2. dashboard periodically checks if the asset is still needed.
+// 3. syz-ci queries needed_assets to figure out which assets are still needed.
+// 4. Once an asset is not needed, syz-ci removes the corresponding file.
+type NewAsset struct {
+	DownloadURL string
+	Type        AssetType
+}
+
+type AddBuildAssetsReq struct {
+	BuildID string
+	Assets  []NewAsset
+}
+
+func (dash *Dashboard) AddBuildAssets(req *AddBuildAssetsReq) error {
+	return dash.Query("add_build_assets", req, nil)
+}
+
+type NeededAssetsResp struct {
+	DownloadURLs []string
+}
+
+func (dash *Dashboard) NeededAssetsList() (*NeededAssetsResp, error) {
+	resp := new(NeededAssetsResp)
+	err := dash.Query("needed_assets", nil, resp)
+	return resp, err
 }
 
 type BugListResp struct {
@@ -538,11 +660,47 @@ func (dash *Dashboard) LoadBug(id string) (*BugReport, error) {
 	return resp, err
 }
 
+type LoadFullBugReq struct {
+	BugID string
+}
+
+type FullBugInfo struct {
+	SimilarBugs []*SimilarBugInfo
+	BisectCause *BugReport
+	BisectFix   *BugReport
+	Crashes     []*BugReport
+}
+
+type SimilarBugInfo struct {
+	Title     string
+	Status    BugStatus
+	Namespace string
+	Link      string
+	Closed    time.Time
+}
+
+func (dash *Dashboard) LoadFullBug(req *LoadFullBugReq) (*FullBugInfo, error) {
+	resp := new(FullBugInfo)
+	err := dash.Query("load_full_bug", req, resp)
+	return resp, err
+}
+
+type UpdateReportReq struct {
+	BugID       string
+	CrashID     int64
+	GuiltyFiles *[]string
+}
+
+func (dash *Dashboard) UpdateReport(req *UpdateReportReq) error {
+	return dash.Query("update_report", req, nil)
+}
+
 type (
-	BugStatus  int
-	BugNotif   int
-	ReproLevel int
-	ReportType int
+	BugStatus       int
+	BugStatusReason string
+	BugNotif        int
+	ReproLevel      int
+	ReportType      int
 )
 
 const (
@@ -553,6 +711,11 @@ const (
 	BugStatusUpdate // aux info update (i.e. ExtID/Link/CC)
 	BugStatusUnCC   // don't CC sender on any future communication
 	BugStatusFixed
+)
+
+const (
+	InvalidatedByRevokedRepro = BugStatusReason("invalid_no_repro")
+	InvalidatedByNoActivity   = BugStatusReason("invalid_no_activity")
 )
 
 const (
@@ -583,6 +746,9 @@ const (
 func (dash *Dashboard) Query(method string, req, reply interface{}) error {
 	if dash.logger != nil {
 		dash.logger("API(%v): %#v", method, req)
+	}
+	if dash.mocker != nil {
+		return dash.mocker(method, req, reply)
 	}
 	err := dash.queryImpl(method, req, reply)
 	if err != nil {

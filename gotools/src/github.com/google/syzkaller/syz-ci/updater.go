@@ -28,8 +28,9 @@ const (
 
 // SyzUpdater handles everything related to syzkaller updates.
 // As kernel builder, it maintains 2 builds:
-//  - latest: latest known good syzkaller build
-//  - current: currently used syzkaller build
+//   - latest: latest known good syzkaller build
+//   - current: currently used syzkaller build
+//
 // Additionally it updates and restarts the current executable as necessary.
 // Current executable is always built on the same revision as the rest of syzkaller binaries.
 type SyzUpdater struct {
@@ -69,7 +70,7 @@ func NewSyzUpdater(cfg *Config) *SyzUpdater {
 	osutil.MkdirAll(syzkallerDir)
 
 	// List of required files in syzkaller build (contents of latest/current dirs).
-	files := map[string]bool{
+	syzFiles := map[string]bool{
 		"tag":             true, // contains syzkaller repo git hash
 		"bin/syz-ci":      true, // these are just copied from syzkaller dir
 		"bin/syz-manager": true,
@@ -80,15 +81,11 @@ func NewSyzUpdater(cfg *Config) *SyzUpdater {
 		mgrcfg := mgr.managercfg
 		os, vmarch, arch := mgrcfg.TargetOS, mgrcfg.TargetVMArch, mgrcfg.TargetArch
 		targets[os+"/"+vmarch+"/"+arch] = true
-		files[fmt.Sprintf("bin/%v_%v/syz-fuzzer", os, vmarch)] = true
-		files[fmt.Sprintf("bin/%v_%v/syz-execprog", os, vmarch)] = true
+		syzFiles[fmt.Sprintf("bin/%v_%v/syz-fuzzer", os, vmarch)] = true
+		syzFiles[fmt.Sprintf("bin/%v_%v/syz-execprog", os, vmarch)] = true
 		if mgrcfg.SysTarget.ExecutorBin == "" {
-			files[fmt.Sprintf("bin/%v_%v/syz-executor", os, arch)] = true
+			syzFiles[fmt.Sprintf("bin/%v_%v/syz-executor", os, arch)] = true
 		}
-	}
-	syzFiles := make(map[string]bool)
-	for f := range files {
-		syzFiles[f] = true
 	}
 	compilerID, err := osutil.RunCmd(time.Minute, "", "go", "version")
 	if err != nil {
@@ -113,8 +110,8 @@ func NewSyzUpdater(cfg *Config) *SyzUpdater {
 }
 
 // UpdateOnStart does 3 things:
-//  - ensures that the current executable is fresh
-//  - ensures that we have a working syzkaller build in current
+//   - ensures that the current executable is fresh
+//   - ensures that we have a working syzkaller build in current
 func (upd *SyzUpdater) UpdateOnStart(autoupdate bool, shutdown chan struct{}) {
 	os.RemoveAll(upd.currentDir)
 	latestTag := upd.checkLatest()
@@ -225,8 +222,8 @@ func (upd *SyzUpdater) build(commit *vcs.Commit) error {
 	// syzkaller testing may be slowed down by concurrent kernel builds too much
 	// and cause timeout failures, so we serialize it with other builds:
 	// https://groups.google.com/forum/#!msg/syzkaller-openbsd-bugs/o-G3vEsyQp4/f_nFpoNKBQAJ
-	kernelBuildSem <- struct{}{}
-	defer func() { <-kernelBuildSem }()
+	buildSem.Wait()
+	defer buildSem.Signal()
 
 	if upd.descriptions != "" {
 		files, err := ioutil.ReadDir(upd.descriptions)
@@ -235,7 +232,17 @@ func (upd *SyzUpdater) build(commit *vcs.Commit) error {
 		}
 		for _, f := range files {
 			src := filepath.Join(upd.descriptions, f.Name())
-			dst := filepath.Join(upd.syzkallerDir, "sys", targets.Linux, f.Name())
+			dst := ""
+			switch filepath.Ext(src) {
+			case ".txt", ".const":
+				dst = filepath.Join(upd.syzkallerDir, "sys", targets.Linux, f.Name())
+			case ".test":
+				dst = filepath.Join(upd.syzkallerDir, "sys", targets.Linux, "test", f.Name())
+			case ".h":
+				dst = filepath.Join(upd.syzkallerDir, "executor", f.Name())
+			default:
+				continue
+			}
 			if err := osutil.CopyFile(src, dst); err != nil {
 				return err
 			}

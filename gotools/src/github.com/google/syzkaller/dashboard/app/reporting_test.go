@@ -5,11 +5,15 @@ package main
 
 import (
 	"fmt"
+	"html"
+	"reflect"
 	"regexp"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/google/syzkaller/dashboard/dashapi"
+	"github.com/google/syzkaller/pkg/email"
 	"github.com/google/syzkaller/sys/targets"
 )
 
@@ -25,6 +29,7 @@ func TestReportBug(t *testing.T) {
 		Title:       "title1",
 		Maintainers: []string{`"Foo Bar" <foo@bar.com>`, `bar@foo.com`},
 		Log:         []byte("log1"),
+		Flags:       dashapi.CrashUnderStrace,
 		Report:      []byte("report1"),
 		MachineInfo: []byte("machine info 1"),
 	}
@@ -71,6 +76,7 @@ func TestReportBug(t *testing.T) {
 		MachineInfoLink:   externalLink(c.ctx, textMachineInfo, dbCrash.MachineInfo),
 		Log:               []byte("log1"),
 		LogLink:           externalLink(c.ctx, textCrashLog, dbCrash.Log),
+		LogHasStrace:      true,
 		Report:            []byte("report1"),
 		ReportLink:        externalLink(c.ctx, textCrashReport, dbCrash.Report),
 		ReproOpts:         []uint8{},
@@ -78,6 +84,8 @@ func TestReportBug(t *testing.T) {
 		CrashTime:         timeNow(c.ctx),
 		NumCrashes:        1,
 		HappenedOn:        []string{"repo1 branch1"},
+		Assets:            []dashapi.Asset{},
+		ReportElements:    &dashapi.ReportElements{},
 	}
 	c.expectEQ(want, rep)
 
@@ -240,6 +248,8 @@ func TestInvalidBug(t *testing.T) {
 		CrashTime:         timeNow(c.ctx),
 		NumCrashes:        1,
 		HappenedOn:        []string{"repo1 branch1"},
+		Assets:            []dashapi.Asset{},
+		ReportElements:    &dashapi.ReportElements{},
 	}
 	c.expectEQ(want, rep)
 	c.client.ReportFailedRepro(testCrashID(crash1))
@@ -510,14 +520,14 @@ func TestMachineInfo(t *testing.T) {
 	bugLinkRegex := regexp.MustCompile(`<a href="(/bug\?id=[^"]+)">title1</a>`)
 	bugLinkSubmatch := bugLinkRegex.FindSubmatch(indexPage)
 	c.expectEQ(len(bugLinkSubmatch), 2)
-	bugURL := string(bugLinkSubmatch[1])
+	bugURL := html.UnescapeString(string(bugLinkSubmatch[1]))
 
 	bugPage, err := c.AuthGET(AccessAdmin, bugURL)
 	c.expectOK(err)
 	infoLinkRegex := regexp.MustCompile(`<a href="(/text\?tag=MachineInfo[^"]+)">info</a>`)
 	infoLinkSubmatch := infoLinkRegex.FindSubmatch(bugPage)
 	c.expectEQ(len(infoLinkSubmatch), 2)
-	infoURL := string(infoLinkSubmatch[1])
+	infoURL := html.UnescapeString(string(infoLinkSubmatch[1]))
 
 	receivedInfo, err := c.AuthGET(AccessAdmin, infoURL)
 	c.expectOK(err)
@@ -719,4 +729,348 @@ func TestAltTitles7(t *testing.T) {
 	rep := c.client.pollBug()
 	c.expectEQ(rep.Title, crash1.Title)
 	c.expectEQ(rep.Log, crash2.Log)
+}
+
+func TestDetachExternalTracker(t *testing.T) {
+	c := NewCtx(t)
+	defer c.Close()
+
+	build := testBuild(1)
+	c.client.UploadBuild(build)
+
+	crash1 := testCrash(build, 1)
+	c.client.ReportCrash(crash1)
+
+	// Get single report for "test" type.
+	resp, _ := c.client.ReportingPollBugs("test")
+	c.expectEQ(len(resp.Reports), 1)
+	rep1 := resp.Reports[0]
+	c.expectNE(rep1.ID, "")
+	c.expectEQ(string(rep1.Config), `{"Index":1}`)
+
+	// Signal detach_reporting for current bug.
+	reply, _ := c.client.ReportingUpdate(&dashapi.BugUpdate{
+		ID:         rep1.ID,
+		Status:     dashapi.BugStatusUpstream,
+		ReproLevel: dashapi.ReproLevelNone,
+		Link:       "http://URI/1",
+		CrashID:    rep1.CrashID,
+	})
+	c.expectEQ(reply.OK, true)
+
+	// Now add syz repro to check it doesn't use first reporting.
+	crash1.ReproOpts = []byte("some opts")
+	crash1.ReproSyz = []byte("getpid()")
+	c.client.ReportCrash(crash1)
+
+	// Fetch bug and check reporting path (Config) is different.
+	rep2 := c.client.pollBug()
+	c.expectNE(rep2.ID, "")
+	c.expectEQ(string(rep2.Config), `{"Index":2}`)
+
+	closed, _ := c.client.ReportingPollClosed([]string{rep1.ID, rep2.ID})
+	c.expectEQ(len(closed), 1)
+	c.expectEQ(closed[0], rep1.ID)
+}
+
+func TestUpdateBugReporting(t *testing.T) {
+	c := NewCtx(t)
+	defer c.Close()
+	setIDs := func(bug *Bug, arr []BugReporting) {
+		for i := range arr {
+			arr[i].ID = bugReportingHash(bug.keyHash(), arr[i].Name)
+		}
+	}
+	now := timeNow(c.ctx)
+	// We test against the test2 namespace.
+	cfg := config.Namespaces["test2"]
+	tests := []struct {
+		Before []BugReporting
+		After  []BugReporting
+		Error  bool
+	}{
+		// Initially empty object.
+		{
+			Before: []BugReporting{},
+			After: []BugReporting{
+				{
+					Name: "reporting1",
+				},
+				{
+					Name: "reporting2",
+				},
+				{
+					Name: "reporting3",
+				},
+			},
+		},
+		// Prepending and appending new reporting objects, the bug is not reported yet.
+		{
+			Before: []BugReporting{
+				{
+					Name: "reporting2",
+				},
+			},
+			After: []BugReporting{
+				{
+					Name: "reporting1",
+				},
+				{
+					Name: "reporting2",
+				},
+				{
+					Name: "reporting3",
+				},
+			},
+		},
+		// The order or reportings is changed.
+		{
+			Before: []BugReporting{
+				{
+					Name: "reporting2",
+				},
+				{
+					Name: "reporting1",
+				},
+				{
+					Name: "reporting3",
+				},
+			},
+			After: []BugReporting{},
+			Error: true,
+		},
+		// Prepending and appending new reporting objects, the bug is already reported.
+		{
+			Before: []BugReporting{
+				{
+					Name:     "reporting2",
+					Reported: now,
+					ExtID:    "abcd",
+				},
+			},
+			After: []BugReporting{
+				{
+					Name:     "reporting1",
+					Closed:   now,
+					Reported: now,
+					Dummy:    true,
+				},
+				{
+					Name:     "reporting2",
+					Reported: now,
+					ExtID:    "abcd",
+				},
+				{
+					Name: "reporting3",
+				},
+			},
+		},
+		// It must look like as if the new Reporting was immediate.
+		{
+			Before: []BugReporting{
+				{
+					Name:     "reporting1",
+					Reported: now.Add(-24 * time.Hour),
+					ExtID:    "abcd",
+				},
+				{
+					Name:     "reporting3",
+					Reported: now,
+					ExtID:    "efgh",
+				},
+			},
+			After: []BugReporting{
+				{
+					Name:     "reporting1",
+					Reported: now.Add(-24 * time.Hour),
+					ExtID:    "abcd",
+				},
+				{
+					Name:     "reporting2",
+					Reported: now.Add(-24 * time.Hour),
+					Closed:   now.Add(-24 * time.Hour),
+					Dummy:    true,
+				},
+				{
+					Name:     "reporting3",
+					Reported: now,
+					ExtID:    "efgh",
+				},
+			},
+		},
+	}
+	for _, test := range tests {
+		bug := &Bug{
+			Title:     "bug",
+			Reporting: test.Before,
+			Namespace: "test2",
+		}
+		setIDs(bug, bug.Reporting)
+		setIDs(bug, test.After)
+		hasError := bug.updateReportings(cfg, now) != nil
+		if hasError != test.Error {
+			t.Errorf("Before: %#v, Expected error: %v, Got error: %v", test.Before, test.Error, hasError)
+		}
+		if !test.Error && !reflect.DeepEqual(bug.Reporting, test.After) {
+			t.Errorf("Before: %#v, Expected After: %#v, Got After: %#v", test.Before, test.After, bug.Reporting)
+		}
+	}
+}
+
+func TestFullBugInfo(t *testing.T) {
+	c := NewCtx(t)
+	defer c.Close()
+
+	build := testBuild(1)
+	c.client.UploadBuild(build)
+
+	const crashTitle = "WARNING: abcd"
+
+	// Oldest crash: with strace.
+	crashStrace := testCrashWithRepro(build, 1)
+	crashStrace.Title = crashTitle
+	crashStrace.Flags = dashapi.CrashUnderStrace
+	crashStrace.Report = []byte("with strace")
+	c.client.ReportCrash(crashStrace)
+	rep := c.client.pollBug()
+
+	// Newer: just with repro.
+	c.advanceTime(24 * 7 * time.Hour)
+	crashRepro := testCrashWithRepro(build, 1)
+	crashRepro.Title = crashTitle
+	crashRepro.Report = []byte("with repro")
+	c.client.ReportCrash(crashRepro)
+
+	// Ensure we have some bisect jobs done.
+	pollResp := c.client.pollJobs(build.Manager)
+	c.expectNE(pollResp.ID, "")
+	jobID := pollResp.ID
+	done := &dashapi.JobDoneReq{
+		ID:    jobID,
+		Build: *testBuild(3),
+		Log:   []byte("bisect log"),
+		Commits: []dashapi.Commit{
+			{
+				Hash:   "111111111111111111111111",
+				Title:  "kernel: break build",
+				Author: "hacker@kernel.org",
+				CC:     []string{"reviewer1@kernel.org"},
+				Date:   time.Date(2000, 2, 9, 4, 5, 6, 7, time.UTC),
+			},
+		},
+	}
+	c.client.expectOK(c.client.JobDone(done))
+	c.client.pollBug()
+
+	// Yet newer: no repro.
+	c.advanceTime(24 * 7 * time.Hour)
+	crashNew := testCrash(build, 1)
+	crashNew.Title = crashTitle
+	c.client.ReportCrash(crashNew)
+
+	// And yet newer.
+	c.advanceTime(24 * time.Hour)
+	crashNew2 := testCrash(build, 1)
+	crashNew2.Title = crashTitle
+	crashNew2.Report = []byte("newest")
+	c.client.ReportCrash(crashNew2)
+
+	// Also create a bug in another namespace.
+	otherBuild := testBuild(2)
+	c.client2.UploadBuild(otherBuild)
+
+	otherCrash := testCrash(otherBuild, 1)
+	otherCrash.Title = crashTitle
+	c.client2.ReportCrash(otherCrash)
+	otherPollMsg := c.client2.pollEmailBug()
+	_, otherExtBugID, _ := email.RemoveAddrContext(otherPollMsg.Sender)
+
+	// Query the full bug info.
+	info, err := c.client.LoadFullBug(&dashapi.LoadFullBugReq{BugID: rep.ID})
+	c.expectOK(err)
+	if info.BisectCause == nil {
+		t.Fatalf("info.BisectCause is empty")
+	}
+	if info.BisectCause.BisectCause == nil {
+		t.Fatalf("info.BisectCause.BisectCause is empty")
+	}
+	c.expectEQ(info.SimilarBugs, []*dashapi.SimilarBugInfo{{
+		Title:     crashTitle,
+		Namespace: "test2",
+		Status:    dashapi.BugStatusOpen,
+		Link:      "https://testapp.appspot.com/bug?extid=" + otherExtBugID,
+	}})
+
+	// There must be 3 crashes.
+	reportsOrder := [][]byte{[]byte("newest"), []byte("with repro"), []byte("with strace")}
+	c.expectEQ(len(info.Crashes), len(reportsOrder))
+	for i, report := range reportsOrder {
+		c.expectEQ(info.Crashes[i].Report, report)
+	}
+}
+
+func TestUpdateReportApi(t *testing.T) {
+	c := NewCtx(t)
+	defer c.Close()
+
+	build := testBuild(1)
+	c.client.UploadBuild(build)
+
+	// Report a crash.
+	c.client.ReportCrash(testCrashWithRepro(build, 1))
+	c.client.pollBug()
+
+	listResp, err := c.client.BugList()
+	c.expectOK(err)
+	c.expectEQ(len(listResp.List), 1)
+
+	// Load the bug info.
+	bugID := listResp.List[0]
+	rep, err := c.client.LoadBug(bugID)
+	c.expectOK(err)
+
+	// Now update the crash.
+	setGuiltyFiles := []string{"fs/a.c", "net/b.c"}
+	err = c.client.UpdateReport(&dashapi.UpdateReportReq{
+		BugID:       bugID,
+		CrashID:     rep.CrashID,
+		GuiltyFiles: &setGuiltyFiles,
+	})
+	c.expectOK(err)
+
+	// And make sure it's been updated.
+	ret, err := c.client.LoadBug(bugID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ret.ReportElements == nil {
+		t.Fatalf("ReportElements is nil")
+	}
+	if diff := cmp.Diff(ret.ReportElements.GuiltyFiles, setGuiltyFiles); diff != "" {
+		t.Fatal(diff)
+	}
+}
+
+func TestReportDecommissionedBugs(t *testing.T) {
+	c := NewCtx(t)
+	defer c.Close()
+
+	client := c.makeClient(clientTestDecomm, keyTestDecomm, true)
+	build := testBuild(1)
+	client.UploadBuild(build)
+
+	crash := testCrash(build, 1)
+	client.ReportCrash(crash)
+	rep := client.pollBug()
+
+	closed, _ := client.ReportingPollClosed([]string{rep.ID})
+	c.expectEQ(len(closed), 0)
+
+	// And now let's decommission the namespace.
+	config.Namespaces[rep.Namespace].Decommissioned = true
+	defer func() { config.Namespaces[rep.Namespace].Decommissioned = false }()
+
+	closed, _ = client.ReportingPollClosed([]string{rep.ID})
+	c.expectEQ(len(closed), 1)
+	c.expectEQ(closed[0], rep.ID)
 }

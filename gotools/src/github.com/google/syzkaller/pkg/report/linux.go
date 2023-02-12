@@ -70,12 +70,14 @@ func ctorLinux(cfg *config) (reporterImpl, []string, error) {
 		regexp.MustCompile(`^mm/percpu.*`),
 		regexp.MustCompile(`^mm/vmalloc.c`),
 		regexp.MustCompile(`^mm/page_alloc.c`),
+		regexp.MustCompile(`^mm/mempool.c`),
 		regexp.MustCompile(`^mm/util.c`),
 		regexp.MustCompile(`^kernel/rcu/.*`),
 		regexp.MustCompile(`^arch/.*/kernel/traps.c`),
 		regexp.MustCompile(`^arch/.*/mm/fault.c`),
 		regexp.MustCompile(`^arch/.*/mm/physaddr.c`),
 		regexp.MustCompile(`^arch/.*/kernel/stacktrace.c`),
+		regexp.MustCompile(`^arch/.*/kernel/apic/apic.c`),
 		regexp.MustCompile(`^arch/arm64/kernel/entry.*.c`),
 		regexp.MustCompile(`^kernel/locking/.*`),
 		regexp.MustCompile(`^kernel/panic.c`),
@@ -127,6 +129,7 @@ func ctorLinux(cfg *config) (reporterImpl, []string, error) {
 		"lowmemorykiller: Killing 'syz-fuzzer'",
 		"lowmemorykiller: Killing 'sshd'",
 		"INIT: PANIC: segmentation violation!",
+		"\\*\\*\\* stack smashing detected \\*\\*\\*: terminated",
 	}
 	return ctx, suppressions, nil
 }
@@ -216,6 +219,17 @@ func (ctx *linux) findFirstOops(output []byte) (oops *oops, startPos int, contex
 	return
 }
 
+// This method decides if the report prefix is already long enough to be cut on "Kernel panic - not
+// syncing: panic_on_kmsan set ...".
+func (ctx *linux) reportMinLines(oopsLine []byte) int {
+	if bytes.Contains(oopsLine, []byte("BUG: KMSAN:")) {
+		// KMSAN reports do not have the "Call trace" and some of the other lines which are
+		// present e.g. in KASAN reports. So we use a lower threshold for them.
+		return 16
+	}
+	return 22
+}
+
 // Yes, it is complex, but all state and logic are tightly coupled. It's unclear how to simplify it.
 // nolint: gocyclo, gocognit
 func (ctx *linux) findReport(output []byte, oops *oops, startPos int, context string, useQuestionable bool) (
@@ -230,6 +244,7 @@ func (ctx *linux) findReport(output []byte, oops *oops, startPos int, context st
 	secondReportPos := 0
 	textLines := 0
 	skipText, cpuTraceback := false, false
+	oopsLine := []byte{}
 	for pos, next := 0, 0; pos < len(output); pos = next + 1 {
 		next = bytes.IndexByte(output[pos:], '\n')
 		if next != -1 {
@@ -249,10 +264,14 @@ func (ctx *linux) findReport(output []byte, oops *oops, startPos int, context st
 			}
 			continue
 		}
-		oopsLine := pos == startPos
+		isOopsLine := pos == startPos
+		if isOopsLine {
+			oopsLine = line
+		}
+
 		for _, oops1 := range linuxOopses {
 			if !matchOops(line, oops1, ctx.ignores) {
-				if !oopsLine && secondReportPos == 0 {
+				if !isOopsLine && secondReportPos == 0 {
 					for _, pattern := range ctx.infoMessagesWithStack {
 						if bytes.Contains(line, pattern) {
 							secondReportPos = pos
@@ -263,13 +282,13 @@ func (ctx *linux) findReport(output []byte, oops *oops, startPos int, context st
 				continue
 			}
 			endPos = next
-			if !oopsLine && secondReportPos == 0 {
+			if !isOopsLine && secondReportPos == 0 {
 				if !matchesAny(line, ctx.reportStartIgnores) {
 					secondReportPos = pos
 				}
 			}
 		}
-		if !oopsLine && (questionable ||
+		if !isOopsLine && (questionable ||
 			context1 != context && (!cpuTraceback || !ctx.cpuContext.MatchString(context1))) {
 			continue
 		}
@@ -282,9 +301,9 @@ func (ctx *linux) findReport(output []byte, oops *oops, startPos int, context st
 			// from other CPUs regardless of what is the current context.
 			// Otherwise we will throw traceback away because it does not match the oops context.
 			cpuTraceback = true
-		} else if textLines > 22 &&
-			(bytes.Contains(line, []byte("Kernel panic - not syncing")) ||
-				bytes.Contains(line, []byte("WARNING: possible circular locking dependency detected"))) {
+		} else if (bytes.Contains(line, []byte("Kernel panic - not syncing")) ||
+			bytes.Contains(line, []byte("WARNING: possible circular locking dependency detected"))) &&
+			textLines > ctx.reportMinLines(oopsLine) {
 			// If panic_on_warn set, then we frequently have 2 stacks:
 			// one for the actual report (or maybe even more than one),
 			// and then one for panic caused by panic_on_warn. This makes
@@ -300,7 +319,7 @@ func (ctx *linux) findReport(output []byte, oops *oops, startPos int, context st
 			skipText = true
 			skipLine = true
 		}
-		if !oopsLine && skipLine {
+		if !isOopsLine && skipLine {
 			continue
 		}
 		report = append(report, stripped...)
@@ -350,13 +369,19 @@ func (ctx *linux) Symbolize(rep *Report) error {
 		}
 	}
 
-	rep.Report = ctx.decompileReportOpcodes(rep.Report)
+	rep.Report = ctx.decompileOpcodes(rep.Report, rep)
+
+	// Skip getting maintainers for Android fuzzing since the kernel source
+	// directory structure is different.
+	if ctx.config.vmType == "cuttlefish" || ctx.config.vmType == "proxyapp" {
+		return nil
+	}
 
 	// We still do this even if we did not symbolize,
 	// because tests pass in already symbolized input.
-	rep.guiltyFile = ctx.extractGuiltyFile(rep)
-	if rep.guiltyFile != "" {
-		maintainers, err := ctx.getMaintainers(rep.guiltyFile)
+	rep.GuiltyFile = ctx.extractGuiltyFile(rep)
+	if rep.GuiltyFile != "" {
+		maintainers, err := ctx.getMaintainers(rep.GuiltyFile)
 		if err != nil {
 			return err
 		}
@@ -606,14 +631,19 @@ func (ctx *linux) parseOpcodes(codeSlice string) (parsedOpcodes, error) {
 	}, nil
 }
 
-// decompileReportOpcodes detects the most meaningful "Code: " lines from the report, decompiles
+// decompileOpcodes detects the most meaningful "Code: " lines from the report, decompiles
 // them and appends a human-readable listing to the end of the report.
-func (ctx *linux) decompileReportOpcodes(report []byte) []byte {
+func (ctx *linux) decompileOpcodes(text []byte, report *Report) []byte {
+	if report.Type == Hang {
+		// Even though Hang reports do contain the Code: section, there's no point in
+		// decompiling that. So just return the text.
+		return text
+	}
 	// Iterate over all "Code: " lines and pick the first that could be decompiled
 	// that might be of interest to the user.
 	var decompiled *decompiledOpcodes
 	var prevLine []byte
-	for s := bufio.NewScanner(bytes.NewReader(report)); s.Scan(); prevLine = append([]byte{}, s.Bytes()...) {
+	for s := bufio.NewScanner(bytes.NewReader(text)); s.Scan(); prevLine = append([]byte{}, s.Bytes()...) {
 		// We want to avoid decompiling code from user-space as it is not of big interest during
 		// debugging kernel problems.
 		// For now this check only works for x86/amd64, but Linux on other architectures supported
@@ -634,7 +664,7 @@ func (ctx *linux) decompileReportOpcodes(report []byte) []byte {
 	}
 
 	if decompiled == nil {
-		return report
+		return text
 	}
 
 	skipInfo := ""
@@ -647,7 +677,7 @@ func (ctx *linux) decompileReportOpcodes(report []byte) []byte {
 	// the most important information at the top of the report, so that it is visible from
 	// the syzbot dashboard without scrolling.
 	headLine := fmt.Sprintf("----------------\nCode disassembly (best guess)%v:\n", skipInfo)
-	report = append(report, headLine...)
+	text = append(text, headLine...)
 
 	for idx, opcode := range decompiled.opcodes {
 		line := opcode.FullDescription
@@ -656,20 +686,24 @@ func (ctx *linux) decompileReportOpcodes(report []byte) []byte {
 		} else {
 			line += "\n"
 		}
-		report = append(report, line...)
+		text = append(text, line...)
 	}
-	return report
+	return text
 }
 
 func (ctx *linux) extractGuiltyFile(rep *Report) string {
-	report := rep.Report[rep.reportPrefixLen:]
-	if strings.HasPrefix(rep.Title, "INFO: rcu detected stall") {
+	return ctx.extractGuiltyFileRaw(rep.Title, rep.Report[rep.reportPrefixLen:])
+}
+
+func (ctx *linux) extractGuiltyFileRaw(title string, report []byte) string {
+	if strings.HasPrefix(title, "INFO: rcu detected stall") {
 		// Special case for rcu stalls.
 		// There are too many frames that we want to skip before actual guilty frames,
 		// we would need to ignore too many files and that would be fragile.
 		// So instead we try to extract guilty file starting from the known
 		// interrupt entry point first.
-		for _, interruptEnd := range []string{" apic_timer_interrupt+0x", "Exception stack"} {
+		for _, interruptEnd := range []string{"apic_timer_interrupt+0x",
+			"el1h_64_irq+0x", "Exception stack"} {
 			if pos := bytes.Index(report, []byte(interruptEnd)); pos != -1 {
 				if file := ctx.extractGuiltyFileImpl(report[pos:]); file != "" {
 					return file
@@ -681,27 +715,55 @@ func (ctx *linux) extractGuiltyFile(rep *Report) string {
 }
 
 func (ctx *linux) extractGuiltyFileImpl(report []byte) string {
-	first := ""
-	for s := bufio.NewScanner(bytes.NewReader(report)); s.Scan(); {
-		match := filenameRe.FindSubmatch(s.Bytes())
+	scanner := bufio.NewScanner(bytes.NewReader(report))
+
+	// Extract the first possible guilty file.
+	guilty := ""
+	for scanner.Scan() {
+		match := filenameRe.FindSubmatch(scanner.Bytes())
 		if match == nil {
 			continue
 		}
 		file := match[1]
-		if first == "" {
+		if guilty == "" {
 			// Avoid producing no guilty file at all, otherwise we mail the report to nobody.
 			// It's unclear if it's better to return the first one or the last one.
 			// So far the only test we have has only one file anyway.
-			first = string(file)
+			guilty = string(file)
 		}
 
-		if matchesAny(file, ctx.guiltyFileIgnores) || ctx.guiltyLineIgnore.Match(s.Bytes()) {
+		if matchesAny(file, ctx.guiltyFileIgnores) || ctx.guiltyLineIgnore.Match(scanner.Bytes()) {
 			continue
 		}
-		first = string(file)
+		guilty = string(file)
 		break
 	}
-	return filepath.Clean(first)
+	guilty = filepath.Clean(guilty)
+
+	// Search for deeper filepaths in the stack trace below the first possible guilty file.
+	deepestPath := filepath.Dir(guilty)
+	for scanner.Scan() {
+		match := filenameRe.FindSubmatch(scanner.Bytes())
+		if match == nil {
+			continue
+		}
+		file := match[1]
+		if matchesAny(file, ctx.guiltyFileIgnores) || ctx.guiltyLineIgnore.Match(scanner.Bytes()) {
+			continue
+		}
+		clean := filepath.Clean(string(file))
+
+		// Check if the new path has *both* the same directory prefix *and* a deeper suffix.
+		if strings.HasPrefix(clean, deepestPath) {
+			suffix := strings.TrimPrefix(clean, deepestPath)
+			if deeperPathRe.Match([]byte(suffix)) {
+				guilty = clean
+				deepestPath = filepath.Dir(guilty)
+			}
+		}
+	}
+
+	return guilty
 }
 
 func (ctx *linux) getMaintainers(file string) (vcs.Recipients, error) {
@@ -794,7 +856,7 @@ func (ctx *linux) isCorrupted(title string, report []byte, format oopsFormat) (b
 	return false, ""
 }
 
-func linuxStallFrameExtractor(frames []string) (string, string) {
+func linuxStallFrameExtractor(frames []string) string {
 	// During rcu stalls and cpu lockups kernel loops in some part of code,
 	// usually across several functions. When the stall is detected, traceback
 	// points to a random stack within the looping code. We generally take
@@ -814,14 +876,14 @@ func linuxStallFrameExtractor(frames []string) (string, string) {
 				// (there can be several variations on the next one).
 				prev = "smp_call_function"
 			}
-			return prev, ""
+			return prev
 		}
 		prev = frame
 	}
-	return "", "did not find any anchor frame"
+	return ""
 }
 
-func linuxHangTaskFrameExtractor(frames []string) (string, string) {
+func linuxHangTaskFrameExtractor(frames []string) string {
 	// The problem with task hung reports is that they manifest at random victim stacks,
 	// rather at the root cause stack. E.g. if there is something wrong with RCU subsystem,
 	// we are getting hangs all over the kernel on all synchronize_* calls.
@@ -842,7 +904,7 @@ func linuxHangTaskFrameExtractor(frames []string) (string, string) {
 				if replacement != "" {
 					frame = replacement
 				}
-				return frame, ""
+				return frame
 			}
 		}
 	}
@@ -855,9 +917,9 @@ nextFrame:
 				continue nextFrame
 			}
 		}
-		return frame, ""
+		return frame
 	}
-	return "", "all frames are skipped"
+	return ""
 }
 
 var linuxStallAnchorFrames = []*regexp.Regexp{
@@ -869,6 +931,8 @@ var linuxStallAnchorFrames = []*regexp.Regexp{
 	compile("do_fast_syscall_"),  // syscall entry
 	compile("sysenter_dispatch"), // syscall entry
 	compile("tracesys_phase2"),   // syscall entry
+	compile("el0_svc_handler"),   // syscall entry
+	compile("invoke_syscall"),    // syscall entry
 	compile("ret_fast_syscall"),  // arm syscall entry
 	compile("netif_receive_skb"), // net receive entry point
 	compile("do_softirq"),
@@ -912,20 +976,21 @@ var linuxStallAnchorFrames = []*regexp.Regexp{
 	compile("^sock_recvmsg"),
 	compile("^sock_release"),
 	compile("^__sock_release"),
-	compile("__sys_setsockopt"),
+	compile("^setsockopt$"),
 	compile("kernel_setsockopt"),
 	compile("sock_common_setsockopt"),
-	compile("__sys_listen"),
+	compile("^listen$"),
 	compile("kernel_listen"),
 	compile("sk_common_release"),
 	compile("^sock_mmap"),
-	compile("__sys_accept"),
+	compile("^accept$"),
 	compile("kernel_accept"),
 	compile("^sock_do_ioctl"),
 	compile("^sock_ioctl"),
 	compile("^compat_sock_ioctl"),
 	compile("^nfnetlink_rcv_msg"),
 	compile("^rtnetlink_rcv_msg"),
+	compile("^netlink_dump"),
 	compile("^(sys_)?(socketpair|connect|ioctl)"),
 	// Page fault entry points:
 	compile("__do_fault"),
@@ -965,10 +1030,14 @@ var linuxStackParams = &stackParams{
 		// Match 'backtrace:', but exclude 'stack backtrace:'
 		regexp.MustCompile(`[^k] backtrace:`),
 		regexp.MustCompile(`Backtrace:`),
+		regexp.MustCompile(`Uninit was stored to memory at`),
 	},
 	frameRes: []*regexp.Regexp{
 		compile("^ *(?:{{PC}} ){0,2}{{FUNC}}"),
-		compile(`^ *{{PC}} \([a-zA-Z0-9_]+\) from {{PC}} \({{FUNC}}`), // arm is totally different
+		// Arm is totally different.
+		// Extract both current and next frames. This is needed for the top
+		// frame which is present only in LR register which we don't parse.
+		compile(`^ *{{PC}} \(([a-zA-Z0-9_.]+)\) from {{PC}} \({{FUNC}}`),
 	},
 	skipPatterns: []string{
 		"__sanitizer",
@@ -978,12 +1047,17 @@ var linuxStackParams = &stackParams{
 		"kmsan",
 		"kcsan_setup_watchpoint",
 		"check_memory_region",
+		"check_heap_object",
+		"check_object",
 		"read_word_at_a_time",
+		"(read|write)_once_.*nocheck",
 		"print_address_description",
 		"panic",
 		"invalid_op",
 		"report_bug",
 		"fixup_bug",
+		"print_report",
+		"print_usage_bug",
 		"do_error",
 		"invalid_op",
 		"_trap",
@@ -996,11 +1070,10 @@ var linuxStackParams = &stackParams{
 		"warn_bogus",
 		"__warn",
 		"alloc_page",
-		"kmalloc",
-		"kcalloc",
-		"kzalloc",
+		"k?v?(?:m|z|c)alloc",
 		"krealloc",
 		"kmem_cache",
+		"allocate_slab",
 		"slab_",
 		"debug_object",
 		"timer_is_static_object",
@@ -1016,7 +1089,8 @@ var linuxStackParams = &stackParams{
 		"lock_release",
 		"lock_class",
 		"mark_lock",
-		"reacquire_held_locks",
+		"(reacquire|mark)_held_locks",
+		"raw_spin_rq",
 		"spin_lock",
 		"spin_trylock",
 		"spin_unlock",
@@ -1031,21 +1105,21 @@ var linuxStackParams = &stackParams{
 		"down_write",
 		"down_read_trylock",
 		"down_write_trylock",
+		"down_trylock",
 		"up_read",
 		"up_write",
-		"mutex_lock",
-		"mutex_trylock",
-		"mutex_unlock",
-		"mutex_remove_waiter",
+		"^mutex_",
+		"^__mutex_",
+		"^rt_mutex_",
+		"owner_on_cpu",
 		"osq_lock",
 		"osq_unlock",
+		"atomic(64)?_(dec|inc|read|set|or|xor|and|add|sub|fetch|xchg|cmpxchg|try)",
+		"(set|clear|change|test)_bit",
 		"__wake_up",
-		"refcount_add",
-		"refcount_sub",
-		"refcount_inc",
-		"refcount_dec",
-		"refcount_set",
-		"refcount_read",
+		"^refcount_",
+		"^kref_",
+		"ref_tracker",
 		"seqprop_assert",
 		"memcpy",
 		"memcmp",
@@ -1104,11 +1178,10 @@ var linuxStackParams = &stackParams{
 		"flush_workqueue",
 		"drain_workqueue",
 		"destroy_workqueue",
+		"queue_work",
 		"finish_wait",
 		"kthread_stop",
-		"kobject_del",
-		"kobject_put",
-		"kobject_uevent_env",
+		"kobject_",
 		"add_uevent_var",
 		"get_device_parent",
 		"device_add",
@@ -1146,6 +1219,16 @@ var linuxStackParams = &stackParams{
 		"writeq$",
 		"logic_in",
 		"logic_out",
+		"^crc\\d+",
+		"__might_resched",
+		"assertfail",
+		"^iput$",
+		"^iput_final$",
+		"^ihold$",
+		"hex_dump_to_buffer",
+		"print_hex_dump",
+		"^klist_",
+		"(trace|lockdep)_(hard|soft)irq",
 	},
 	corruptedLines: []*regexp.Regexp{
 		// Fault injection stacks are frequently intermixed with crash reports.
@@ -1156,16 +1239,16 @@ var linuxStackParams = &stackParams{
 		"SYSC_",
 		"SyS_",
 		"sys_",
-		"____sys_",
-		"___sys_",
-		"__sys_",
-		"__se_sys_",
-		"__do_sys_",
-		"compat_SYSC_",
-		"compat_SyS_",
 		"__x64_",
 		"__ia32_",
 		"__arm64_",
+		"____sys_",
+		"___sys_",
+		"__sys_",
+		"__se_",
+		"__do_sys_",
+		"compat_SYSC_",
+		"compat_SyS_",
 		"ksys_",
 	},
 }
@@ -1210,12 +1293,12 @@ var linuxOopses = append([]*oops{
 			},
 			{
 				title:  compile("BUG: KASAN:"),
-				report: compile("BUG: KASAN: double-free or invalid-free in {{FUNC}}"),
+				report: compile("BUG: KASAN: (?:double-free or invalid-free|double-free|invalid-free) in {{FUNC}}"),
 				fmt:    "KASAN: invalid-free in %[2]v",
 				alt:    []string{"invalid-free in %[2]v"},
 				stack: &stackFmt{
 					parts: []*regexp.Regexp{
-						compile("BUG: KASAN: double-free or invalid-free in {{FUNC}}"),
+						compile("BUG: KASAN: (?:double-free or invalid-free|double-free|invalid-free) in {{FUNC}}"),
 						linuxCallTrace,
 						parseStackTrace,
 					},
@@ -1235,25 +1318,34 @@ var linuxOopses = append([]*oops{
 				title:  compile("BUG: KMSAN: kernel-usb-infoleak"),
 				report: compile("BUG: KMSAN: kernel-usb-infoleak in {{FUNC}}"),
 				fmt:    "KMSAN: kernel-usb-infoleak in %[2]v",
+				alt:    []string{"KMSAN origin in %[3]v"},
 				stack: &stackFmt{
 					parts: []*regexp.Regexp{
-						linuxCallTrace,
+						parseStackTrace,
+						compile("(Local variable .* created at:|Uninit was created at:)"),
 						parseStackTrace,
 					},
-					skip: []string{"usb_submit_urb", "usb_start_wait_urb", "usb_bulk_msg", "usb_interrupt_msg", "usb_control_msg"},
+					skip: []string{"alloc_skb", "usb_submit_urb", "usb_start_wait_urb", "usb_bulk_msg", "usb_interrupt_msg", "usb_control_msg"},
 				},
+				noStackTrace: true,
 			},
 			{
 				title:  compile("BUG: KMSAN:"),
 				report: compile("BUG: KMSAN: ([a-z\\-]+) in {{FUNC}}"),
 				fmt:    "KMSAN: %[1]v in %[3]v",
-				alt:    []string{"bad-access in %[3]v"},
+				alt: []string{
+					"bad-access in %[3]v",
+					"KMSAN origin in %[4]v",
+				},
 				stack: &stackFmt{
 					parts: []*regexp.Regexp{
-						linuxCallTrace,
+						parseStackTrace,
+						compile("(Local variable .* created at:|Uninit was created at:)"),
 						parseStackTrace,
 					},
+					skip: []string{"alloc_skb", "netlink_ack", "netlink_rcv_skb"},
 				},
+				noStackTrace: true,
 			},
 			{
 				title:        compile("BUG: KCSAN:"),
@@ -1368,6 +1460,17 @@ var linuxOopses = append([]*oops{
 				fmt:    "BUG: still has locks held in %[1]v",
 			},
 			{
+				title: compile("BUG: scheduling while atomic"),
+				fmt:   "BUG: scheduling while atomic in %[1]v",
+				stack: &stackFmt{
+					parts: []*regexp.Regexp{
+						linuxCallTrace,
+						parseStackTrace,
+					},
+					skip: []string{"schedule"},
+				},
+			},
+			{
 				title:        compile("BUG: lock held when returning to user space"),
 				report:       compile("BUG: lock held when returning to user space(?:.*\\n)+?.*leaving the kernel with locks still held(?:.*\\n)+?.*at: (?:{{PC}} +)?{{FUNC}}"),
 				fmt:          "BUG: lock held when returning to user space in %[1]v",
@@ -1405,8 +1508,13 @@ var linuxOopses = append([]*oops{
 				noStackTrace: true,
 			},
 			{
-				title: compile("BUG: Dentry .* still in use \\([0-9]+\\) \\[unmount of ([^\\]]+)\\]"),
-				fmt:   "BUG: Dentry still in use [unmount of %[1]v]",
+				// Kernel includes filesystem type and block device name into the message.
+				// We used to include them, but block devices are plain harmful (loop0/1/2),
+				// and filesystem type also leads to duplicates. So now we exclude them.
+				title:  compile("BUG: Dentry .* still in use"),
+				report: compile("BUG: Dentry .* still in use \\([0-9]+\\) \\[(unmount) of ([^\\]]+)\\]"),
+				fmt:    "BUG: Dentry still in use in %[1]v",
+				alt:    []string{"BUG: Dentry still in use [%[1]v of %[2]v]"},
 			},
 			{
 				title: compile("BUG: Bad page state"),
@@ -1458,15 +1566,15 @@ var linuxOopses = append([]*oops{
 						compile("backtrace:"),
 						parseStackTrace,
 					},
-					skip: []string{"kmemleak", "kmalloc", "kcalloc", "kzalloc",
-						"vmalloc", "mmap", "kmem", "slab", "alloc", "create_object",
+					skip: []string{"kmemleak", "mmap", "kmem", "slab", "alloc", "create_object",
 						"idr_get", "list_lru_init", "kasprintf", "kvasprintf",
 						"pcpu_create", "strdup", "strndup", "memdup"},
 				},
 			},
 			{
-				title: compile("BUG: stack guard page was hit at"),
+				title: compile("BUG: .*stack guard page was hit at"),
 				fmt:   "BUG: stack guard page was hit in %[1]v",
+				alt:   []string{"stack-overflow in %[1]v"},
 				stack: &stackFmt{
 					parts: []*regexp.Regexp{
 						linuxRipFrame,
@@ -1549,6 +1657,11 @@ var linuxOopses = append([]*oops{
 				fmt:    "WARNING: still has locks held in %[1]v",
 			},
 			{
+				title: compile("WARNING: Nested lock was not taken"),
+				fmt:   "WARNING: nested lock was not taken in %[1]v",
+				stack: warningStackFmt(),
+			},
+			{
 				title:        compile("WARNING: lock held when returning to user space"),
 				report:       compile("WARNING: lock held when returning to user space(?:.*\\n)+?.*leaving the kernel with locks still held(?:.*\\n)+?.*at: (?:{{PC}} +)?{{FUNC}}"),
 				fmt:          "WARNING: lock held when returning to user space in %[1]v",
@@ -1557,13 +1670,12 @@ var linuxOopses = append([]*oops{
 			{
 				title: compile("WARNING: .*mm/.*\\.c.* k?.?malloc"),
 				fmt:   "WARNING: kmalloc bug in %[1]v",
-				stack: warningStackFmt("kmalloc", "kcalloc", "kzalloc", "krealloc",
-					"vmalloc", "slab", "kmem"),
+				stack: warningStackFmt("kmalloc", "krealloc", "slab", "kmem"),
 			},
 			{
 				title: compile("WARNING: .*mm/vmalloc.c.*__vmalloc_node"),
 				fmt:   "WARNING: zero-size vmalloc in %[1]v",
-				stack: warningStackFmt("vmalloc"),
+				stack: warningStackFmt(),
 			},
 			{
 				title: compile("WARNING: .* usb_submit_urb"),
@@ -1615,7 +1727,13 @@ var linuxOopses = append([]*oops{
 			{
 				title:  compile("WARNING: inconsistent lock state"),
 				report: compile("WARNING: inconsistent lock state(?:.*\\n)+?.*takes(?:.*\\n)+?.*at: (?:{{PC}} +)?{{FUNC}}"),
-				fmt:    "inconsistent lock state in %[1]v",
+				fmt:    "inconsistent lock state in %[2]v",
+				stack: &stackFmt{
+					parts: []*regexp.Regexp{
+						linuxCallTrace,
+						parseStackTrace,
+					},
+				},
 			},
 			{
 				title:  compile("WARNING: suspicious RCU usage"),
@@ -1626,8 +1744,7 @@ var linuxOopses = append([]*oops{
 						linuxCallTrace,
 						parseStackTrace,
 					},
-					skip: []string{"rcu", "kmem", "slab", "kmalloc",
-						"vmalloc", "kcalloc", "kzalloc"},
+					skip: []string{"rcu", "kmem", "slab"},
 				},
 			},
 			{
@@ -1675,6 +1792,10 @@ var linuxOopses = append([]*oops{
 		[]*regexp.Regexp{
 			compile("WARNING: /etc/ssh/moduli does not exist, using fixed modulus"), // printed by sshd
 			compile("WARNING: workqueue cpumask: online intersect > possible intersect"),
+			compile("WARNING: [Tt]he mand mount option (is being|has been) deprecated"),
+			compile("WARNING: Unsupported flag value\\(s\\) of 0x%x in DT_FLAGS_1"), // printed when glibc is dumped
+			compile("WARNING: Unprivileged eBPF is enabled with eIBRS"),
+			compile(`WARNING: fbcon: Driver '(.*)' missed to adjust virtual screen size (\((?:\d+)x(?:\d+) vs\. (?:\d+)x(?:\d+)\))`),
 		},
 	},
 	{
@@ -1716,7 +1837,7 @@ var linuxOopses = append([]*oops{
 						parseStackTrace,
 					},
 					parts2: []*regexp.Regexp{
-						compile("(?:apic_timer_interrupt|Exception stack)"),
+						compile("(?:apic_timer_interrupt|Exception stack|el1h_64_irq)"),
 						parseStackTrace,
 					},
 					skip:      []string{"apic_timer_interrupt", "rcu"},
@@ -1743,8 +1864,7 @@ var linuxOopses = append([]*oops{
 						linuxCallTrace,
 						parseStackTrace,
 					},
-					skip: []string{"rcu", "kmem", "slab", "kmalloc",
-						"vmalloc", "kcalloc", "kzalloc"},
+					skip: []string{"rcu", "kmem", "slab"},
 				},
 			},
 			{
@@ -1830,7 +1950,9 @@ var linuxOopses = append([]*oops{
 				},
 			},
 		},
-		[]*regexp.Regexp{},
+		[]*regexp.Regexp{
+			compile(`general protection fault .* error:\d+ in `),
+		},
 	},
 	{
 		[]byte("stack segment: "),
@@ -1876,12 +1998,26 @@ var linuxOopses = append([]*oops{
 				title:  compile("Kernel panic - not syncing: corrupted stack end"),
 				report: compile("Kernel panic - not syncing: corrupted stack end detected inside scheduler"),
 				fmt:    "kernel panic: corrupted stack end in %[1]v",
+				alt:    []string{"stack-overflow in %[1]v"},
 				stack: &stackFmt{
 					parts: []*regexp.Regexp{
 						linuxCallTrace,
 						parseStackTrace,
 					},
 					skip:      []string{"schedule", "retint_kernel"},
+					extractor: linuxStallFrameExtractor,
+				},
+			},
+			{
+				title: compile("Kernel panic - not syncing: kernel stack overflow"),
+				fmt:   "kernel stack overflow in %[1]v",
+				alt:   []string{"stack-overflow in %[1]v"},
+				stack: &stackFmt{
+					parts: []*regexp.Regexp{
+						linuxCallTrace,
+						parseStackTrace,
+					},
+					skip:      []string{"bad_stack"},
 					extractor: linuxStallFrameExtractor,
 				},
 			},
@@ -1963,7 +2099,6 @@ var linuxOopses = append([]*oops{
 			{
 				title: compile("kernel BUG at (.*)"),
 				fmt:   "kernel BUG in %[2]v",
-				alt:   []string{"kernel BUG at %[1]v"}, // historical title required for merging with existing bugs
 				stack: &stackFmt{
 					parts: []*regexp.Regexp{
 						linuxRipFrame,
@@ -2102,6 +2237,30 @@ var linuxOopses = append([]*oops{
 			{
 				title:        compile("unregister_netdevice: waiting for (?:.*) to become free"),
 				fmt:          "unregister_netdevice: waiting for DEV to become free",
+				noStackTrace: true,
+			},
+		},
+		[]*regexp.Regexp{},
+	},
+	{
+		// Custom vfs error printed by older versions of the kernel, see #3621.
+		[]byte("VFS: Close: file count is 0"),
+		[]oopsFormat{
+			{
+				title:        compile("VFS: Close: file count is 0"),
+				fmt:          "VFS: Close: file count is zero (use-after-free)",
+				noStackTrace: true,
+			},
+		},
+		[]*regexp.Regexp{},
+	},
+	{
+		// Custom vfs error printed by older versions of the kernel, see #3621.
+		[]byte("VFS: Busy inodes after unmount"),
+		[]oopsFormat{
+			{
+				title:        compile("VFS: Busy inodes after unmount"),
+				fmt:          "VFS: Busy inodes after unmount (use-after-free)",
 				noStackTrace: true,
 			},
 		},

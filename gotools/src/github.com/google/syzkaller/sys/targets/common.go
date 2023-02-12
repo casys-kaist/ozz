@@ -21,25 +21,21 @@ func MakePosixMmap(target *prog.Target, exec, contain bool) func() []*prog.Call 
 	size := target.NumPages * target.PageSize
 	const invalidFD = ^uint64(0)
 	makeMmap := func(addr, size, prot uint64) *prog.Call {
-		args := []prog.Arg{
+		call := prog.MakeCall(meta, []prog.Arg{
 			prog.MakeVmaPointerArg(meta.Args[0].Type, prog.DirIn, addr, size),
 			prog.MakeConstArg(meta.Args[1].Type, prog.DirIn, size),
 			prog.MakeConstArg(meta.Args[2].Type, prog.DirIn, prot),
 			prog.MakeConstArg(meta.Args[3].Type, prog.DirIn, flags),
 			prog.MakeResultArg(meta.Args[4].Type, prog.DirIn, nil, invalidFD),
-		}
-		i := len(args)
+		})
+		i := len(call.Args)
 		// Some targets have a padding argument between fd and offset.
 		if len(meta.Args) > 6 {
-			args = append(args, prog.MakeConstArg(meta.Args[i].Type, prog.DirIn, 0))
+			call.Args = append(call.Args, prog.MakeConstArg(meta.Args[i].Type, prog.DirIn, 0))
 			i++
 		}
-		args = append(args, prog.MakeConstArg(meta.Args[i].Type, prog.DirIn, 0))
-		return &prog.Call{
-			Meta: meta,
-			Args: args,
-			Ret:  prog.MakeReturnArg(meta.Ret),
-		}
+		call.Args = append(call.Args, prog.MakeConstArg(meta.Args[i].Type, prog.DirIn, 0))
+		return call
 	}
 	return func() []*prog.Call {
 		if contain {
@@ -58,14 +54,10 @@ func MakeSyzMmap(target *prog.Target) func() []*prog.Call {
 	size := target.NumPages * target.PageSize
 	return func() []*prog.Call {
 		return []*prog.Call{
-			{
-				Meta: meta,
-				Args: []prog.Arg{
-					prog.MakeVmaPointerArg(meta.Args[0].Type, prog.DirIn, 0, size),
-					prog.MakeConstArg(meta.Args[1].Type, prog.DirIn, size),
-				},
-				Ret: prog.MakeReturnArg(meta.Ret),
-			},
+			prog.MakeCall(meta, []prog.Arg{
+				prog.MakeVmaPointerArg(meta.Args[0].Type, prog.DirIn, 0, size),
+				prog.MakeConstArg(meta.Args[1].Type, prog.DirIn, size),
+			}),
 		}
 	}
 }
@@ -90,12 +82,12 @@ func MakeUnixNeutralizer(target *prog.Target) *UnixNeutralizer {
 	}
 }
 
-func (arch *UnixNeutralizer) Neutralize(c *prog.Call) {
+func (arch *UnixNeutralizer) Neutralize(c *prog.Call, fixStructure bool) error {
 	switch c.Meta.CallName {
 	case "mmap":
 		if c.Meta.Name == "mmap$bifrost" {
 			// Mali bifrost mmap doesn't support MAP_FIXED.
-			return
+			return nil
 		}
 		// Add MAP_FIXED flag, otherwise it produces non-deterministic results.
 		c.Args[3].(*prog.ConstArg).Val |= arch.MAP_FIXED
@@ -106,7 +98,7 @@ func (arch *UnixNeutralizer) Neutralize(c *prog.Call) {
 		}
 		switch c.Args[pos+1].Type().(type) {
 		case *prog.ProcType, *prog.ResourceType:
-			return
+			return nil
 		}
 		mode := c.Args[pos].(*prog.ConstArg)
 		dev := c.Args[pos+1].(*prog.ConstArg)
@@ -136,4 +128,5 @@ func (arch *UnixNeutralizer) Neutralize(c *prog.Call) {
 			code.Val = 1
 		}
 	}
+	return nil
 }

@@ -6,35 +6,31 @@
 package rpctype
 
 import (
+	"math"
+
 	"github.com/google/syzkaller/pkg/host"
-	"github.com/google/syzkaller/pkg/interleaving"
 	"github.com/google/syzkaller/pkg/ipc"
 	"github.com/google/syzkaller/pkg/signal"
 )
 
-type RPCInput struct {
-	Call   string
-	Prog   []byte
-	Signal signal.Serial
-	Cover  []uint32
+type Input struct {
+	Call     string
+	Prog     []byte
+	Signal   signal.Serial
+	Cover    []uint32
+	CallID   int // seq number of call in the prog to which the item is related (-1 for extra)
+	RawCover []uint32
 }
 
-type RPCScheduledInput struct {
-	Prog   []byte
-	Cover  []uint32
-	Signal interleaving.SerialSignal
-}
-
-type RPCCandidate struct {
+type Candidate struct {
 	Prog      []byte
 	Minimized bool
 	Smashed   bool
 }
 
-type RPCProg struct {
-	Prog    []byte
-	ProgIdx int
-	RunIdx  int
+type ExecTask struct {
+	Prog []byte
+	ID   int64
 }
 
 type ConnectArgs struct {
@@ -45,6 +41,7 @@ type ConnectArgs struct {
 
 type ConnectRes struct {
 	EnabledCalls      []int
+	NoMutateCalls     map[int]bool
 	GitRevision       string
 	TargetRevision    string
 	AllSandboxes      bool
@@ -70,33 +67,20 @@ type SyscallReason struct {
 
 type NewInputArgs struct {
 	Name string
-	RPCInput
-}
-
-type NewScheduledInputArgs struct {
-	Name string
-	RPCScheduledInput
+	Input
 }
 
 type PollArgs struct {
-	Name             string
-	NeedCandidates   bool
-	MaxSignal        signal.Serial
-	MaxInterleaving  interleaving.SerialSignal
-	MaxCommunication interleaving.SerialSignal
-	Stats            map[string]uint64
-	Collections      map[string]uint64
-
-	InstCount []uint32
+	Name           string
+	NeedCandidates bool
+	MaxSignal      signal.Serial
+	Stats          map[string]uint64
 }
 
 type PollRes struct {
-	Candidates       []RPCCandidate
-	NewInputs        []RPCInput
-	MaxSignal        signal.Serial
-	MaxInterleaving  interleaving.SerialSignal
-	MaxCommunication interleaving.SerialSignal
-	InstBlacklist    []uint32
+	Candidates []Candidate
+	NewInputs  []Input
+	MaxSignal  signal.Serial
 }
 
 type RunnerConnectArgs struct {
@@ -125,25 +109,26 @@ type UpdateUnsupportedArgs struct {
 type NextExchangeArgs struct {
 	// Pool/VM are used to identify the instance on which the client is running.
 	Pool, VM int
-	// ProgIdx is used to uniquely identify the program for which the client is
+	// ExecTaskID is used to uniquely identify the program for which the client is
 	// sending results.
-	ProgIdx int
+	ExecTaskID int64
 	// Hanged is set to true if the program for which we are sending results
 	// was killed due to hanging.
 	Hanged bool
 	// Info contains information about the execution of each system call in the
 	// program.
 	Info ipc.ProgInfo
-	// RunIdx is the number of times this program has been run on the kernel.
-	RunIdx int
 }
 
 // NextExchaneRes contains the data passed from server to client namely
 // programs  to execute on the VM.
 type NextExchangeRes struct {
-	// RPCProg contains the serialized program that will be sent to the client.
-	RPCProg
+	ExecTask
 }
+
+const (
+	NoTask int64 = math.MaxInt64
+)
 
 type HubConnectArgs struct {
 	// Client/Key are used for authentication.

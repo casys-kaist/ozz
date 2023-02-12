@@ -172,8 +172,11 @@ type arch struct {
 	TIOCGSERIAL                 uint64
 }
 
-func (arch *arch) neutralize(c *prog.Call) {
-	arch.unix.Neutralize(c)
+func (arch *arch) neutralize(c *prog.Call, fixStructure bool) error {
+	err := arch.unix.Neutralize(c, fixStructure)
+	if err != nil {
+		return err
+	}
 	switch c.Meta.CallName {
 	case "mremap":
 		// Add MREMAP_FIXED flag, otherwise it produces non-deterministic results.
@@ -238,11 +241,61 @@ func (arch *arch) neutralize(c *prog.Call) {
 		enforceIntArg(c.Args[0])
 		enforceIntArg(c.Args[1])
 		enforceIntArg(c.Args[2])
+	case "sched_setattr":
+		// Enabling a SCHED_FIFO or a SCHED_RR policy may lead to false positive stall-related crashes.
+		neutralizeSchedAttr(c.Args[1])
 	}
 
 	switch c.Meta.Name {
 	case "setsockopt$EBT_SO_SET_ENTRIES":
 		arch.neutralizeEbtables(c)
+	}
+	return nil
+}
+
+func neutralizeSchedAttr(a prog.Arg) {
+	switch attr := a.(type) {
+	case *prog.PointerArg:
+		if attr.Res == nil {
+			// If it's just a pointer to somewhere, still set it to NULL as there's a risk that
+			// it points to the valid memory and it can be interpreted as a sched_attr struct.
+			attr.Address = 0
+			return
+		}
+		groupArg, ok := attr.Res.(*prog.GroupArg)
+		if !ok || len(groupArg.Inner) == 0 {
+			return
+		}
+		if unionArg, ok := groupArg.Inner[0].(*prog.UnionArg); ok {
+			dataArg, ok := unionArg.Option.(*prog.DataArg)
+			if !ok {
+				return
+			}
+			if dataArg.Dir() == prog.DirOut {
+				return
+			}
+			// Clear the first 16 bytes to prevent overcoming the limitation by squashing the struct.
+			data := append([]byte{}, dataArg.Data()...)
+			for i := 0; i < 16 && i < len(data); i++ {
+				data[i] = 0
+			}
+			dataArg.SetData(data)
+		}
+
+		// Most likely it's the intended sched_attr structure.
+		if len(groupArg.Inner) > 1 {
+			policyField, ok := groupArg.Inner[1].(*prog.ConstArg)
+			if !ok {
+				return
+			}
+			const SCHED_FIFO = 0x1
+			const SCHED_RR = 0x2
+			if policyField.Val == SCHED_FIFO || policyField.Val == SCHED_RR {
+				policyField.Val = 0
+			}
+		}
+	case *prog.ConstArg:
+		attr.Val = 0
 	}
 }
 
@@ -352,14 +405,10 @@ func (arch *arch) generateTimespec(g *prog.Gen, typ0 prog.Type, dir prog.Dir, ol
 		})
 		var tpaddr prog.Arg
 		tpaddr, calls = g.Alloc(ptrArgType, prog.DirIn, tp)
-		gettime := &prog.Call{
-			Meta: meta,
-			Args: []prog.Arg{
-				prog.MakeConstArg(meta.Args[0].Type, prog.DirIn, arch.CLOCK_REALTIME),
-				tpaddr,
-			},
-			Ret: prog.MakeReturnArg(meta.Ret),
-		}
+		gettime := prog.MakeCall(meta, []prog.Arg{
+			prog.MakeConstArg(meta.Args[0].Type, prog.DirIn, arch.CLOCK_REALTIME),
+			tpaddr,
+		})
 		calls = append(calls, gettime)
 		sec := prog.MakeResultArg(typ.Fields[0].Type, dir, tp.Inner[0].(*prog.ResultArg), 0)
 		nsec := prog.MakeResultArg(typ.Fields[1].Type, dir, tp.Inner[1].(*prog.ResultArg), 0)

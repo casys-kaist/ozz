@@ -4,11 +4,14 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/google/syzkaller/dashboard/dashapi"
+	"github.com/google/syzkaller/pkg/email"
 )
 
 func TestEmailNotifUpstreamEmbargo(t *testing.T) {
@@ -33,7 +36,7 @@ func TestEmailNotifUpstreamEmbargo(t *testing.T) {
 	upstreamReport := c.pollEmailBug()
 	c.expectEQ(notifUpstream.Subject, crash.Title)
 	c.expectEQ(notifUpstream.Sender, report.Sender)
-	c.expectEQ(notifUpstream.Body, "Sending this report upstream.")
+	c.expectEQ(notifUpstream.Body, "Sending this report to the next reporting stage.")
 	c.expectEQ(upstreamReport.Subject, "[syzbot] "+crash.Title)
 	c.expectNE(upstreamReport.Sender, report.Sender)
 	c.expectEQ(upstreamReport.To, []string{"bugs@syzkaller.com", "default@maintainers.com"})
@@ -62,7 +65,7 @@ func TestEmailNotifUpstreamSkip(t *testing.T) {
 	notifUpstream := c.pollEmailBug()
 	upstreamReport := c.pollEmailBug()
 	c.expectEQ(notifUpstream.Sender, report.Sender)
-	c.expectEQ(notifUpstream.Body, "Sending this report upstream.")
+	c.expectEQ(notifUpstream.Body, "Sending this report to the next reporting stage.")
 	c.expectNE(upstreamReport.Sender, report.Sender)
 	c.expectEQ(upstreamReport.To, []string{"bugs@syzkaller.com", "default@maintainers.com"})
 }
@@ -71,13 +74,22 @@ func TestEmailNotifBadFix(t *testing.T) {
 	c := NewCtx(t)
 	defer c.Close()
 
+	client := c.publicClient
+
 	build := testBuild(1)
-	c.client2.UploadBuild(build)
+	client.UploadBuild(build)
+
+	// Fake more active managers.
+	for i := 1; i < 5; i++ {
+		client.UploadBuild(testBuild(i + 1))
+	}
 
 	crash := testCrash(build, 1)
-	c.client2.ReportCrash(crash)
+	client.ReportCrash(crash)
 	report := c.pollEmailBug()
 	c.expectEQ(report.To, []string{"test@syzkaller.com"})
+	_, extBugID, err := email.RemoveAddrContext(report.Sender)
+	c.expectOK(err)
 
 	c.incomingEmail(report.Sender, "#syz fix some: commit title")
 	c.expectNoEmail()
@@ -89,8 +101,44 @@ func TestEmailNotifBadFix(t *testing.T) {
 	c.expectNoEmail()
 	c.advanceTime(10 * 24 * time.Hour)
 	notif := c.pollEmailBug()
-	if !strings.Contains(notif.Body, "This bug is marked as fixed by commit:\nsome: commit title\n") {
-		t.Fatalf("bad notification text: %q", notif.Body)
+	t.Logf("%s", notif.Body)
+
+	expectReply := fmt.Sprintf(`This bug is marked as fixed by commit:
+some: commit title
+
+But I can't find it in the tested trees[1] for more than 90 days.
+Is it a correct commit? Please update it by replying:
+
+#syz fix: exact-commit-title
+
+Until then the bug is still considered open and new crashes with
+the same signature are ignored.
+
+Kernel: access-public-email
+Dashboard link: https://testapp.appspot.com/bug?extid=%s
+
+---
+[1] I expect the commit to be present in:
+
+1. branch1 branch of
+repo1
+
+2. branch2 branch of
+repo2
+
+3. branch3 branch of
+repo3
+
+4. branch4 branch of
+repo4
+
+The full list of 5 trees can be found at
+https://testapp.appspot.com/access-public-email/repos
+`, extBugID)
+
+	if diff := cmp.Diff(expectReply, notif.Body); diff != "" {
+		t.Errorf("wrong notification text: %s", diff)
+		fmt.Printf("received notification:\n%s\n", notif.Body)
 	}
 	// No notifications for another 14 days, then another one.
 	c.advanceTime(13 * 24 * time.Hour)

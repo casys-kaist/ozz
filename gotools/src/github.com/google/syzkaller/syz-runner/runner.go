@@ -70,8 +70,12 @@ func main() {
 		log.Fatalf("failed to connect to verifier: %v", err)
 	}
 
+	enabled := make(map[*prog.Syscall]bool)
+	for _, c := range target.Syscalls {
+		enabled[c] = true
+	}
 	if r.CheckUnsupportedCalls {
-		_, unsupported, err := host.DetectSupportedSyscalls(target, ipc.FlagsToSandbox(config.Flags))
+		_, unsupported, err := host.DetectSupportedSyscalls(target, ipc.FlagsToSandbox(config.Flags), enabled)
 		if err != nil {
 			log.Fatalf("failed to get unsupported system calls: %v", err)
 		}
@@ -93,13 +97,13 @@ func main() {
 		log.Fatalf("failed to get initial program: %v", err)
 	}
 
-	rn.Run(res.Prog, res.ProgIdx, res.RunIdx)
+	rn.Run(res.Prog, res.ID)
 }
 
 // Run is responsible for requesting new programs from the verifier, executing them and then sending back the Result.
 // TODO: Implement functionality to execute several programs at once and send back a slice of results.
-func (rn *Runner) Run(firstProg []byte, idx, runIdx int) {
-	p, pIdx, rIdx := firstProg, idx, runIdx
+func (rn *Runner) Run(firstProg []byte, taskID int64) {
+	p, id := firstProg, taskID
 
 	env, err := ipc.MakeEnv(rn.config, 0)
 	if err != nil {
@@ -112,25 +116,25 @@ func (rn *Runner) Run(firstProg []byte, idx, runIdx int) {
 			log.Fatalf("failed to deserialise new program: %v", err)
 		}
 
+		log.Printf("executing program") // watchdog for monitor
 		_, info, hanged, err := env.Exec(rn.opts, prog)
 		if err != nil {
 			log.Fatalf("failed to execute the program: %v", err)
 		}
 
 		a := &rpctype.NextExchangeArgs{
-			Pool:    rn.pool,
-			VM:      rn.vm,
-			ProgIdx: pIdx,
-			Hanged:  hanged,
-			Info:    *info,
-			RunIdx:  rIdx,
+			Pool:       rn.pool,
+			VM:         rn.vm,
+			Hanged:     hanged,
+			Info:       *info,
+			ExecTaskID: id,
 		}
 
 		r := &rpctype.NextExchangeRes{}
 		if err := rn.vrf.Call("Verifier.NextExchange", a, r); err != nil {
 			log.Fatalf("failed to make exchange with verifier: %v", err)
 		}
-		p, pIdx, rIdx = r.Prog, r.ProgIdx, r.RunIdx
+		p, id = r.Prog, r.ID
 
 		if !rn.newEnv {
 			continue

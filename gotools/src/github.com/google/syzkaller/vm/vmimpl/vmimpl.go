@@ -8,10 +8,11 @@
 package vmimpl
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/big"
 	"net"
 	"os/exec"
 	"strings"
@@ -70,16 +71,17 @@ type Infoer interface {
 type Env struct {
 	// Unique name
 	// Can be used for VM name collision resolution if several pools share global name space.
-	Name     string
-	OS       string // target OS
-	Arch     string // target arch
-	Workdir  string
-	Image    string
-	SSHKey   string
-	SSHUser  string
-	Timeouts targets.Timeouts
-	Debug    bool
-	Config   []byte // json-serialized VM-type-specific config
+	Name      string
+	OS        string // target OS
+	Arch      string // target arch
+	Workdir   string
+	Image     string
+	SSHKey    string
+	SSHUser   string
+	Timeouts  targets.Timeouts
+	Debug     bool
+	Config    []byte // json-serialized VM-type-specific config
+	KernelSrc string
 }
 
 // BootError is returned by Pool.Create when VM does not boot.
@@ -169,7 +171,11 @@ func Multiplex(cmd *exec.Cmd, merger *OutputMerger, console io.Closer, timeout t
 }
 
 func RandomPort() int {
-	return rand.Intn(64<<10-1<<10) + 1<<10
+	n, err := rand.Int(rand.Reader, big.NewInt(64<<10-1<<10))
+	if err != nil {
+		panic(err)
+	}
+	return int(n.Int64()) + 1<<10
 }
 
 func UnusedTCPPort() int {

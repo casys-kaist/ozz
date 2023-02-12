@@ -174,11 +174,9 @@ Unions are described as:
 
 ```
 unionname "[" "\n"
-	(fieldname type ("(" fieldattribute* ")")? "\n")+
+	(fieldname type "\n")+
 "]" ("[" attribute* "]")?
 ```
-
-Field attributes are as defined for [structs](#structs).
 
 Unions can have attributes specified in square brackets after the union.
 Attributes are:
@@ -235,6 +233,10 @@ test_struct {
 	field1	my_resource_2	(in)
 }
 ```
+
+Each resource type must be "produced" (used as an output) by at least one syscall
+(outside of unions and optional pointers) and "consumed" (used as an input)
+by at least one syscall.
 
 ## Type Aliases
 
@@ -409,7 +411,7 @@ Though, `syz-extract` can still be invoked manually on this file.
 meta arches["arch1", "arch2"]
 ```
 Restricts this file only to the given set of architectures.
-`make extract` and ``make generate` will not use it on other architectures.
+`make extract` and `make generate` will not use it on other architectures.
 
 ## Misc
 

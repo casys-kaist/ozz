@@ -17,14 +17,10 @@ import (
 
 const (
 	// "Recommended" number of calls in programs that we try to aim at during fuzzing.
-	RecommendedCalls = 20
+	RecommendedCalls = 30
 	// "Recommended" max number of calls in programs.
 	// If we receive longer programs from hub/corpus we discard them.
 	MaxCalls = 40
-	// "Recommended max" number of scheduling points in programs
-	MaximalPoints = 4
-	// "Recommended min" number of scheduling points in programs
-	MinimalPoints = 2
 )
 
 type randGen struct {
@@ -76,6 +72,8 @@ var (
 		(1 << 16) - 1, (1 << 16), (1 << 16) + 1,
 		(1 << 31) - 1, (1 << 31), (1 << 31) + 1,
 		(1 << 32) - 1, (1 << 32), (1 << 32) + 1,
+		(1 << 63) - 1, (1 << 63), (1 << 63) + 1,
+		(1 << 64) - 1,
 	}
 	// The indexes (exclusive) for the maximum specialInts values that fit in 1, 2, ... 8 bytes.
 	specialIntIndex [9]int
@@ -373,8 +371,14 @@ func (r *randGen) allocVMA(s *state, typ Type, dir Dir, numPages uint64) *Pointe
 	return MakeVmaPointerArg(typ, dir, page*r.target.PageSize, numPages*r.target.PageSize)
 }
 
-func (r *randGen) createResource(s *state, res *ResourceType, dir Dir) (arg Arg, calls []*Call) {
+func (r *randGen) createResource(s *state, res *ResourceType, dir Dir) (Arg, []*Call) {
+	if !r.inGenerateResource {
+		panic("inGenerateResource is not set")
+	}
 	kind := res.Desc.Name
+	// Find calls that produce the necessary resources.
+	// TODO: reduce priority of less specialized ctors.
+	metas := r.enabledCtors(s, kind)
 	// We may have no resources, but still be in createResource due to ANYRES.
 	if len(r.target.resourceMap) != 0 && r.oneOf(1000) {
 		// Spoof resource subkind.
@@ -389,64 +393,54 @@ func (r *randGen) createResource(s *state, res *ResourceType, dir Dir) (arg Arg,
 				kind, r.target.OS, r.target.Arch))
 		}
 		sort.Strings(all)
-		kind = all[r.Intn(len(all))]
+		kind1 := all[r.Intn(len(all))]
+		metas1 := r.enabledCtors(s, kind1)
+		if len(metas1) != 0 {
+			// Don't use the resource for which we don't have any ctors.
+			// It's fine per-se because below we just return nil in such case.
+			// But in TestCreateResource tests we want to ensure that we don't fail
+			// to create non-optional resources, and if we spoof a non-optional
+			// resource with ctors with a optional resource w/o ctors, then that check will fail.
+			kind, metas = kind1, metas1
+		}
 	}
-	// Find calls that produce the necessary resources.
-	metas0 := r.target.resourceCtors[kind]
-	// TODO: reduce priority of less specialized ctors.
+	if len(metas) == 0 {
+		// We may not have any constructors for optional input resources because we don't disable
+		// syscalls based on optional inputs resources w/o ctors in TransitivelyEnabledCalls.
+		return nil, nil
+	}
+	// Now we have a set of candidate calls that can create the necessary resource.
+	// Generate one of them.
+	meta := metas[r.Intn(len(metas))]
+	calls := r.generateParticularCall(s, meta)
+	s1 := newState(r.target, s.ct, nil)
+	s1.analyze(calls[len(calls)-1])
+	// Now see if we have what we want.
+	var allres []*ResultArg
+	for kind1, res1 := range s1.resources {
+		if r.target.isCompatibleResource(kind, kind1) {
+			allres = append(allres, res1...)
+		}
+	}
+	sort.SliceStable(allres, func(i, j int) bool {
+		return allres[i].Type().Name() < allres[j].Type().Name()
+	})
+	if len(allres) == 0 {
+		panic(fmt.Sprintf("failed to create a resource %v (%v) with %v",
+			res.Desc.Kind[0], kind, meta.Name))
+	}
+	arg := MakeResultArg(res, dir, allres[r.Intn(len(allres))], 0)
+	return arg, calls
+}
+
+func (r *randGen) enabledCtors(s *state, kind string) []*Syscall {
 	var metas []*Syscall
-	for _, meta := range metas0 {
+	for _, meta := range r.target.resourceCtors[kind] {
 		if s.ct.Generatable(meta.ID) {
 			metas = append(metas, meta)
 		}
 	}
-	if len(metas) == 0 {
-		return res.DefaultArg(dir), nil
-	}
-
-	// Now we have a set of candidate calls that can create the necessary resource.
-	for i := 0; i < 1e3; i++ {
-		// Generate one of them.
-		meta := metas[r.Intn(len(metas))]
-		calls := r.generateParticularCall(s, meta)
-		s1 := newState(r.target, s.ct, nil)
-		s1.analyze(calls[len(calls)-1])
-		// Now see if we have what we want.
-		var allres []*ResultArg
-		for kind1, res1 := range s1.resources {
-			if r.target.isCompatibleResource(kind, kind1) {
-				allres = append(allres, res1...)
-			}
-		}
-		sort.SliceStable(allres, func(i, j int) bool {
-			return allres[i].Type().Name() < allres[j].Type().Name()
-		})
-		if len(allres) != 0 {
-			// Bingo!
-			arg := MakeResultArg(res, dir, allres[r.Intn(len(allres))], 0)
-			return arg, calls
-		}
-		// Discard unsuccessful calls.
-		// Note: s.ma/va have already noted allocations of the new objects
-		// in discarded syscalls, ideally we should recreate state
-		// by analyzing the program again.
-		for _, c := range calls {
-			ForeachArg(c, func(arg Arg, _ *ArgCtx) {
-				if a, ok := arg.(*ResultArg); ok && a.Res != nil {
-					delete(a.Res.uses, a)
-				}
-			})
-		}
-	}
-	// Generally we can loop several times, e.g. when we choose a call that returns
-	// the resource in an array, but then generateArg generated that array of zero length.
-	// But we must succeed eventually.
-	var ctors []string
-	for _, meta := range metas {
-		ctors = append(ctors, meta.Name)
-	}
-	panic(fmt.Sprintf("failed to create a resource %v with %v",
-		res.Desc.Kind[0], strings.Join(ctors, ", ")))
+	return metas
 }
 
 func (r *randGen) generateText(kind TextKind) []byte {
@@ -586,12 +580,7 @@ func (r *randGen) generateParticularCall(s *state, meta *Syscall) (calls []*Call
 	if meta.Attrs.NoGenerate {
 		panic(fmt.Sprintf("generating no_generate call: %v", meta.Name))
 	}
-	c := &Call{
-		Meta:   meta,
-		Ret:    MakeReturnArg(meta.Ret),
-		Thread: ^uint64(0),
-		Epoch:  ^uint64(0),
-	}
+	c := MakeCall(meta, nil)
 	c.Args, calls = r.generateArgs(s, meta.Args, DirIn)
 	r.target.assignSizesCall(c)
 	return append(calls, c)
@@ -824,6 +813,10 @@ func (a *ArrayType) generate(r *randGen, s *state, dir Dir) (arg Arg, calls []*C
 	case ArrayRangeLen:
 		count = r.randRange(a.RangeBegin, a.RangeEnd)
 	}
+	// The resource we are trying to generate may be in the array elements, so create at least 1.
+	if r.inGenerateResource && count == 0 {
+		count = 1
+	}
 	var inner []Arg
 	for i := uint64(0); i < count; i++ {
 		arg1, calls1 := r.generateArg(s, a.Elem, dir)
@@ -847,7 +840,9 @@ func (a *UnionType) generate(r *randGen, s *state, dir Dir) (arg Arg, calls []*C
 }
 
 func (a *PtrType) generate(r *randGen, s *state, dir Dir) (arg Arg, calls []*Call) {
-	if r.oneOf(1000) {
+	// The resource we are trying to generate may be in the pointer,
+	// so don't try to create an empty special pointer during resource generation.
+	if !r.inGenerateResource && r.oneOf(1000) {
 		index := r.rand(len(r.target.SpecialPointers))
 		return MakeSpecialPointerArg(a, dir, index), nil
 	}
@@ -924,7 +919,7 @@ func (r *randGen) resourceCentric(s *state, t *ResourceType, dir Dir) (arg Arg, 
 			}
 		})
 		if !includeCall {
-			p.removeCall(idx)
+			p.RemoveCall(idx)
 		} else {
 			for _, res := range newResources {
 				relatedRes[res] = true
@@ -938,7 +933,7 @@ func (r *randGen) resourceCentric(s *state, t *ResourceType, dir Dir) (arg Arg, 
 
 	// Removes the references that are not used anymore.
 	for i := biasedLen; i < len(calls); i++ {
-		p.removeCall(i)
+		p.RemoveCall(i)
 	}
 
 	return MakeResultArg(t, dir, resource, 0), p.Calls

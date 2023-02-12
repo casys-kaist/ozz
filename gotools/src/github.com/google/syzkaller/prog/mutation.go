@@ -18,24 +18,25 @@ const maxBlobLen = uint64(100 << 10)
 
 // Mutate program p.
 //
-// p:       The program to mutate.
-// rs:      Random source.
-// ncalls:  The allowed maximum calls in mutated program.
-// ct:      ChoiceTable for syscalls.
-// corpus:  The entire corpus, including original program p.
-func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, corpus []*Prog) {
+// p:           The program to mutate.
+// rs:          Random source.
+// ncalls:      The allowed maximum calls in mutated program.
+// ct:          ChoiceTable for syscalls.
+// noMutate:    Set of IDs of syscalls which should not be mutated.
+// corpus:      The entire corpus, including original program p.
+func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, noMutate map[int]bool, corpus []*Prog) {
 	r := newRand(p.Target, rs)
 	if ncalls < len(p.Calls) {
 		ncalls = len(p.Calls)
 	}
 	ctx := &mutator{
-		p:      p,
-		r:      r,
-		ncalls: ncalls,
-		ct:     ct,
-		corpus: corpus,
+		p:        p,
+		r:        r,
+		ncalls:   ncalls,
+		ct:       ct,
+		noMutate: noMutate,
+		corpus:   corpus,
 	}
-	ctx.initialize()
 	for stop, ok := false, false; !stop; stop = ok && len(p.Calls) != 0 && r.oneOf(3) {
 		switch {
 		case r.oneOf(5):
@@ -52,11 +53,6 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, corpus []*Pro
 			ok = ctx.removeCall()
 		}
 	}
-	ctx.checkContenders()
-	// Unthreading p before threading to prevent epochs from being
-	// messed up.
-	p.unthreading()
-	p.Threading(p.Contender)
 	p.sanitizeFix()
 	p.debugValidate()
 	if got := len(p.Calls); got < 1 || got > ncalls {
@@ -67,31 +63,12 @@ func (p *Prog) Mutate(rs rand.Source, ncalls int, ct *ChoiceTable, corpus []*Pro
 // Internal state required for performing mutations -- currently this matches
 // the arguments passed to Mutate().
 type mutator struct {
-	p      *Prog        // The program to mutate.
-	r      *randGen     // The randGen instance.
-	ncalls int          // The allowed maximum calls in mutated program.
-	ct     *ChoiceTable // ChoiceTable for syscalls.
-	corpus []*Prog      // The entire corpus, including original program p.
-
-	contenders []string
-}
-
-func (ctx *mutator) initialize() {
-	for _, c := range ctx.p.Contenders() {
-		ctx.contenders = append(ctx.contenders, c.Meta.Name)
-	}
-}
-
-func (ctx *mutator) checkContenders() {
-	cs := ctx.p.Contenders()
-	if len(cs) != len(ctx.contenders) {
-		panic(fmt.Sprintf("wrong length, before=%v, after=%v", len(ctx.contenders), len(cs)))
-	}
-	for i, c := range cs {
-		if ctx.contenders[i] != c.Meta.Name {
-			panic(fmt.Sprintf("wrong contender at %d, before=%v, after=%v", i, ctx.contenders[i], c.Meta.Name))
-		}
-	}
+	p        *Prog        // The program to mutate.
+	r        *randGen     // The randGen instance.
+	ncalls   int          // The allowed maximum calls in mutated program.
+	ct       *ChoiceTable // ChoiceTable for syscalls.
+	noMutate map[int]bool // Set of IDs of syscalls which should not be mutated.
+	corpus   []*Prog      // The entire corpus, including original program p.
 }
 
 // This function selects a random other program p0 out of the corpus, and
@@ -106,17 +83,8 @@ func (ctx *mutator) splice() bool {
 	p0c := p0.Clone()
 	idx := r.Intn(len(p.Calls))
 	p.Calls = append(p.Calls[:idx], append(p0c.Calls, p.Calls[idx:]...)...)
-	inserted := len(p0c.Calls)
-	for i := range p.Contender.Calls {
-		if idx <= p.Contender.Calls[i] {
-			p.Contender.Calls[i] += inserted
-		}
-	}
-	for i := len(p.Calls) - 1; len(p.Calls) >= ctx.ncalls; i-- {
-		if p.IsContender(i) {
-			continue
-		}
-		p.removeCall(i)
+	for i := len(p.Calls) - 1; i >= ctx.ncalls; i-- {
+		p.RemoveCall(i)
 	}
 	return true
 }
@@ -130,12 +98,15 @@ func (ctx *mutator) squashAny() bool {
 		return false
 	}
 	ptr := complexPtrs[r.Intn(len(complexPtrs))]
-	if !p.Target.isAnyPtr(ptr.Type()) {
-		p.Target.squashPtr(ptr)
+	if ctx.noMutate[ptr.call.Meta.ID] {
+		return false
+	}
+	if !p.Target.isAnyPtr(ptr.arg.Type()) {
+		p.Target.squashPtr(ptr.arg)
 	}
 	var blobs []*DataArg
 	var bases []*PointerArg
-	ForeachSubArg(ptr, func(arg Arg, ctx *ArgCtx) {
+	ForeachSubArg(ptr.arg, func(arg Arg, ctx *ArgCtx) {
 		if data, ok := arg.(*DataArg); ok && arg.Dir() != DirOut {
 			blobs = append(blobs, data)
 			bases = append(bases, ctx.Base)
@@ -144,6 +115,10 @@ func (ctx *mutator) squashAny() bool {
 	if len(blobs) == 0 {
 		return false
 	}
+	// Note: we need to call analyze before we mutate the blob.
+	// After mutation the blob can grow out of bounds of the data area
+	// and analyze will crash with out-of-bounds access while marking existing allocations.
+	s := analyze(ctx.ct, ctx.corpus, p, ptr.call)
 	// TODO(dvyukov): we probably want special mutation for ANY.
 	// E.g. merging adjacent ANYBLOBs (we don't create them,
 	// but they can appear in future); or replacing ANYRES
@@ -155,7 +130,6 @@ func (ctx *mutator) squashAny() bool {
 	arg.data = mutateData(r, arg.Data(), 0, maxBlobLen)
 	// Update base pointer if size has increased.
 	if baseSize < base.Res.Size() {
-		s := analyze(ctx.ct, ctx.corpus, p, p.Calls[0])
 		newArg := r.allocAddr(s, base.Type(), base.Dir(), base.Res.Size(), base.Res)
 		*base = *newArg
 	}
@@ -178,9 +152,7 @@ func (ctx *mutator) insertCall() bool {
 	calls := r.generateCall(s, p, idx)
 	p.insertBefore(c, calls)
 	for len(p.Calls) > ctx.ncalls {
-		// NOTE: no need to check idx is a contender because after
-		// this loop can be repeated until removing all inserted call.
-		p.removeCall(idx)
+		p.RemoveCall(idx)
 	}
 	return true
 }
@@ -191,17 +163,9 @@ func (ctx *mutator) removeCall() bool {
 	if len(p.Calls) == 0 {
 		return false
 	}
-
-	for try := 0; try < 3; try++ {
-		idx := r.Intn(len(p.Calls))
-		// don't want to remove a contender if exists
-		if p.IsContender(idx) {
-			continue
-		}
-		p.removeCall(idx)
-		return true
-	}
-	return false
+	idx := r.Intn(len(p.Calls))
+	p.RemoveCall(idx)
+	return true
 }
 
 // Mutate an argument of a random call.
@@ -216,6 +180,9 @@ func (ctx *mutator) mutateArg() bool {
 		return false
 	}
 	c := p.Calls[idx]
+	if ctx.noMutate[c.Meta.ID] {
+		return false
+	}
 	updateSizes := true
 	for stop, ok := false, false; !stop; stop = ok && r.oneOf(3) {
 		ok = true
@@ -235,7 +202,7 @@ func (ctx *mutator) mutateArg() bool {
 		idx += len(calls)
 		for len(p.Calls) > ctx.ncalls {
 			idx--
-			p.removeCall(idx)
+			p.RemoveCall(idx)
 		}
 		if idx < 0 || idx >= len(p.Calls) || p.Calls[idx] != c {
 			panic(fmt.Sprintf("wrong call index: idx=%v calls=%v p.Calls=%v ncalls=%v",

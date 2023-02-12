@@ -4,7 +4,6 @@
 package osutil
 
 import (
-	"crypto/md5"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -66,18 +65,4 @@ func WriteTempFile(data []byte) (string, error) {
 	}
 	f.Close()
 	return f.Name(), nil
-}
-
-func BinaryHash(filePath string) ([]byte, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	hash := md5.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return nil, err
-	}
-	return hash.Sum(nil), nil
 }
