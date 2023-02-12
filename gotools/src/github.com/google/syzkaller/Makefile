@@ -160,7 +160,7 @@ descriptions:
 	touch .descriptions
 
 manager: descriptions
-	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GOHOSTFLAGS) -o ./bin/syz-manager github.com/google/syzkaller/syz-manager
+	CGO_ENABLED=1 GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GOHOSTFLAGS) -o ./bin/syz-manager github.com/google/syzkaller/syz-manager
 
 runtest: descriptions
 	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GOHOSTFLAGS) -o ./bin/syz-runtest github.com/google/syzkaller/tools/syz-runtest
@@ -227,6 +227,9 @@ verifier: descriptions
 
 runner:  descriptions
 	GOOS=$(TARGETGOOS) GOARCH=$(TARGETGOARCH) $(GO) build $(GOTARGETFLAGS) -o ./bin/$(TARGETOS)_$(TARGETVMARCH)/syz-runner$(EXE) github.com/google/syzkaller/syz-runner
+
+cover2:
+	GOOS=$(HOSTOS) GOARCH=$(HOSTARCH) $(HOSTGO) build $(GOHOSTFLAGS) -o ./bin/syz-cover2 github.com/google/syzkaller/tools/syz-cover2
 
 # `extract` extracts const files from various kernel sources, and may only
 # re-generate parts of files.
