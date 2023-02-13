@@ -14,3 +14,8 @@
   Seems like this causes real-world problems, but it is caused by
   missing *load* barriers. As we do not have an ability to reorder
   loads, this is not applicable for our project.
+
+- 26fbe9772b8c459687930511444ce443011f86bf
+  This caused a hang, but we cannot trigger the bug because reordering
+  happened in the async thread.
+  
