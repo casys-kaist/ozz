@@ -510,6 +510,10 @@ func (p *Prog) fixupEpoch() {
 		return
 	}
 
+	if len(p.Calls) == 0 {
+		return
+	}
+
 	const undefined = ^uint64(0)
 	// TODO: fix maxThr
 	maxThr := 3
@@ -519,6 +523,10 @@ func (p *Prog) fixupEpoch() {
 		thr:    make([]bool, maxThr),
 		maxThr: maxThr,
 	}
+
+	// The first call always runs in the thread0 at the epoch0
+	// NOTE: p is  a sequential prog
+	p.Calls[0].Thread, p.Calls[0].Epoch = 0, 0
 
 	for _, c := range p.Calls {
 		newepoch := false
