@@ -71,7 +71,7 @@ typedef unsigned char uint8;
 // Note: zircon max fd is 256.
 // Some common_OS.h files know about this constant for RLIMIT_NOFILE.
 const int kMaxFd = 250;
-const int kMaxThreads = 8;
+const int kMaxThreads = 4;
 const int kMaxSchedule = 128;
 const int kMaxVector = 32;
 const int kMaxFallbackThreads = 3;
