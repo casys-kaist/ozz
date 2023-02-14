@@ -207,6 +207,11 @@ func (cfg *Config) initTimeouts() {
 		// but a smaller value should be enough to finish at least some syscalls.
 		// Note: the name check is a hack.
 		slowdown = 10
+	case strings.Contains(cfg.Name, "kssb"):
+		// The store buffer emulation is slow. TODO: Test how much the
+		// store buffer emulation slows down the kernel.
+		// Note: the name check is a hack.
+		slowdown = 5
 	}
 	// Note: we could also consider heavy debug tools (KASAN/KMSAN/KCSAN/KMEMLEAK) if necessary.
 	cfg.Timeouts = cfg.SysTarget.Timeouts(slowdown)
