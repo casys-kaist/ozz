@@ -765,7 +765,7 @@ void receive_execute()
 	// this point.
 	flag_comparisons = false;
 	// NOTE: We always enable flag_threaded
-	flag_threaded = req.exec_flags & (1 << 4);
+	flag_threaded = true;
 	flag_coverage_filter = req.exec_flags & (1 << 5);
 
 	debug("[%llums] exec opts: procid=%llu threaded=%d cover=%d comps=%d dedup=%d signal=%d"
