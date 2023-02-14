@@ -1604,6 +1604,8 @@ void thread_mmap_cover(thread_t* th)
 		return;
 	cover_mmap(&th->cov);
 	cover_protect(&th->cov);
+	cover_mmap(&th->rfcov);
+	cover_protect(&th->rfcov);
 }
 
 void* worker_thread(void* arg)
