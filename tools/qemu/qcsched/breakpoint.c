@@ -47,7 +47,7 @@ static void __handle_breakpoint_hook(CPUState *cpu)
 
     DRPRINTF(cpu, "%s %llx\n", __func__, cpu->regs.rbx);
 
-    if (!qcsched_vmi_running_context_being_scheduled(cpu)) {
+    if (!qcsched_vmi_running_context_being_scheduled(cpu, false)) {
         // The context is switched, this is not a thread we want to
         // control. Reinstall the brekapoint on the hook.
         DRPRINTF(cpu, "Reinstalling a breakpoint\n");

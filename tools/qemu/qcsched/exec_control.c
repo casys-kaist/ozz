@@ -33,7 +33,7 @@ void kidnap_task(CPUState *cpu)
 {
     bool kidnapped = task_kidnapped(cpu);
 
-    ASSERT(qcsched_vmi_running_context_being_scheduled(cpu),
+    ASSERT(qcsched_vmi_running_context_being_scheduled(cpu, true),
            "kidnapping a wrong context");
 
     if (sched.current == sched.total || !sched.activated)

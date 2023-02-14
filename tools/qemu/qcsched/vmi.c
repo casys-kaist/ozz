@@ -74,11 +74,15 @@ qcsched_vmi_lock_info_duplicated(struct qcsched_vmi_lock_info *lock_info,
     return false;
 }
 
-bool qcsched_vmi_running_context_being_scheduled(CPUState *cpu)
+bool qcsched_vmi_running_context_being_scheduled(CPUState *cpu, bool task_only)
 {
     struct qcsched_vmi_task running;
+    bool ret;
     qcsched_vmi_task(cpu, &running);
-    return __vmi_scheduling_subject(&running) && qcsched_vmi_in_task(cpu);
+    ret = __vmi_scheduling_subject(&running);
+    if (task_only)
+        ret = ret && qcsched_vmi_in_task(cpu);
+    return ret;
 }
 
 static bool qcsched_vmi_lockdep_whitelisted(target_ulong lockdep_addr)
@@ -103,7 +107,7 @@ static void qcsched_vmi_lock_acquire(CPUState *cpu, target_ulong lockdep_addr,
     if (qcsched_vmi_lockdep_whitelisted(lockdep_addr))
         return;
 
-    if (!qcsched_vmi_running_context_being_scheduled(cpu))
+    if (!qcsched_vmi_running_context_being_scheduled(cpu, true))
         return;
 
     // Allowed: activated
@@ -162,7 +166,7 @@ static void qcsched_vmi_lock_release(CPUState *cpu, target_ulong lockdep_addr)
         &vmi_info.lock_info[cpu->cpu_index];
     int cnt = lock_info->count;
 
-    if (!qcsched_vmi_running_context_being_scheduled(cpu))
+    if (!qcsched_vmi_running_context_being_scheduled(cpu, true))
         return;
 
     // Allowed: activated
