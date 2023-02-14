@@ -50,6 +50,7 @@ static void __handle_breakpoint_hook(CPUState *cpu)
     if (!qcsched_vmi_running_context_being_scheduled(cpu)) {
         // The context is switched, this is not a thread we want to
         // control. Reinstall the brekapoint on the hook.
+        DRPRINTF(cpu, "Reinstalling a breakpoint\n");
         ASSERT(!(err = kvm_insert_breakpoint_cpu(cpu, vmi_info.hook_addr, 1,
                                                  GDB_BREAKPOINT_HW)),
                "failed to insert a breakpoint at the hook err=%d\n", err);
@@ -148,12 +149,12 @@ static void __handle_breakpoint_schedpoint(CPUState *cpu)
     }
 }
 
-static void
+static bool
 watchdog_breakpoint_check_count(CPUState *cpu,
                                 struct qcsched_breakpoint_record *record)
 {
     if (record->RIP != RIP(cpu))
-        return;
+        return false;
     // In this project, there is no case that a breakpoint keep being
     // hit consecutively so far (we don't consider cases where an
     // instruction is executed multiple times, such as a loop; this
@@ -164,35 +165,44 @@ watchdog_breakpoint_check_count(CPUState *cpu,
     ASSERT(record->count < WATCHDOG_BREAKPOINT_COUNT_KILL_QEMU,
            "watchdog failed: killing QEMU");
 
-    if (record->count >= WATCHDOG_BREAKPOINT_COUNT_MAX) {
+    int count_max = WATCHDOG_BREAKPOINT_COUNT_MAX;
+    if (breakpoint_on_hook(cpu))
+        // XXX: Because a breakpoint on the hook can be hit by
+        // multiple threads, we give more chance to survive in the
+        // case of hook.
+        count_max *= 5;
+
+    if (record->count >= count_max) {
         int err;
         DRPRINTF(cpu, "watchdog failed: a breakpoint at %lx is hit %d times",
                  record->RIP, record->count);
         qcsched_window_close_window(cpu);
         ASSERT(!(err = kvm_update_guest_debug(cpu, 0)),
                "%s, kvm_update_guest_debug_debug returns %d", __func__, err);
+        return true;
+    } else {
+        return false;
     }
 }
 
-static void watchdog_breakpoint(CPUState *cpu)
+static void watchdog_breakpoint_reset(CPUState *cpu,
+                                      struct qcsched_breakpoint_record *record)
 {
+    record->RIP = RIP(cpu);
+    record->count = 0;
+}
+
+static bool watchdog_breakpoint(CPUState *cpu)
+{
+    bool failed = false;
     int index = cpu->cpu_index;
     struct qcsched_breakpoint_record *record = &sched.last_breakpoint[index];
 
-    if (breakpoint_on_hook(cpu))
-        // XXX: Because a breakpoint on the hook can be hit by
-        // multiple threads, it is not a subject of the watchdog. But
-        // we many want to kill the schedule if too many threads hit
-        // it to prevent the performance degradation.
-        return;
-
-    watchdog_breakpoint_check_count(cpu, record);
-
-    if (record->RIP == RIP(cpu))
-        return;
-
-    record->RIP = RIP(cpu);
-    record->count = 0;
+    if (record->RIP != RIP(cpu))
+        watchdog_breakpoint_reset(cpu, record);
+    else
+        failed = watchdog_breakpoint_check_count(cpu, record);
+    return failed;
 }
 
 static int qcsched_handle_breakpoint_iolocked(CPUState *cpu)
@@ -228,11 +238,15 @@ static int qcsched_handle_breakpoint_iolocked(CPUState *cpu)
         return 0;
 
     watchdog_breakpoint(cpu);
+    bool watchdog_failed = watchdog_breakpoint(cpu);
 
     // We need to synchronize the window before cleaning up left
     // schedpoint
     qcsched_window_sync(cpu);
     qcsched_window_cleanup_left_schedpoint(cpu);
+
+    if (watchdog_failed)
+        return 0;
 
     if (breakpoint_on_hook(cpu)) {
         __handle_breakpoint_hook(cpu);
