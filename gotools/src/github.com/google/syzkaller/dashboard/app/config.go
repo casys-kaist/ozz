@@ -82,6 +82,8 @@ type Config struct {
 	WaitForRepro time.Duration
 	// If set, successful fix bisections will auto-close the bug.
 	FixBisectionAutoClose bool
+	// If set, dashboard will periodically request repros and revoke no longer working ones.
+	RetestRepros bool
 	// Managers contains some special additional info about syz-manager instances.
 	Managers map[string]ConfigManager
 	// Reporting config.
@@ -98,6 +100,15 @@ type Config struct {
 	Repos []KernelRepo
 	// If not nil, bugs in this namespace will be exported to the specified Kcidb.
 	Kcidb *KcidbConfig
+	// Subsystems config.
+	Subsystems SubsystemsConfig
+}
+
+// SubsystemsConfig describes how to generate the list of kernel subsystems and the rules of
+// subsystem inference / bug reporting.
+type SubsystemsConfig struct {
+	// IMPORTANT: this interface is experimental and will likely change in the future.
+	SubsystemCc func(name string) []string
 }
 
 // ObsoletingConfig describes how bugs without reproducer should be obsoleted.
@@ -114,6 +125,7 @@ type ObsoletingConfig struct {
 	MaxPeriod         time.Duration
 	NonFinalMinPeriod time.Duration
 	NonFinalMaxPeriod time.Duration
+	ReproRetestPeriod time.Duration
 }
 
 // ConfigManager describes a single syz-manager instance.
@@ -336,6 +348,9 @@ func checkNamespace(ns string, cfg *Config, namespaces, clientNames map[string]b
 	if cfg.Kcidb != nil {
 		checkKcidb(ns, cfg.Kcidb)
 	}
+	if cfg.Subsystems.SubsystemCc == nil {
+		cfg.Subsystems.SubsystemCc = func(string) []string { return nil }
+	}
 	checkKernelRepos(ns, cfg)
 	checkNamespaceReporting(ns, cfg)
 }
@@ -477,4 +492,12 @@ func checkClients(clientNames map[string]bool, clients map[string]string) {
 		}
 		clientNames[name] = true
 	}
+}
+
+func (cfg *Config) lastActiveReporting() int {
+	last := len(cfg.Reporting) - 1
+	for last > 0 && cfg.Reporting[last].DailyLimit == 0 {
+		last--
+	}
+	return last
 }

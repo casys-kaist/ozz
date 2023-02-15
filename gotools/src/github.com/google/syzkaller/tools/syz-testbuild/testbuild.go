@@ -8,12 +8,12 @@
 // The kernel checkout given to the tool will be cleaned and used for in-tree builds.
 // Example invocation:
 //
-// sudo syz-testbuild -kernel_src $LINUX_CHECKOUT \
-//	-config dashboard/config/upstream-kasan.config \
-//	-sysctl dashboard/config/upstream.sysctl \
-//	-cmdline dashboard/config/upstream-apparmor.cmdline \
-//	-userspace $WHEEZY_USERSPACE \
-//	-bisect_bin $BISECT_BIN
+//	sudo syz-testbuild -kernel_src $LINUX_CHECKOUT \
+//		-config dashboard/config/upstream-kasan.config \
+//		-sysctl dashboard/config/upstream.sysctl \
+//		-cmdline dashboard/config/upstream-apparmor.cmdline \
+//		-userspace $WHEEZY_USERSPACE \
+//		-bisect_bin $BISECT_BIN
 //
 // A suitable wheezy userspace can be downloaded from:
 // https://storage.googleapis.com/syzkaller/wheezy.tar.gz
@@ -49,6 +49,7 @@ var (
 	flagBisectBin     = flag.String("bisect_bin", "", "path to bisection binaries")
 	flagSyzkaller     = flag.String("syzkaller", ".", "path to built syzkaller")
 	flagSandbox       = flag.String("sandbox", "namespace", "sandbox to use for testing")
+	flagSandboxArg    = flag.Int("sandbox_arg", 0, "an argument for sandbox runner")
 )
 
 const (
@@ -68,18 +69,19 @@ func main() {
 	}
 	defer os.RemoveAll(dir)
 	cfg := &mgrconfig.Config{
-		RawTarget: *flagOS + "/" + *flagArch,
-		HTTP:      ":0",
-		Workdir:   dir,
-		KernelSrc: *flagKernelSrc,
-		KernelObj: *flagKernelSrc,
-		Syzkaller: *flagSyzkaller,
-		Sandbox:   *flagSandbox,
-		SSHUser:   "root",
-		Procs:     1,
-		Cover:     false,
-		Type:      vmType,
-		VM:        json.RawMessage([]byte(fmt.Sprintf(`{ "count": %v, "cpu": 2, "mem": 2048 }`, numTests))),
+		RawTarget:  *flagOS + "/" + *flagArch,
+		HTTP:       ":0",
+		Workdir:    dir,
+		KernelSrc:  *flagKernelSrc,
+		KernelObj:  *flagKernelSrc,
+		Syzkaller:  *flagSyzkaller,
+		Sandbox:    *flagSandbox,
+		SandboxArg: *flagSandboxArg,
+		SSHUser:    "root",
+		Procs:      1,
+		Cover:      false,
+		Type:       vmType,
+		VM:         json.RawMessage([]byte(fmt.Sprintf(`{ "count": %v, "cpu": 2, "mem": 2048 }`, numTests))),
 		Derived: mgrconfig.Derived{
 			TargetOS:     *flagOS,
 			TargetArch:   *flagArch,
@@ -99,7 +101,7 @@ func main() {
 		tool.Fail(err)
 	}
 	log.Printf("HEAD is on %v %v", head.Hash, head.Title)
-	tags, err := bisecter.PreviousReleaseTags(head.Hash)
+	tags, err := bisecter.PreviousReleaseTags(head.Hash, "gcc")
 	if err != nil {
 		tool.Fail(err)
 	}
@@ -108,7 +110,7 @@ func main() {
 	if err != nil {
 		tool.Fail(err)
 	}
-	env, err := instance.NewEnv(cfg)
+	env, err := instance.NewEnv(cfg, nil, nil)
 	if err != nil {
 		tool.Fail(err)
 	}
@@ -123,7 +125,8 @@ func main() {
 }
 
 func test(repo vcs.Repo, bisecter vcs.Bisecter, kernelConfig []byte, env instance.Env, com *vcs.Commit) {
-	bisectEnv, err := bisecter.EnvForCommit(*flagBisectBin, com.Hash, kernelConfig)
+	compiler, compilerType, linker, ccache := "gcc", "gcc", "ld", ""
+	bisectEnv, err := bisecter.EnvForCommit(compiler, compilerType, *flagBisectBin, com.Hash, kernelConfig)
 	if err != nil {
 		tool.Fail(err)
 	}
@@ -131,8 +134,15 @@ func test(repo vcs.Repo, bisecter vcs.Bisecter, kernelConfig []byte, env instanc
 	if err := build.Clean(*flagOS, *flagArch, vmType, *flagKernelSrc); err != nil {
 		tool.Fail(err)
 	}
-	_, _, err = env.BuildKernel(bisectEnv.Compiler, "", *flagUserspace,
-		*flagKernelCmdline, *flagKernelSysctl, bisectEnv.KernelConfig)
+	_, _, err = env.BuildKernel(&instance.BuildKernelConfig{
+		CompilerBin:  bisectEnv.Compiler,
+		LinkerBin:    linker,
+		CcacheBin:    ccache,
+		UserspaceDir: *flagUserspace,
+		CmdlineFile:  *flagKernelCmdline,
+		SysctlFile:   *flagKernelSysctl,
+		KernelConfig: bisectEnv.KernelConfig,
+	})
 	if err != nil {
 		if verr, ok := err.(*osutil.VerboseError); ok {
 			log.Printf("BUILD BROKEN: %v", verr.Title)
@@ -149,11 +159,11 @@ func test(repo vcs.Repo, bisecter vcs.Bisecter, kernelConfig []byte, env instanc
 	}
 	var verdicts []string
 	for i, res := range results {
-		if res == nil {
+		if res.Error == nil {
 			verdicts = append(verdicts, "OK")
 			continue
 		}
-		switch err := res.(type) {
+		switch err := res.Error.(type) {
 		case *instance.TestError:
 			if err.Boot {
 				verdicts = append(verdicts, fmt.Sprintf("boot failed: %v", err))

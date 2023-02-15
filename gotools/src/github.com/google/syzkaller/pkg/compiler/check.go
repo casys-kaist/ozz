@@ -8,6 +8,7 @@ package compiler
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/google/syzkaller/pkg/ast"
@@ -16,6 +17,7 @@ import (
 )
 
 func (comp *compiler) typecheck() {
+	comp.checkComments()
 	comp.checkDirectives()
 	comp.checkNames()
 	comp.checkFields()
@@ -32,6 +34,18 @@ func (comp *compiler) check() {
 	comp.checkConstructors()
 	comp.checkVarlens()
 	comp.checkDupConsts()
+}
+
+func (comp *compiler) checkComments() {
+	confusingComment := regexp.MustCompile(`^\s*(include|incdir|define)`)
+	for _, decl := range comp.desc.Nodes {
+		switch n := decl.(type) {
+		case *ast.Comment:
+			if confusingComment.MatchString(n.Text) {
+				comp.error(n.Pos, "confusing comment faking a directive (rephrase if it's intentional)")
+			}
+		}
+	}
 }
 
 func (comp *compiler) checkDirectives() {
@@ -170,7 +184,11 @@ func (comp *compiler) checkStructFields(n *ast.Struct, typ, name string) {
 	}
 	hasDirections, hasOutOverlay := false, false
 	for fieldIdx, f := range n.Fields {
-		attrs := comp.parseAttrs(fieldAttrs, f, f.Attrs)
+		if n.IsUnion {
+			comp.parseAttrs(nil, f, f.Attrs)
+			continue
+		}
+		attrs := comp.parseAttrs(structFieldAttrs, f, f.Attrs)
 		dirCount := attrs[attrIn] + attrs[attrOut] + attrs[attrInOut]
 		if dirCount != 0 {
 			hasDirections = true
@@ -180,10 +198,6 @@ func (comp *compiler) checkStructFields(n *ast.Struct, typ, name string) {
 			comp.error(f.Pos, "%v has multiple direction attributes", typ)
 		}
 		if attrs[attrOutOverlay] > 0 {
-			if n.IsUnion {
-				_, typ, name := f.Info()
-				comp.error(f.Pos, "unknown %v %v attribute %v", typ, name, attrOutOverlay.Name)
-			}
 			if fieldIdx == 0 {
 				comp.error(f.Pos, "%v attribute must not be specified on the first field", attrOutOverlay.Name)
 			}
@@ -311,13 +325,15 @@ func (comp *compiler) checkAttributeValues() {
 			for _, f := range st.Fields {
 				isOut := hasOutOverlay
 				for _, attr := range f.Attrs {
-					desc := fieldAttrs[attr.Ident]
+					desc := structFieldAttrs[attr.Ident]
 					if desc.CheckConsts != nil {
 						desc.CheckConsts(comp, f, attr)
 					}
 					switch attr.Ident {
 					case attrOutOverlay.Name:
 						hasOutOverlay = true
+						fallthrough
+					case attrOut.Name, attrInOut.Name:
 						isOut = true
 					}
 				}
@@ -388,13 +404,17 @@ type parentDesc struct {
 	fields []*ast.Field
 }
 
-func parentTargetName(s *ast.Struct) string {
-	parentName := s.Name.Name
-	if pos := strings.IndexByte(parentName, '['); pos != -1 {
-		// For template parents name is "struct_name[ARG1, ARG2]", strip the part after '['.
-		parentName = parentName[:pos]
+// templateName return the part before '[' for full template names.
+func templateBase(name string) string {
+	if pos := strings.IndexByte(name, '['); pos != -1 {
+		return name[:pos]
 	}
-	return parentName
+	return name
+}
+
+func parentTargetName(s *ast.Struct) string {
+	// For template parents name is "struct_name[ARG1, ARG2]", strip the part after '['.
+	return templateBase(s.Name.Name)
 }
 
 func (comp *compiler) checkLenType(t0, t *ast.Type, parents []parentDesc,
@@ -652,10 +672,10 @@ func (comp *compiler) checkConstructors() {
 		switch n := decl.(type) {
 		case *ast.Call:
 			for _, arg := range n.Args {
-				comp.checkTypeCtors(arg.Type, prog.DirIn, true, ctors, inputs, checked)
+				comp.checkTypeCtors(arg.Type, prog.DirIn, true, true, ctors, inputs, checked)
 			}
 			if n.Ret != nil {
-				comp.checkTypeCtors(n.Ret, prog.DirOut, true, ctors, inputs, checked)
+				comp.checkTypeCtors(n.Ret, prog.DirOut, true, true, ctors, inputs, checked)
 			}
 		}
 	}
@@ -672,22 +692,25 @@ func (comp *compiler) checkConstructors() {
 			}
 			if !inputs[name] {
 				comp.error(n.Pos, "resource %v is never used as an input"+
-					"(such resources are not useful)", name)
+					" (such resources are not useful)", name)
 			}
 		}
 	}
 }
 
-func (comp *compiler) checkTypeCtors(t *ast.Type, dir prog.Dir, isArg bool,
+func (comp *compiler) checkTypeCtors(t *ast.Type, dir prog.Dir, isArg, canCreate bool,
 	ctors, inputs map[string]bool, checked map[structDir]bool) {
-	desc := comp.getTypeDesc(t)
+	desc, args, base := comp.getArgsBase(t, isArg)
+	if base.IsOptional {
+		canCreate = false
+	}
 	if desc == typeResource {
 		// TODO(dvyukov): consider changing this to "dir == prog.DirOut".
 		// We have few questionable cases where resources can be created
 		// only by inout struct fields. These structs should be split
 		// into two different structs: one is in and second is out.
 		// But that will require attaching dir to individual fields.
-		if dir != prog.DirIn {
+		if canCreate && dir != prog.DirIn {
 			r := comp.resources[t.Ident]
 			for r != nil && !ctors[r.Name.Name] {
 				ctors[r.Name.Name] = true
@@ -705,6 +728,9 @@ func (comp *compiler) checkTypeCtors(t *ast.Type, dir prog.Dir, isArg bool,
 	}
 	if desc == typeStruct {
 		s := comp.structs[t.Ident]
+		if s.IsUnion {
+			canCreate = false
+		}
 		name := s.Name.Name
 		key := structDir{name, dir}
 		if checked[key] {
@@ -716,17 +742,16 @@ func (comp *compiler) checkTypeCtors(t *ast.Type, dir prog.Dir, isArg bool,
 			if !fldHasDir {
 				fldDir = dir
 			}
-			comp.checkTypeCtors(fld.Type, fldDir, false, ctors, inputs, checked)
+			comp.checkTypeCtors(fld.Type, fldDir, false, canCreate, ctors, inputs, checked)
 		}
 		return
 	}
 	if desc == typePtr {
 		dir = genDir(t.Args[0])
 	}
-	_, args, _ := comp.getArgsBase(t, isArg)
 	for i, arg := range args {
 		if desc.Args[i].Type == typeArgType {
-			comp.checkTypeCtors(arg, dir, desc.Args[i].IsArg, ctors, inputs, checked)
+			comp.checkTypeCtors(arg, dir, desc.Args[i].IsArg, canCreate, ctors, inputs, checked)
 		}
 	}
 }
@@ -971,12 +996,25 @@ func (comp *compiler) checkTypeArgs(t *ast.Type, desc *typeDesc, flags checkFlag
 
 func (comp *compiler) replaceTypedef(ctx *checkCtx, t *ast.Type, flags checkFlags) {
 	typedefName := t.Ident
+	typedef := comp.typedefs[typedefName]
+	fullTypeName := ast.SerializeNode(t)
+	if comp.brokenTypedefs[fullTypeName] {
+		// We've already produced some errors for this exact type instantiation.
+		// Don't produce duplicates, also helps to prevent exponential
+		// slowdown due to some cases of recursion. But increment the number
+		// of errors so that callers can understand that we did not succeed.
+		comp.errors++
+		return
+	}
 	comp.usedTypedefs[typedefName] = true
+	err0 := comp.errors
+	defer func() {
+		comp.brokenTypedefs[fullTypeName] = err0 != comp.errors
+	}()
 	if len(t.Colon) != 0 {
 		comp.error(t.Pos, "type alias %v with ':'", t.Ident)
 		return
 	}
-	typedef := comp.typedefs[typedefName]
 	// Handling optional BASE argument.
 	if len(typedef.Args) > 0 && typedef.Args[len(typedef.Args)-1].Name == argBase {
 		if flags&checkIsArg != 0 && len(t.Args) == len(typedef.Args)-1 {
@@ -988,22 +1026,22 @@ func (comp *compiler) replaceTypedef(ctx *checkCtx, t *ast.Type, flags checkFlag
 			comp.checkTypeArg(t, t.Args[len(t.Args)-1], typeArgBase)
 		}
 	}
-	fullTypeName := ast.SerializeNode(t)
-	for i, prev := range ctx.instantiationStack {
-		if prev == fullTypeName {
-			ctx.instantiationStack = append(ctx.instantiationStack, fullTypeName)
-			path := ""
-			for j := i; j < len(ctx.instantiationStack); j++ {
-				if j != i {
-					path += " -> "
-				}
-				path += ctx.instantiationStack[j]
-			}
-			comp.error(t.Pos, "type instantiation loop: %v", path)
-			return
-		}
-	}
+	recursion := 0
 	ctx.instantiationStack = append(ctx.instantiationStack, fullTypeName)
+	for i, prev := range ctx.instantiationStack[:len(ctx.instantiationStack)-1] {
+		if typedefName == templateBase(prev) {
+			recursion++
+			if recursion > 10 {
+				comp.error(t.Pos, "type instantiation recursion: %v", strings.Join(ctx.instantiationStack, " -> "))
+				return
+			}
+		}
+		if prev != fullTypeName {
+			continue
+		}
+		comp.error(t.Pos, "type instantiation loop: %v", strings.Join(ctx.instantiationStack[i:], " -> "))
+		return
+	}
 	nargs := len(typedef.Args)
 	args := t.Args
 	if nargs != len(t.Args) {
@@ -1032,6 +1070,9 @@ func (comp *compiler) replaceTypedef(ctx *checkCtx, t *ast.Type, flags checkFlag
 				return
 			}
 			comp.checkStruct(*ctx, inst)
+			if err0 != comp.errors {
+				return
+			}
 			comp.desc.Nodes = append(comp.desc.Nodes, inst)
 			comp.structs[fullTypeName] = inst
 		}

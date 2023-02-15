@@ -36,6 +36,22 @@ if (foo)
 			},
 		},
 		{
+			pattern:     `\) {\n[^\n}]+?\n\t*}\n`,
+			suppression: "debug|__except",
+			message:     "Don't use single-line compound statements (remove {})",
+			tests: []string{
+				`
+if (foo) {
+	bar();
+}
+`, `
+	while (x + y) {
+		foo(a, y);
+	}
+`,
+			},
+		},
+		{
 			// These are also not properly stripped by pkg/csource.
 			pattern: `/\*[^{]`,
 			message: "Don't use /* */ block comments. Use // line comments instead",
@@ -49,6 +65,7 @@ if (foo)
 				"These should be guarded by #ifndef __NR_foo, but this is dependent on the host " +
 				"and may break on other machines (after pkg/csource processing).\n" +
 				"Define sys_foo constants instead.",
+			commonOnly: true,
 			tests: []string{
 				`
 #ifndef __NR_io_uring_setup
@@ -63,7 +80,7 @@ if (foo)
 		},
 		{
 			pattern:     `//[^\s]`,
-			suppression: `https?://`,
+			suppression: `https?://|//%`,
 			message:     "Add a space after //",
 			tests: []string{
 				`//foo`,
@@ -125,6 +142,14 @@ if (foo)
 				`failmsg("format %s string", "format")`,
 			},
 		},
+		{
+			pattern: `ifn?def\s+SYZ_`,
+			message: "SYZ_* are always defined, use #if instead of #ifdef",
+			tests: []string{
+				`#ifndef SYZ_EXECUTOR_USES_FORK_SERVER`,
+				`#ifdef SYZ_EXECUTOR_USES_FORK_SERVER`,
+			},
+		},
 	}
 	for _, check := range checks {
 		re := regexp.MustCompile(check.pattern)
@@ -146,18 +171,24 @@ if (foo)
 			re := regexp.MustCompile(check.pattern)
 			supp := regexp.MustCompile(check.suppression)
 			for _, match := range re.FindAllIndex(data, -1) {
-				// Locate the last line of the match, that's where we assume the error is.
 				end := match[1] - 1
 				for end != len(data) && data[end] != '\n' {
 					end++
 				}
-				start := end - 1
+				// Match suppressions against all lines of the match.
+				start := match[0] - 1
 				for start != 0 && data[start-1] != '\n' {
 					start--
 				}
 				if check.suppression != "" && supp.Match(data[start:end]) {
 					continue
 				}
+				// Locate the last line of the match, that's where we assume the error is.
+				start = end - 1
+				for start != 0 && data[start-1] != '\n' {
+					start--
+				}
+
 				line := bytes.Count(data[:start], []byte{'\n'}) + 1
 				t.Errorf("\nexecutor/%v:%v: %v\n%s\n", file, line, check.message, data[start:end])
 			}

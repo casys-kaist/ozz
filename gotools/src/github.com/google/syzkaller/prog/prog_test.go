@@ -9,6 +9,8 @@ import (
 	"math/rand"
 	"strings"
 	"testing"
+
+	"github.com/google/syzkaller/pkg/testutil"
 )
 
 func TestGeneration(t *testing.T) {
@@ -21,7 +23,7 @@ func TestGeneration(t *testing.T) {
 
 func TestDefault(t *testing.T) {
 	target, _, _ := initTest(t)
-	ForeachType(target.Syscalls, func(typ Type, ctx TypeCtx) {
+	ForeachType(target.Syscalls, func(typ Type, ctx *TypeCtx) {
 		arg := typ.DefaultArg(ctx.Dir)
 		if !isDefault(arg) {
 			t.Errorf("default arg is not default: %s\ntype: %#v\narg: %#v",
@@ -142,13 +144,17 @@ func TestVmaType(t *testing.T) {
 // deserialized for another arch. This happens when managers exchange
 // programs via hub.
 func TestCrossTarget(t *testing.T) {
-	if raceEnabled {
+	if testutil.RaceEnabled {
 		t.Skip("skipping in race mode, too slow")
 	}
 	t.Parallel()
 	const OS = "linux"
 	var archs []string
-	archs = append(archs, "linux")
+	for _, target := range AllTargets() {
+		if target.OS == OS {
+			archs = append(archs, target.Arch)
+		}
+	}
 	for _, arch := range archs {
 		target, err := GetTarget(OS, arch)
 		if err != nil {
@@ -174,7 +180,7 @@ func TestCrossTarget(t *testing.T) {
 
 func testCrossTarget(t *testing.T, target *Target, crossTargets []*Target) {
 	ct := target.DefaultChoiceTable()
-	rs := randSource(t)
+	rs := testutil.RandSource(t)
 	iters := 100
 	if testing.Short() {
 		iters /= 10
@@ -187,7 +193,7 @@ func testCrossTarget(t *testing.T, target *Target, crossTargets []*Target) {
 			t.Fatal(err)
 		}
 		testCrossArchProg(t, p, crossTargets)
-		p.Mutate(rs, 20, ct, nil)
+		p.Mutate(rs, 20, ct, nil, nil)
 		testCrossArchProg(t, p, crossTargets)
 		p, _ = Minimize(p, -1, false, func(*Prog, int) bool {
 			return rs.Int63()%2 == 0
@@ -216,7 +222,7 @@ func TestSpecialStructs(t *testing.T) {
 			t.Run(special, func(t *testing.T) {
 				var typ Type
 				for i := 0; i < len(target.Syscalls) && typ == nil; i++ {
-					ForeachCallType(target.Syscalls[i], func(t Type, ctx TypeCtx) {
+					ForeachCallType(target.Syscalls[i], func(t Type, ctx *TypeCtx) {
 						if ctx.Dir == DirOut {
 							return
 						}
@@ -467,48 +473,4 @@ func TestSanitizeRandom(t *testing.T) {
 			}
 		}
 	})
-}
-
-func TestFixupEpoch(t *testing.T) {
-	p := &Prog{Calls: []*Call{
-		{Thread: 0, Epoch: 0},
-		{Thread: 0, Epoch: 0},
-		{Thread: 0, Epoch: 0},
-		{Thread: 0, Epoch: 0},
-	}}
-	p.fixupEpoch()
-	for i, c := range p.Calls {
-		if c.Epoch != uint64(i) {
-			t.Errorf("wrong epoch, expected %v, got %v", i, c.Epoch)
-		}
-	}
-}
-
-func TestFixupEpochRazzer(t *testing.T) {
-	p0 := &Prog{Calls: []*Call{
-		{Thread: 0, Epoch: 0},
-		{Thread: 0, Epoch: 2},
-		{Thread: 1, Epoch: 1},
-		{Thread: 1, Epoch: 2},
-	},
-		Threaded: true,
-	}
-	p1 := &Prog{Calls: []*Call{
-		{Thread: 0, Epoch: 0},
-		{Thread: 0, Epoch: 2},
-		{Thread: 1, Epoch: 1},
-		{Thread: 1, Epoch: 2},
-	},
-		Threaded: true,
-	}
-	p0.fixupEpoch()
-	for i := 0; i < len(p0.Calls); i++ {
-		c0, c1 := p0.Calls[i], p1.Calls[i]
-		if c0.Thread != c1.Thread {
-			t.Errorf("wrong thread %v, %v", c0.Thread, c1.Thread)
-		}
-		if c0.Epoch != c1.Epoch {
-			t.Errorf("wrong epoch %v, %v", c0.Epoch, c1.Epoch)
-		}
-	}
 }

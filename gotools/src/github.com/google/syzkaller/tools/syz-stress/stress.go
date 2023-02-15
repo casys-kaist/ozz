@@ -104,13 +104,13 @@ func main() {
 				if *flagGenerate && len(corpus) == 0 || i%4 != 0 {
 					p = target.Generate(rs, prog.RecommendedCalls, ct)
 					execute(pid, env, execOpts, p)
-					p.Mutate(rs, prog.RecommendedCalls, ct, corpus)
+					p.Mutate(rs, prog.RecommendedCalls, ct, nil, corpus)
 					execute(pid, env, execOpts, p)
 				} else {
 					p = corpus[rnd.Intn(len(corpus))].Clone()
-					p.Mutate(rs, prog.RecommendedCalls, ct, corpus)
+					p.Mutate(rs, prog.RecommendedCalls, ct, nil, corpus)
 					execute(pid, env, execOpts, p)
-					p.Mutate(rs, prog.RecommendedCalls, ct, corpus)
+					p.Mutate(rs, prog.RecommendedCalls, ct, nil, corpus)
 					execute(pid, env, execOpts, p)
 				}
 			}
@@ -168,6 +168,9 @@ func createIPCConfig(target *prog.Target, features *host.Features, featuresFlags
 	if featuresFlags["devlink_pci"].Enabled && features[host.FeatureDevlinkPCI].Enabled {
 		config.Flags |= ipc.FlagEnableDevlinkPCI
 	}
+	if featuresFlags["nic_vf"].Enabled && features[host.FeatureNicVF].Enabled {
+		config.Flags |= ipc.FlagEnableNicVF
+	}
 	if featuresFlags["vhci"].Enabled && features[host.FeatureVhciInjection].Enabled {
 		config.Flags |= ipc.FlagEnableVhciInjection
 	}
@@ -186,30 +189,23 @@ func buildCallList(target *prog.Target, enabled []string) map[*prog.Syscall]bool
 		}
 		return calls
 	}
-	calls, disabled, err := host.DetectSupportedSyscalls(target, "none")
-	if err != nil {
-		log.Fatalf("failed to detect host supported syscalls: %v", err)
-	}
+
+	enabledSyscalls := make(map[*prog.Syscall]bool)
 	if len(enabled) != 0 {
 		syscallsIDs, err := mgrconfig.ParseEnabledSyscalls(target, enabled, nil)
 		if err != nil {
 			log.Fatalf("failed to parse enabled syscalls: %v", err)
 		}
-		enabledSyscalls := make(map[*prog.Syscall]bool)
 		for _, id := range syscallsIDs {
 			enabledSyscalls[target.Syscalls[id]] = true
 		}
-		for c := range calls {
-			if !enabledSyscalls[c] {
-				delete(calls, c)
-			}
-		}
-		for c := range disabled {
-			if !enabledSyscalls[c] {
-				delete(disabled, c)
-			}
-		}
 	}
+
+	calls, disabled, err := host.DetectSupportedSyscalls(target, "none", enabledSyscalls)
+	if err != nil {
+		log.Fatalf("failed to detect host supported syscalls: %v", err)
+	}
+
 	for c, reason := range disabled {
 		log.Logf(0, "unsupported syscall: %v: %v", c.Name, reason)
 	}

@@ -74,8 +74,7 @@ static void os_init(int argc, char** argv, char* data, size_t data_size)
 	prctl(PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0);
 	is_kernel_64_bit = detect_kernel_bitness();
 	if (!is_kernel_64_bit)
-		// XXX: In this project, we support only 64-bit
-		// kernels.
+		// XXX: In this project, we support only 64-bit kernels.
 		fail("kernel is not 64 bit");
 	is_gvisor = detect_gvisor();
 	if (is_gvisor)
@@ -86,12 +85,15 @@ static void os_init(int argc, char** argv, char* data, size_t data_size)
 	// One observed case before: executor had a mapping above the data mapping (output region),
 	// while C repros did not have that mapping above, as the result in one case VMA had next link,
 	// while in the other it didn't and it caused a bug to not reproduce with the C repro.
-	if (mmap(data - SYZ_PAGE_SIZE, SYZ_PAGE_SIZE, PROT_NONE, MAP_ANON | MAP_PRIVATE | MAP_FIXED, -1, 0) != data - SYZ_PAGE_SIZE)
-		fail("mmap of left data PROT_NONE page failed");
-	if (mmap(data, data_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_ANON | MAP_PRIVATE | MAP_FIXED, -1, 0) != data)
-		fail("mmap of data segment failed");
-	if (mmap(data + data_size, SYZ_PAGE_SIZE, PROT_NONE, MAP_ANON | MAP_PRIVATE | MAP_FIXED, -1, 0) != data + data_size)
-		fail("mmap of right data PROT_NONE page failed");
+	void* got = mmap(data - SYZ_PAGE_SIZE, SYZ_PAGE_SIZE, PROT_NONE, MAP_ANON | MAP_PRIVATE | MAP_FIXED, -1, 0);
+	if (data - SYZ_PAGE_SIZE != got)
+		failmsg("mmap of left data PROT_NONE page failed", "want %p, got %p", data - SYZ_PAGE_SIZE, got);
+	got = mmap(data, data_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_ANON | MAP_PRIVATE | MAP_FIXED, -1, 0);
+	if (data != got)
+		failmsg("mmap of data segment failed", "want %p, got %p", data, got);
+	got = mmap(data + data_size, SYZ_PAGE_SIZE, PROT_NONE, MAP_ANON | MAP_PRIVATE | MAP_FIXED, -1, 0);
+	if (data + data_size != got)
+		failmsg("mmap of right data PROT_NONE page failed", "want %p, got %p", data + data_size, got);
 }
 
 static intptr_t execute_syscall(const call_t* c, intptr_t a[kMaxArgs])
@@ -129,20 +131,32 @@ static void cover_open(cover_t* cov, bool extra)
 	if (ioctl(cov->fd, cov_init_trace, cover_size))
 		failmsg("cover init trace write failed", "fd=%d", cov->fd);
 	uint64 mmap_alloc_scale = (cov->type == code_coverage ? (is_kernel_64_bit ? 8 : 4) : sizeof(struct kmemcov_access));
-	size_t mmap_alloc_size = cover_size * mmap_alloc_scale;
-	cov->data = (char*)mmap(NULL, mmap_alloc_size,
-				PROT_READ | PROT_WRITE, MAP_SHARED, cov->fd, 0);
-	if (cov->data == MAP_FAILED)
-		failmsg("cover mmap failed", "fd=%d", cov->fd);
-	cov->data_end = cov->data + mmap_alloc_size;
+	cov->mmap_alloc_size = cover_size * mmap_alloc_scale;
 }
 
 static void cover_protect(cover_t* cov)
 {
 }
 
+#if SYZ_EXECUTOR_USES_SHMEM
 static void cover_unprotect(cover_t* cov)
 {
+}
+#endif
+
+static void cover_mmap(cover_t* cov)
+{
+	if (cov->data != NULL)
+		fail("cover_mmap invoked on an already mmapped cover_t object");
+	if (cov->mmap_alloc_size == 0)
+		fail("cover_t structure is corrupted");
+	cov->data = (char*)mmap(NULL, cov->mmap_alloc_size,
+				PROT_READ | PROT_WRITE, MAP_SHARED, cov->fd, 0);
+	if (cov->data == MAP_FAILED)
+		exitf("cover mmap failed, fd=%d", cov->fd);
+	cov->data_end = cov->data + cov->mmap_alloc_size;
+	cov->data_offset = is_kernel_64_bit ? sizeof(uint64_t) : sizeof(uint32_t);
+	cov->pc_offset = 0;
 }
 
 static void cover_kcov_enable(cover_t* cov, bool collect_comps, bool extra)
@@ -165,7 +179,8 @@ static void cover_kcov_enable(cover_t* cov, bool collect_comps, bool extra)
 	arg.common_handle = kcov_remote_handle(KCOV_SUBSYSTEM_COMMON, procid + 1);
 	arg.handles[0] = kcov_remote_handle(KCOV_SUBSYSTEM_USB, procid + 1);
 	if (ioctl(cov->fd, KCOV_REMOTE_ENABLE, &arg))
-		exitf("remote cover enable write trace failed, fd=%d", cov->fd);
+		exitf("remote cover enable write trace failed");
+	exitf("remote cover enable write trace failed, fd=%d", cov->fd);
 }
 
 static void cover_kmemcov_enable(cover_t* cov, bool collect_comps, bool extra)
@@ -223,6 +238,7 @@ static void cover_collect(cover_t* cov)
 		cov->size = *(uint32*)cov->data;
 }
 
+#if SYZ_EXECUTOR_USES_SHMEM
 static bool use_cover_edges(uint32 pc)
 {
 	return true;
@@ -241,6 +257,7 @@ static bool use_cover_edges(uint64 pc)
 #endif
 	return true;
 }
+#endif
 
 static bool detect_kernel_bitness()
 {
@@ -292,6 +309,17 @@ NORETURN void doexit(int status)
 	}
 }
 
+// If we need to kill just a single thread (e.g. after cloning), exit_group is not
+// the right choice - it will kill all threads, which might eventually lead to
+// unnecessary SYZFAIL errors.
+NORETURN void doexit_thread(int status)
+{
+	volatile unsigned i;
+	syscall(__NR_exit, status);
+	for (i = 0;; i++) {
+	}
+}
+
 #define SYZ_HAVE_FEATURES 1
 static feature_t features[] = {
     {"leak", setup_leak},
@@ -299,6 +327,5 @@ static feature_t features[] = {
     {"binfmt_misc", setup_binfmt_misc},
     {"kcsan", setup_kcsan},
     {"usb", setup_usb},
-    {"sysctl", setup_sysctl},
     {"802154", setup_802154},
 };

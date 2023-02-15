@@ -7,14 +7,9 @@ shell:
  - make kvm_guest.config: [-android]
 
 config:
- # We reduce number of vivid/netrom/rose/hcd devices to 2 because we use at most 2 procs
- # with emulation and creating these devices takes time during boot.
- - CMDLINE: [append, "root=/dev/vda console=ttyAMA0 watchdog_thresh=165 workqueue.watchdog_thresh=420 sysctl.net.core.netdev_unregister_timeout_secs=420 dummy_hcd.num=2"]
+ - CMDLINE: [append, "root=/dev/vda console=ttyAMA0"]
  # Was dropped in "arm64: Drop support for CMDLINE_EXTEND".
  - CMDLINE_EXTEND: [-v5.12]
- # See the comment in x86_64.yml re these numbers.
- - RCU_CPU_STALL_TIMEOUT: 300
- - DEFAULT_HUNG_TASK_TIMEOUT: [420, -nonoise, -kmsan, -kcsan, -kmemleak]
 
  - ARM64_TAGGED_ADDR_ABI
  - ARM64_PMEM
@@ -23,7 +18,8 @@ config:
  - ARCH_VEXPRESS
  - I2C_VERSATILE
  - CLK_SP810
- - ICST
+ - ICST: [-v5.16]
+ - CLK_ICST: [v5.16]
 
  # These are enabled by defconfig, but we don't test them (presumably).
  # Disable them to speed up kernel boot (slow in emulation).
@@ -47,14 +43,9 @@ config:
  - DRM_LIMA: n
  - DRM_PANFROST: n
  - DRM_LEGACY: n
- - FB_SMSCUFX: n
  - FB_IBM_GXT4500: n
  - SMS_SIANO_RC: n
  - V4L_PLATFORM_DRIVERS: n
- - MEDIA_SUPPORT: n
- - MEDIA_CEC_SUPPORT: n
- - MEDIA_PCI_SUPPORT: n
- - MEDIA_RADIO_SUPPORT: n
  - SPI: n
  - SSB: n
  - MMC: n
@@ -121,6 +112,7 @@ config:
  - ARCH_XGENE: n
  - ARCH_ZX: n
  - ARCH_ZYNQMP: n
+ - ARCH_NPCM: n
 
  # Disable whole menu "PCI controller drivers"
  - PCI_MVEBU: n
@@ -323,8 +315,6 @@ config:
  - VEXPRESS_CONFIG: n
  - DA8XX_MSTPRI: n
  - FSL_MC_BUS: n
- - MHI_BUS: n
- - MHI_BUS_DEBUG: n
 
  # Disable whole menu "I2C Hardware Bus support"
  - I2C_ALI1535: n

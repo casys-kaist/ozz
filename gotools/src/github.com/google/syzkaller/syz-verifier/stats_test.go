@@ -3,36 +3,37 @@
 package main
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 )
 
 func dummyStats() *Stats {
-	return &Stats{
-		TotalProgs:       24,
-		TotalMismatches:  10,
-		FlakyProgs:       4,
-		MismatchingProgs: 6,
-		Calls: map[string]*CallStats{
-			"foo": {"foo", 2, 8, map[ReturnState]bool{
-				returnState(1, 7): true,
-				returnState(3, 7): true}},
-			"bar": {"bar", 5, 6, map[ReturnState]bool{
-				crashedReturnState(): true,
-				returnState(10, 7):   true,
-				returnState(22, 7):   true}},
-			"tar": {"tar", 3, 4, map[ReturnState]bool{
-				returnState(31, 7): true,
-				returnState(17, 7): true,
-				returnState(5, 7):  true}},
-			"biz": {"biz", 0, 2, map[ReturnState]bool{}},
+	return (&Stats{
+		TotalProgs:          StatUint64{uint64: 24},
+		TotalCallMismatches: StatUint64{uint64: 10},
+		FlakyProgs:          StatUint64{uint64: 4},
+		MismatchingProgs:    StatUint64{uint64: 6},
+		Calls: StatMapStringToCallStats{
+			mapStringToCallStats: mapStringToCallStats{
+				"foo": {"foo", 2, 8, map[ReturnState]bool{
+					returnState(1, 7): true,
+					returnState(3, 7): true}},
+				"bar": {"bar", 5, 6, map[ReturnState]bool{
+					crashedReturnState(): true,
+					returnState(10, 7):   true,
+					returnState(22, 7):   true}},
+				"tar": {"tar", 3, 4, map[ReturnState]bool{
+					returnState(31, 7): true,
+					returnState(17, 7): true,
+					returnState(5, 7):  true}},
+				"biz": {"biz", 0, 2, map[ReturnState]bool{}},
+			},
 		},
-	}
+	}).Init()
 }
 
-func TestReportCallStats(t *testing.T) {
+func TestGetCallStatsTextDescription(t *testing.T) {
 	tests := []struct {
 		name, call, report string
 	}{
@@ -55,19 +56,18 @@ func TestReportCallStats(t *testing.T) {
 	for _, test := range tests {
 		s := dummyStats()
 		t.Run(test.name, func(t *testing.T) {
-			got, want := s.ReportCallStats(test.call), test.report
+			got, want := s.getCallStatsTextDescription(test.call), test.report
 			if diff := cmp.Diff(want, got); diff != "" {
-				t.Errorf("s.ReportCallStats mismatch (-want +got):\n%s", diff)
+				t.Errorf("s.getCallStatsTextDescription mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
 }
 
-func TestReportGlobalStats(t *testing.T) {
-	s := dummyStats()
-	out := bytes.Buffer{}
-	s.ReportGlobalStats(&out, float64(10))
-	got, want := out.String(),
+func TestGetTextDescription(t *testing.T) {
+	stats := dummyStats()
+
+	got, want := stats.GetTextDescription(float64(10)),
 		"total number of mismatches / total number of calls "+
 			"executed: 10 / 20 (50.00 %)\n\n"+
 			"programs / minute: 2.40\n\n"+
@@ -93,6 +93,6 @@ func TestReportGlobalStats(t *testing.T) {
 			"[\"Flags: 7, Errno: 1 (operation not permitted)\" \"Flags: 7, Errno: 3 (no such process)\"]\n\n"
 
 	if diff := cmp.Diff(want, got); diff != "" {
-		t.Errorf("s.ReportGlobalStats mismatch (-want +got):\n%s", diff)
+		t.Errorf("s.GetTextDescription mismatch (-want +got):\n%s", diff)
 	}
 }

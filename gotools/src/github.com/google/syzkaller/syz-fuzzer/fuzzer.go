@@ -36,17 +36,20 @@ import (
 )
 
 type Fuzzer struct {
-	name              string
-	outputType        OutputType
-	config            *ipc.Config
-	execOpts          *ipc.ExecOpts
-	procs             []*Proc
-	gate              *ipc.Gate
-	workQueue         *WorkQueue
-	needPoll          chan struct{}
-	choiceTable       *prog.ChoiceTable
-	collection        [CollectionCount]uint64
-	stats             [StatCount]uint64
+	name        string
+	outputType  OutputType
+	config      *ipc.Config
+	execOpts    *ipc.ExecOpts
+	procs       []*Proc
+	gate        *ipc.Gate
+	workQueue   *WorkQueue
+	needPoll    chan struct{}
+	choiceTable *prog.ChoiceTable
+	collection  [CollectionCount]uint64
+	noMutate    map[int]bool
+	// The stats field cannot unfortunately be just an uint64 array, because it
+	// results in "unaligned 64-bit atomic operation" errors on 32-bit platforms.
+	stats             []uint64
 	manager           *rpctype.RPCClient
 	target            *prog.Target
 	triagedCandidates uint32
@@ -55,6 +58,7 @@ type Fuzzer struct {
 
 	faultInjectionEnabled    bool
 	comparisonTracingEnabled bool
+	fetchRawCover            bool
 
 	corpusMu     sync.RWMutex
 	corpus       []*prog.Prog
@@ -119,7 +123,6 @@ var collectionNames = [CollectionCount]string{
 type Stat int
 
 const (
-	// Stats of fuzzing strategies
 	StatGenerate Stat = iota
 	StatFuzz
 	StatCandidate
@@ -128,22 +131,26 @@ const (
 	StatSmash
 	StatHint
 	StatSeed
+	StatCollide
+	StatBufferTooSmall
 	StatThreading
 	StatSchedule
 	StatCount
 )
 
 var statNames = [StatCount]string{
-	StatGenerate:  "exec gen",
-	StatFuzz:      "exec fuzz",
-	StatCandidate: "exec candidate",
-	StatTriage:    "exec triage",
-	StatMinimize:  "exec minimize",
-	StatSmash:     "exec smash",
-	StatHint:      "exec hints",
-	StatSeed:      "exec seeds",
-	StatThreading: "exec threadings",
-	StatSchedule:  "exec schedulings",
+	StatGenerate:       "exec gen",
+	StatFuzz:           "exec fuzz",
+	StatCandidate:      "exec candidate",
+	StatTriage:         "exec triage",
+	StatMinimize:       "exec minimize",
+	StatSmash:          "exec smash",
+	StatHint:           "exec hints",
+	StatSeed:           "exec seeds",
+	StatCollide:        "exec collide",
+	StatThreading:      "exec threadings",
+	StatSchedule:       "exec schedulings",
+	StatBufferTooSmall: "buffer too small",
 }
 
 type OutputType int
@@ -159,6 +166,9 @@ func createIPCConfig(features *host.Features, config *ipc.Config) {
 	if features[host.FeatureExtraCoverage].Enabled {
 		config.Flags |= ipc.FlagExtraCover
 	}
+	if features[host.FeatureDelayKcovMmap].Enabled {
+		config.Flags |= ipc.FlagDelayKcovMmap
+	}
 	if features[host.FeatureNetInjection].Enabled {
 		config.Flags |= ipc.FlagEnableTun
 	}
@@ -170,6 +180,9 @@ func createIPCConfig(features *host.Features, config *ipc.Config) {
 	config.Flags |= ipc.FlagEnableCloseFds
 	if features[host.FeatureDevlinkPCI].Enabled {
 		config.Flags |= ipc.FlagEnableDevlinkPCI
+	}
+	if features[host.FeatureNicVF].Enabled {
+		config.Flags |= ipc.FlagEnableNicVF
 	}
 	if features[host.FeatureVhciInjection].Enabled {
 		config.Flags |= ipc.FlagEnableVhciInjection
@@ -185,16 +198,17 @@ func main() {
 	debug.SetGCPercent(50)
 
 	var (
-		flagName    = flag.String("name", "test", "unique name for manager")
-		flagOS      = flag.String("os", runtime.GOOS, "target OS")
-		flagArch    = flag.String("arch", runtime.GOARCH, "target arch")
-		flagManager = flag.String("manager", "", "manager rpc address")
-		flagProcs   = flag.Int("procs", 1, "number of parallel test processes")
-		flagOutput  = flag.String("output", "stdout", "write programs to none/stdout/dmesg/file")
-		flagTest    = flag.Bool("test", false, "enable image testing mode")      // used by syz-ci
-		flagRunTest = flag.Bool("runtest", false, "enable program testing mode") // used by pkg/runtest
-		flagGen     = flag.Bool("gen", true, "generate/mutate inputs")
-		flagShifter = flag.String("shifter", "./shifter", "path to the shifter")
+		flagName     = flag.String("name", "test", "unique name for manager")
+		flagOS       = flag.String("os", runtime.GOOS, "target OS")
+		flagArch     = flag.String("arch", runtime.GOARCH, "target arch")
+		flagManager  = flag.String("manager", "", "manager rpc address")
+		flagProcs    = flag.Int("procs", 1, "number of parallel test processes")
+		flagOutput   = flag.String("output", "stdout", "write programs to none/stdout/dmesg/file")
+		flagTest     = flag.Bool("test", false, "enable image testing mode")      // used by syz-ci
+		flagRunTest  = flag.Bool("runtest", false, "enable program testing mode") // used by pkg/runtest
+		flagRawCover = flag.Bool("raw_cover", false, "fetch raw coverage")
+		flagGen      = flag.Bool("gen", true, "generate/mutate inputs")
+		flagShifter  = flag.String("shifter", "./shifter", "path to the shifter")
 	)
 	defer tool.Init()()
 	outputType := parseOutputType(*flagOutput)
@@ -208,6 +222,9 @@ func main() {
 	config, execOpts, err := ipcconfig.Default(target)
 	if err != nil {
 		log.Fatalf("failed to create default ipc config: %v", err)
+	}
+	if *flagRawCover {
+		execOpts.Flags &^= ipc.FlagDedupCover
 	}
 	timeouts := config.Timeouts
 	sandbox := ipc.FlagsToSandbox(config.Flags)
@@ -238,10 +255,10 @@ func main() {
 	log.Logf(0, "dialing manager at %v", *flagManager)
 	manager, err := rpctype.NewRPCClient(*flagManager, timeouts.Scale)
 	if err != nil {
-		log.Fatalf("failed to connect to manager: %v ", err)
+		log.Fatalf("failed to create an RPC client: %v ", err)
 	}
 
-	log.Logf(0, "connecting to manager...")
+	log.Logf(1, "connecting to manager...")
 	a := &rpctype.ConnectArgs{
 		Name:        *flagName,
 		MachineInfo: machineInfo,
@@ -249,9 +266,8 @@ func main() {
 	}
 	r := &rpctype.ConnectRes{}
 	if err := manager.Call("Manager.Connect", a, r); err != nil {
-		log.Fatalf("failed to connect to manager: %v ", err)
+		log.Fatalf("failed to call Manager.Connect(): %v ", err)
 	}
-	log.Logf(0, "connected to manager...")
 	featureFlags, err := csource.ParseFeaturesFlags("none", "none", true)
 	if err != nil {
 		log.Fatal(err)
@@ -329,6 +345,10 @@ func main() {
 
 		checkResult: r.CheckResult,
 		generate:    *flagGen,
+
+		fetchRawCover: *flagRawCover,
+		noMutate:      r.NoMutateCalls,
+		stats:         make([]uint64, StatCount),
 	}
 	gateCallback := fuzzer.useBugFrames(r, *flagProcs)
 	fuzzer.gate = ipc.NewGate(2**flagProcs, gateCallback)
@@ -339,7 +359,6 @@ func main() {
 		log.Logf(0, "fetching corpus: %v, signal %v/%v (executing program)",
 			len(fuzzer.corpus), len(fuzzer.corpusSignal), len(fuzzer.maxSignal))
 	}
-	log.Logf(0, "Initial poll done")
 	calls := make(map[*prog.Syscall]bool)
 	for _, id := range r.CheckResult.EnabledCalls[sandbox] {
 		calls[target.Syscalls[id]] = true
@@ -561,31 +580,30 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 	if needCandidates && len(r.Candidates) == 0 && atomic.LoadUint32(&fuzzer.triagedCandidates) == 0 {
 		atomic.StoreUint32(&fuzzer.triagedCandidates, 1)
 	}
-
 	return len(r.NewInputs) != 0 || len(r.Candidates) != 0 || maxSignal.Len() != 0
 }
 
-func (fuzzer *Fuzzer) sendInputToManager(inp rpctype.RPCInput) {
+func (fuzzer *Fuzzer) sendInputToManager(inp rpctype.Input) {
 	a := &rpctype.NewInputArgs{
-		Name:     fuzzer.name,
-		RPCInput: inp,
+		Name:  fuzzer.name,
+		Input: inp,
 	}
 	if err := fuzzer.manager.Call("Manager.NewInput", a, nil); err != nil {
 		log.Fatalf("Manager.NewInput call failed: %v", err)
 	}
 }
 
-func (fuzzer *Fuzzer) sendScheduledInputToManager(inp rpctype.RPCScheduledInput) {
+func (fuzzer *Fuzzer) sendScheduledInputToManager(inp rpctype.ScheduledInput) {
 	a := &rpctype.NewScheduledInputArgs{
-		Name:              fuzzer.name,
-		RPCScheduledInput: inp,
+		Name:           fuzzer.name,
+		ScheduledInput: inp,
 	}
 	if err := fuzzer.manager.Call("Manager.NewScheduledInput", a, nil); err != nil {
 		log.Fatalf("Manager.NewScheduledInput call failed: %v", err)
 	}
 }
 
-func (fuzzer *Fuzzer) addInputFromAnotherFuzzer(inp rpctype.RPCInput) {
+func (fuzzer *Fuzzer) addInputFromAnotherFuzzer(inp rpctype.Input) {
 	p := fuzzer.deserializeInput(inp.Prog)
 	if p == nil {
 		return
@@ -595,7 +613,7 @@ func (fuzzer *Fuzzer) addInputFromAnotherFuzzer(inp rpctype.RPCInput) {
 	fuzzer.addInputToCorpus(p, sign, sig)
 }
 
-func (fuzzer *Fuzzer) addCandidateInput(candidate rpctype.RPCCandidate) {
+func (fuzzer *Fuzzer) addCandidateInput(candidate rpctype.Candidate) {
 	p := fuzzer.deserializeInput(candidate.Prog)
 	if p == nil {
 		return
@@ -698,7 +716,6 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 		prio = 1
 	}
 	fuzzer.__addInputToCorpus(p, sig, prio)
-
 	if !sign.Empty() {
 		fuzzer.signalMu.Lock()
 		fuzzer.corpusSignal.Merge(sign)

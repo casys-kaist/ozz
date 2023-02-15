@@ -31,10 +31,12 @@ FROM gcr.io/syzkaller/env
 #	create-image.sh -a s390x -d buster
 
 RUN dpkg --add-architecture i386 && \
-	apt-get update && \
-	DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+	apt-get update --allow-releaseinfo-change && \
+	DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
 	# required to build root images.
 	debootstrap ssh-tools qemu-user-static \
+	# required for gcloud sdk.
+	python2 \
 	&& \
 	apt-get -y autoremove && \
 	apt-get clean autoclean && \
@@ -48,9 +50,9 @@ ENV SOURCEDIR_NETBSD /syzkaller/netbsd
 ENV SOURCEDIR_AKAROS /syzkaller/akaros
 
 # Install gcloud sdk for dashboard/app tests.
-RUN curl https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-294.0.0-linux-x86_64.tar.gz | tar -C /usr/local -xz
+RUN curl https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-360.0.0-linux-x86_64.tar.gz | tar -C /usr/local -xz
 ENV PATH /usr/local/google-cloud-sdk/bin:$PATH
-RUN gcloud components install --quiet app-engine-python app-engine-go cloud-datastore-emulator
+RUN gcloud components install --quiet app-engine-python app-engine-go app-engine-python-extras cloud-datastore-emulator
 RUN chmod 0777 /usr/local/google-cloud-sdk
 
 RUN echo "export PS1='syz-big-env🈶 '" > /syzkaller/.bashrc

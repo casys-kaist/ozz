@@ -43,6 +43,10 @@ typedef signed int ssize_t;
 #include <errno.h>
 #endif
 
+#if !SYZ_EXECUTOR
+/*{{{SYSCALL_DEFINES}}}*/
+#endif
+
 #if SYZ_EXECUTOR && !GOOS_linux
 #if !GOOS_windows
 #include <unistd.h>
@@ -53,7 +57,16 @@ NORETURN void doexit(int status)
 	for (;;) {
 	}
 }
+#if !GOOS_fuchsia
+NORETURN void doexit_thread(int status)
+{
+	// For BSD systems, _exit seems to do exactly what's needed.
+	doexit(status);
+}
 #endif
+#endif
+
+#include "hypercall.h"
 
 static void enable_kssb(void)
 {
@@ -85,6 +98,7 @@ static __thread unsigned int threadid = -1;
 #include <sys/syscall.h>
 #endif
 
+static __thread int clone_ongoing;
 static __thread int skip_segv;
 static __thread jmp_buf segv_env;
 
@@ -104,6 +118,17 @@ static void segv_handler(int sig, siginfo_t* info, void* ctx)
 	// We additionally opportunistically check that the faulty address
 	// is not within executable data region, because such accesses can corrupt
 	// output region and then fuzzer will fail on corrupted data.
+
+	if (__atomic_load_n(&clone_ongoing, __ATOMIC_RELAXED) != 0) {
+		// During clone, we always exit on a SEGV. If we do not, then
+		// it might prevent us from running child-specific code. E.g.
+		// if an invalid stack is passed to the clone() call, then it
+		// will trigger a seg fault, which in turn causes the child to
+		// jump over the NONFAILING macro and continue execution in
+		// parallel with the parent.
+		doexit_thread(sig);
+	}
+
 	uintptr_t addr = (uintptr_t)info->si_addr;
 	const uintptr_t prog_start = 1 << 20;
 	const uintptr_t prog_end = 100 << 20;
@@ -115,9 +140,8 @@ static void segv_handler(int sig, siginfo_t* info, void* ctx)
 	// address of the faulting instruction rather than zero as other
 	// operating systems seem to do.  However, such faults should always be
 	// ignored.
-	if (sig == SIGBUS) {
+	if (sig == SIGBUS)
 		valid = 1;
-	}
 #endif
 	if (skip && valid) {
 		debug("SIGSEGV on %p, skipping\n", (void*)addr);
@@ -237,6 +261,19 @@ static void use_temporary_dir(void)
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#if GOOS_freebsd
+// Unset file flags which might inhibit unlinking.
+static void reset_flags(const char* filename)
+{
+	struct stat st;
+	if (lstat(filename, &st))
+		exitf("lstat(%s) failed", filename);
+	st.st_flags &= ~(SF_NOUNLINK | UF_NOUNLINK | SF_IMMUTABLE | UF_IMMUTABLE | SF_APPEND | UF_APPEND);
+	if (lchflags(filename, st.st_flags))
+		exitf("lchflags(%s) failed", filename);
+}
+#endif
+
 // We need to prevent the compiler from unrolling the while loop by using the gcc's noinline attribute
 // because otherwise it could trigger the compiler warning about a potential format truncation
 // when a filename is constructed with help of snprintf. This warning occurs because by unrolling
@@ -273,21 +310,44 @@ static void __attribute__((noinline)) remove_dir(const char* dir)
 			remove_dir(filename);
 			continue;
 		}
-		if (unlink(filename))
+		if (unlink(filename)) {
+#if GOOS_freebsd
+			if (errno == EPERM) {
+				reset_flags(filename);
+				reset_flags(dir);
+				if (unlink(filename) == 0)
+					continue;
+			}
+#endif
 			exitf("unlink(%s) failed", filename);
+		}
 	}
 	closedir(dp);
-	if (rmdir(dir))
+	while (rmdir(dir)) {
+#if GOOS_freebsd
+		if (errno == EPERM) {
+			reset_flags(dir);
+			if (rmdir(dir) == 0)
+				break;
+		}
+#endif
 		exitf("rmdir(%s) failed", dir);
+	}
 }
 #endif
 #endif
 
 #if !GOOS_linux && !GOOS_netbsd
-#if SYZ_EXECUTOR
+#if SYZ_EXECUTOR || SYZ_FAULT
 static int inject_fault(int nth)
 {
 	return 0;
+}
+#endif
+
+#if SYZ_FAULT
+static void setup_fault()
+{
 }
 #endif
 
@@ -462,6 +522,12 @@ static uint16 csum_inet_digest(struct csum_inet* csum)
 #error "unknown OS"
 #endif
 
+#if SYZ_TEST_COMMON_EXT_EXAMPLE
+#include "common_ext_example.h"
+#else
+#include "common_ext.h"
+#endif
+
 #if SYZ_EXECUTOR || __NR_syz_execute_func
 // syz_execute_func(text ptr[in, text[taget]])
 static long syz_execute_func(volatile long text)
@@ -522,10 +588,6 @@ static void loop(void)
 	fprintf(stderr, "### start\n");
 #endif
 	int i, call, thread;
-#if SYZ_COLLIDE
-	int collide = 0;
-again:
-#endif
 	for (call = 0; call < /*{{{NUM_CALLS}}}*/; call++) {
 		for (thread = 0; thread < (int)(sizeof(threads) / sizeof(threads[0])); thread++) {
 			struct thread_t* th = &threads[thread];
@@ -542,8 +604,8 @@ again:
 			th->call = call;
 			__atomic_fetch_add(&running, 1, __ATOMIC_RELAXED);
 			event_set(&th->ready);
-#if SYZ_COLLIDE
-			if (collide && (call % 2) == 0)
+#if SYZ_ASYNC
+			if (/*{{{ASYNC_CONDITIONS}}}*/)
 				break;
 #endif
 			event_timedwait(&th->done, /*{{{CALL_TIMEOUT_MS}}}*/);
@@ -554,12 +616,6 @@ again:
 		sleep_ms(1);
 #if SYZ_HAVE_CLOSE_FDS
 	close_fds();
-#endif
-#if SYZ_COLLIDE
-	if (!collide) {
-		collide = 1;
-		goto again;
-	}
 #endif
 }
 #endif
@@ -629,6 +685,9 @@ static void loop(void)
 #if SYZ_HAVE_SETUP_TEST
 			setup_test();
 #endif
+#if SYZ_HAVE_SETUP_EXT_TEST
+			setup_ext_test();
+#endif
 #if GOOS_akaros
 #if SYZ_EXECUTOR
 			dup2(child_pipe[0], kInPipeFd);
@@ -676,7 +735,8 @@ static void loop(void)
 			if (waitpid(-1, &status, WNOHANG | WAIT_FLAGS) == pid)
 				break;
 			sleep_ms(1);
-#if SYZ_EXECUTOR && SYZ_EXECUTOR_USES_SHMEM
+#if SYZ_EXECUTOR
+#if SYZ_EXECUTOR_USES_SHMEM
 			// Even though the test process executes exit at the end
 			// and execution time of each syscall is bounded by syscall_timeout_ms (~50ms),
 			// this backup watchdog is necessary and its performance is important.
@@ -699,13 +759,13 @@ static void loop(void)
 			if ((now - start < program_timeout_ms) &&
 			    (now - start < min_timeout_ms || now - last_executed < inactive_timeout_ms))
 				continue;
-#elif SYZ_EXECUTOR
+#else
 			if (current_time_ms() - start < program_timeout_ms)
 				continue;
+#endif
 #else
-		if (current_time_ms() - start < /*{{{PROGRAM_TIMEOUT_MS}}}*/) {
-			continue;
-		}
+			if (current_time_ms() - start < /*{{{PROGRAM_TIMEOUT_MS}}}*/)
+				continue;
 #endif
 			debug("killing hanging pid %d, executed=%d\n", pid, executed_calls);
 			kill_and_wait(pid, &status);
@@ -740,7 +800,6 @@ static void loop(void)
 #endif
 
 #if !SYZ_EXECUTOR
-/*{{{SYSCALL_DEFINES}}}*/
 
 /*{{{RESULTS}}}*/
 
@@ -777,8 +836,14 @@ int main(void)
 	/*{{{MMAP_DATA}}}*/
 #endif
 
+#if SYZ_HAVE_SETUP_EXT
+	setup_ext();
+#endif
 #if SYZ_SYSCTL
 	setup_sysctl();
+#endif
+#if SYZ_CGROUPS
+	setup_cgroups();
 #endif
 #if SYZ_BINFMT_MISC
 	setup_binfmt_misc();

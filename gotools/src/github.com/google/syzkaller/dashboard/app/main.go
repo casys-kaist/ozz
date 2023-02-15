@@ -5,21 +5,33 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
+	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 	"time"
 
+	"cloud.google.com/go/logging"
+	"cloud.google.com/go/logging/logadmin"
 	"github.com/google/syzkaller/dashboard/dashapi"
 	"github.com/google/syzkaller/pkg/email"
 	"github.com/google/syzkaller/pkg/html"
 	"github.com/google/syzkaller/pkg/vcs"
 	"golang.org/x/net/context"
-	db "google.golang.org/appengine/datastore"
-	"google.golang.org/appengine/log"
-	"google.golang.org/appengine/memcache"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/api/iterator"
+	"google.golang.org/appengine/v2"
+	db "google.golang.org/appengine/v2/datastore"
+	"google.golang.org/appengine/v2/log"
+	"google.golang.org/appengine/v2/memcache"
+	proto "google.golang.org/genproto/googleapis/appengine/logging/v1"
+	ltype "google.golang.org/genproto/googleapis/logging/type"
 )
 
 // This file contains web UI http handlers.
@@ -42,29 +54,85 @@ func initHTTPHandlers() {
 		http.Handle("/"+ns, handlerWrapper(handleMain))
 		http.Handle("/"+ns+"/fixed", handlerWrapper(handleFixed))
 		http.Handle("/"+ns+"/invalid", handlerWrapper(handleInvalid))
+		http.Handle("/"+ns+"/graph/bugs", handlerWrapper(handleKernelHealthGraph))
+		http.Handle("/"+ns+"/graph/lifetimes", handlerWrapper(handleGraphLifetimes))
+		http.Handle("/"+ns+"/graph/fuzzing", handlerWrapper(handleGraphFuzzing))
+		http.Handle("/"+ns+"/graph/crashes", handlerWrapper(handleGraphCrashes))
+		http.Handle("/"+ns+"/repos", handlerWrapper(handleRepos))
+		http.Handle("/"+ns+"/bug-stats", handlerWrapper(handleBugStats))
 	}
 	http.HandleFunc("/cache_update", cacheUpdate)
+	http.HandleFunc("/deprecate_assets", handleDeprecateAssets)
+	http.HandleFunc("/retest_repros", handleRetestRepros)
 }
 
 type uiMainPage struct {
 	Header         *uiHeader
 	Now            time.Time
 	Decommissioned bool
-	Managers       []*uiManager
+	Managers       *uiManagerList
 	Groups         []*uiBugGroup
+}
+
+type uiManagerList struct {
+	RepoLink string
+	List     []*uiManager
+}
+
+func makeManagerList(managers []*uiManager, ns string) *uiManagerList {
+	return &uiManagerList{
+		RepoLink: fmt.Sprintf("/%s/repos", ns),
+		List:     managers,
+	}
 }
 
 type uiTerminalPage struct {
 	Header *uiHeader
 	Now    time.Time
 	Bugs   *uiBugGroup
+	Stats  *uiBugStats
+}
+
+type uiBugStats struct {
+	Total          int
+	AutoObsoleted  int
+	ReproObsoleted int
+	UserObsoleted  int
+}
+
+func (stats *uiBugStats) Record(bug *Bug, bugReporting *BugReporting) {
+	stats.Total++
+	switch bug.Status {
+	case BugStatusInvalid:
+		if bugReporting.Auto {
+			stats.AutoObsoleted++
+		} else {
+			stats.UserObsoleted++
+		}
+		if bug.StatusReason == dashapi.InvalidatedByRevokedRepro {
+			stats.ReproObsoleted++
+		}
+	}
+}
+
+type uiReposPage struct {
+	Header *uiHeader
+	Repos  []*uiRepo
+}
+
+type uiRepo struct {
+	URL    string
+	Branch string
+	Alias  string
 }
 
 type uiAdminPage struct {
 	Header        *uiHeader
 	Log           []byte
-	Managers      []*uiManager
-	Jobs          *uiJobList
+	Managers      *uiManagerList
+	RecentJobs    *uiJobList
+	PendingJobs   *uiJobList
+	RunningJobs   *uiJobList
 	MemcacheStats *memcache.Statistics
 }
 
@@ -78,7 +146,6 @@ type uiManager struct {
 	FailedBuildBugLink    string
 	FailedSyzBuildBugLink string
 	LastActive            time.Time
-	LastActiveBad         bool // highlight LastActive in red
 	CurrentUpTime         time.Duration
 	MaxCorpus             int64
 	MaxCover              int64
@@ -119,7 +186,7 @@ type uiBugPage struct {
 	DupOf         *uiBugGroup
 	Dups          *uiBugGroup
 	Similar       *uiBugGroup
-	SampleReport  []byte
+	SampleReport  template.HTML
 	Crashes       *uiCrashTable
 	FixBisections *uiCrashTable
 	TestPatchJobs *uiJobList
@@ -140,6 +207,7 @@ type uiBugGroup struct {
 }
 
 type uiJobList struct {
+	Title  string
 	PerBug bool
 	Jobs   []*uiJob
 }
@@ -166,6 +234,12 @@ type uiBug struct {
 	MissingOn      []string
 	NumManagers    int
 	LastActivity   time.Time
+	Subsystems     []*uiBugSubsystem
+}
+
+type uiBugSubsystem struct {
+	Name string
+	Link string
 }
 
 type uiCrash struct {
@@ -174,11 +248,19 @@ type uiCrash struct {
 	Time            time.Time
 	Maintainers     string
 	LogLink         string
+	LogHasStrace    bool
 	ReportLink      string
 	ReproSyzLink    string
 	ReproCLink      string
+	ReproIsRevoked  bool
 	MachineInfoLink string
+	Assets          []*uiAsset
 	*uiBuild
+}
+
+type uiAsset struct {
+	Title       string
+	DownloadURL string
 }
 
 type uiCrashTable struct {
@@ -223,12 +305,19 @@ func handleMain(c context.Context, w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	accessLevel := accessLevel(c, r)
-	manager := r.FormValue("manager")
+	onlyManager := r.FormValue("only_manager")
+	manager := onlyManager
+	if manager == "" {
+		manager = r.FormValue("manager")
+	}
 	managers, err := loadManagers(c, accessLevel, hdr.Namespace, manager)
 	if err != nil {
 		return err
 	}
-	groups, err := fetchNamespaceBugs(c, accessLevel, hdr.Namespace, manager)
+	groups, err := fetchNamespaceBugs(c, accessLevel, hdr.Namespace,
+		manager, onlyManager != "",
+		r.FormValue("subsystem"),
+	)
 	if err != nil {
 		return err
 	}
@@ -240,16 +329,17 @@ func handleMain(c context.Context, w http.ResponseWriter, r *http.Request) error
 		Decommissioned: config.Namespaces[hdr.Namespace].Decommissioned,
 		Now:            timeNow(c),
 		Groups:         groups,
-		Managers:       managers,
+		Managers:       makeManagerList(managers, hdr.Namespace),
 	}
 	return serveTemplate(w, "main.html", data)
 }
 
 func handleFixed(c context.Context, w http.ResponseWriter, r *http.Request) error {
 	return handleTerminalBugList(c, w, r, &TerminalBug{
-		Status:    BugStatusFixed,
-		Subpage:   "/fixed",
-		ShowPatch: true,
+		Status:      BugStatusFixed,
+		Subpage:     "/fixed",
+		ShowPatch:   true,
+		ShowPatched: true,
 	})
 }
 
@@ -258,13 +348,34 @@ func handleInvalid(c context.Context, w http.ResponseWriter, r *http.Request) er
 		Status:    BugStatusInvalid,
 		Subpage:   "/invalid",
 		ShowPatch: false,
+		ShowStats: true,
+	})
+}
+
+func handleRepos(c context.Context, w http.ResponseWriter, r *http.Request) error {
+	hdr, err := commonHeader(c, r, w, "")
+	if err != nil {
+		return err
+	}
+	repos, err := loadRepos(c, accessLevel(c, r), hdr.Namespace)
+	if err != nil {
+		return err
+	}
+	return serveTemplate(w, "repos.html", &uiReposPage{
+		Header: hdr,
+		Repos:  repos,
 	})
 }
 
 type TerminalBug struct {
-	Status    int
-	Subpage   string
-	ShowPatch bool
+	Status      int
+	Subpage     string
+	ShowPatch   bool
+	ShowPatched bool
+	ShowStats   bool
+	Manager     string
+	OneManager  bool
+	Subsystem   string
 }
 
 func handleTerminalBugList(c context.Context, w http.ResponseWriter, r *http.Request, typ *TerminalBug) error {
@@ -274,15 +385,34 @@ func handleTerminalBugList(c context.Context, w http.ResponseWriter, r *http.Req
 		return err
 	}
 	hdr.Subpage = typ.Subpage
-	manager := r.FormValue("manager")
-	bugs, err := fetchTerminalBugs(c, accessLevel, hdr.Namespace, manager, typ)
+	onlyManager := r.FormValue("only_manager")
+	if onlyManager != "" {
+		typ.Manager = onlyManager
+		typ.OneManager = true
+	} else {
+		typ.Manager = r.FormValue("manager")
+	}
+	typ.Subsystem = r.FormValue("subsystem")
+	extraBugs := []*Bug{}
+	if typ.Status == BugStatusFixed {
+		// Mix in bugs that have pending fixes.
+		extraBugs, err = fetchFixPendingBugs(c, hdr.Namespace, typ.Manager)
+		if err != nil {
+			return err
+		}
+	}
+	bugs, stats, err := fetchTerminalBugs(c, accessLevel, hdr.Namespace, typ, extraBugs)
 	if err != nil {
 		return err
+	}
+	if !typ.ShowStats {
+		stats = nil
 	}
 	data := &uiTerminalPage{
 		Header: hdr,
 		Now:    timeNow(c),
 		Bugs:   bugs,
+		Stats:  stats,
 	}
 	return serveTemplate(w, "terminal.html", data)
 }
@@ -317,15 +447,25 @@ func handleAdmin(c context.Context, w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return err
 	}
-	jobs, err := loadRecentJobs(c)
+	recentJobs, err := loadRecentJobs(c)
+	if err != nil {
+		return err
+	}
+	pendingJobs, err := loadPendingJobs(c)
+	if err != nil {
+		return err
+	}
+	runningJobs, err := loadRunningJobs(c)
 	if err != nil {
 		return err
 	}
 	data := &uiAdminPage{
 		Header:        hdr,
 		Log:           errorLog,
-		Managers:      managers,
-		Jobs:          &uiJobList{Jobs: jobs},
+		Managers:      makeManagerList(managers, hdr.Namespace),
+		RecentJobs:    &uiJobList{Title: "Recent jobs:", Jobs: recentJobs},
+		RunningJobs:   &uiJobList{Title: "Running jobs:", Jobs: runningJobs},
+		PendingJobs:   &uiJobList{Title: "Pending jobs:", Jobs: pendingJobs},
 		MemcacheStats: memcacheStats,
 	}
 	return serveTemplate(w, "admin.html", data)
@@ -335,7 +475,7 @@ func handleAdmin(c context.Context, w http.ResponseWriter, r *http.Request) erro
 func handleBug(c context.Context, w http.ResponseWriter, r *http.Request) error {
 	bug, err := findBugByID(c, r)
 	if err != nil {
-		return ErrDontLog{err}
+		return fmt.Errorf("%v, %w", err, ErrClientNotFound)
 	}
 	accessLevel := accessLevel(c, r)
 	if err := checkAccessLevel(c, r, bug.sanitizeAccess(accessLevel)); err != nil {
@@ -380,7 +520,7 @@ func handleBug(c context.Context, w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return err
 	}
-	similar, err := loadSimilarBugs(c, r, bug, state)
+	similar, err := loadSimilarBugsUI(c, r, bug, state)
 	if err != nil {
 		return err
 	}
@@ -414,6 +554,7 @@ func handleBug(c context.Context, w http.ResponseWriter, r *http.Request) error 
 		SampleReport: sampleReport,
 		Crashes:      crashesTable,
 		TestPatchJobs: &uiJobList{
+			Title:  "Last patch testing requests:",
 			PerBug: true,
 			Jobs:   testPatchJobs,
 		},
@@ -433,7 +574,111 @@ func handleBug(c context.Context, w http.ResponseWriter, r *http.Request) error 
 			}
 		}
 	}
+
+	if isJSONRequested(r) {
+		w.Header().Set("Content-Type", "application/json")
+		return writeJSONVersionOf(w, data)
+	}
+
 	return serveTemplate(w, "bug.html", data)
+}
+
+func handleBugStats(c context.Context, w http.ResponseWriter, r *http.Request) error {
+	if accessLevel(c, r) != AccessAdmin {
+		return fmt.Errorf("admin only")
+	}
+	hdr, err := commonHeader(c, r, w, "")
+	if err != nil {
+		return err
+	}
+	inputs, err := allBugInputs(c, hdr.Namespace)
+	if err != nil {
+		return err
+	}
+
+	const days = 100
+	reports := []struct {
+		name  string
+		stat  stats
+		since time.Time
+	}{
+		{
+			name:  "Effect of strace among bugs with repro since May 2022",
+			stat:  newStatsFilter(newStraceEffect(days), bugsHaveRepro),
+			since: time.Date(2022, 5, 1, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:  "Effect of reproducer since May 2022",
+			stat:  newReproEffect(days),
+			since: time.Date(2022, 5, 1, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:  "Effect of reproducer since 2020",
+			stat:  newReproEffect(days),
+			since: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:  "Effect of the presence of build assets since Oct 2022",
+			stat:  newAssetEffect(days),
+			since: time.Date(2022, 10, 1, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:  "Effect of cause bisection among bugs with repro since 2022",
+			stat:  newStatsFilter(newBisectCauseEffect(days), bugsHaveRepro),
+			since: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+	}
+
+	// Set up common filters.
+	allReportings := config.Namespaces[hdr.Namespace].Reporting
+	commonFilters := []statsFilter{
+		bugsNoLater(timeNow(c), days),                                  // yet make sure bugs are old enough
+		bugsInReportingStage(allReportings[len(allReportings)-1].Name), // only bugs from the last stage
+	}
+	for i, report := range reports {
+		reports[i].stat = newStatsFilter(report.stat, commonFilters...)
+		reports[i].stat = newStatsFilter(reports[i].stat, bugsNoEarlier(report.since))
+	}
+
+	// Prepare the data.
+	for _, input := range inputs {
+		for _, report := range reports {
+			report.stat.Record(input)
+		}
+	}
+	// Print the results.
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	for _, report := range reports {
+		fmt.Fprintf(w, "%s\n==============\n", report.name)
+		wTab := tabwriter.NewWriter(w, 0, 0, 1, ' ', tabwriter.Debug)
+		table := report.stat.Collect().([][]string)
+		for _, row := range table {
+			for _, cell := range row {
+				fmt.Fprintf(wTab, "%s\t", cell)
+			}
+			fmt.Fprintf(wTab, "\n")
+		}
+		wTab.Flush()
+		fmt.Fprintf(w, "\n\n")
+	}
+
+	return nil
+}
+
+func isJSONRequested(request *http.Request) bool {
+	return request.FormValue("json") == "1"
+}
+
+func writeJSONVersionOf(writer http.ResponseWriter, bugPage *uiBugPage) error {
+	data, err := json.MarshalIndent(
+		GetExtAPIDescrForBugPage(bugPage),
+		"",
+		"\t")
+	if err != nil {
+		return err
+	}
+	_, err = writer.Write(data)
+	return err
 }
 
 func findBugByID(c context.Context, r *http.Request) (*Bug, error) {
@@ -468,14 +713,14 @@ func handleTextImpl(c context.Context, w http.ResponseWriter, r *http.Request, t
 	if x := r.FormValue("x"); x != "" {
 		xid, err := strconv.ParseUint(x, 16, 64)
 		if err != nil || xid == 0 {
-			return ErrDontLog{fmt.Errorf("failed to parse text id: %v", err)}
+			return fmt.Errorf("failed to parse text id: %v: %w", err, ErrClientBadRequest)
 		}
 		id = int64(xid)
 	} else {
 		// Old link support, don't remove.
 		xid, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
 		if err != nil || xid == 0 {
-			return ErrDontLog{fmt.Errorf("failed to parse text id: %v", err)}
+			return fmt.Errorf("failed to parse text id: %v: %w", err, ErrClientBadRequest)
 		}
 		id = xid
 	}
@@ -486,7 +731,7 @@ func handleTextImpl(c context.Context, w http.ResponseWriter, r *http.Request, t
 	data, ns, err := getText(c, tag, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "datastore: no such entity") {
-			err = ErrDontLog{err}
+			err = fmt.Errorf("%v: %w", err, ErrClientBadRequest)
 		}
 		return err
 	}
@@ -557,7 +802,25 @@ func textFilename(tag string) string {
 	}
 }
 
-func fetchNamespaceBugs(c context.Context, accessLevel AccessLevel, ns, manager string) ([]*uiBugGroup, error) {
+func fetchFixPendingBugs(c context.Context, ns, manager string) ([]*Bug, error) {
+	filter := func(query *db.Query) *db.Query {
+		query = query.Filter("Namespace=", ns).
+			Filter("Status=", BugStatusOpen).
+			Filter("Commits>", "")
+		if manager != "" {
+			query = query.Filter("HappenedOn=", manager)
+		}
+		return query
+	}
+	rawBugs, _, err := loadAllBugs(c, filter)
+	if err != nil {
+		return nil, err
+	}
+	return rawBugs, nil
+}
+
+func fetchNamespaceBugs(c context.Context, accessLevel AccessLevel, ns,
+	manager string, oneManager bool, subsystem string) ([]*uiBugGroup, error) {
 	bugs, err := loadVisibleBugs(c, accessLevel, ns, manager)
 	if err != nil {
 		return nil, err
@@ -581,12 +844,19 @@ func fetchNamespaceBugs(c context.Context, accessLevel AccessLevel, ns, manager 
 			dups = append(dups, bug)
 			continue
 		}
+		if oneManager && len(bug.HappenedOn) > 1 {
+			continue
+		}
+		if subsystem != "" && !bug.hasSubsystem(subsystem) {
+			continue
+		}
 		uiBug := createUIBug(c, bug, state, managers)
+		if len(uiBug.Commits) != 0 {
+			// Don't show "fix pending" bugs on the main page.
+			continue
+		}
 		bugMap[bug.keyHash()] = uiBug
 		id := uiBug.ReportingIndex
-		if len(uiBug.Commits) != 0 {
-			id = -1
-		}
 		groups[id] = append(groups[id], uiBug)
 	}
 	for _, dup := range dups {
@@ -608,27 +878,23 @@ func fetchNamespaceBugs(c context.Context, accessLevel AccessLevel, ns, manager 
 			}
 			return bugs[i].ReportedTime.After(bugs[j].ReportedTime)
 		})
-		caption, fragment, showPatched := "", "", false
+		caption, fragment := "", ""
 		switch index {
-		case -1:
-			caption, showPatched = "fix pending", true
-			fragment = "pending"
 		case len(cfg.Reporting) - 1:
-			caption, showPatched = "open", false
+			caption = "open"
 			fragment = "open"
 		default:
 			reporting := &cfg.Reporting[index]
-			caption, showPatched = reporting.DisplayTitle, false
+			caption = reporting.DisplayTitle
 			fragment = reporting.Name
 		}
 		uiGroups = append(uiGroups, &uiBugGroup{
-			Now:         timeNow(c),
-			Caption:     caption,
-			Fragment:    fragment,
-			Namespace:   ns,
-			ShowPatched: showPatched,
-			ShowIndex:   index,
-			Bugs:        bugs,
+			Now:       timeNow(c),
+			Caption:   caption,
+			Fragment:  fragment,
+			Namespace: ns,
+			ShowIndex: index,
+			Bugs:      bugs,
 		})
 	}
 	sort.Slice(uiGroups, func(i, j int) bool {
@@ -678,41 +944,58 @@ func loadVisibleBugs(c context.Context, accessLevel AccessLevel, ns, manager str
 }
 
 func fetchTerminalBugs(c context.Context, accessLevel AccessLevel,
-	ns, manager string, typ *TerminalBug) (*uiBugGroup, error) {
+	ns string, typ *TerminalBug, extraBugs []*Bug) (*uiBugGroup, *uiBugStats, error) {
 	bugs, _, err := loadAllBugs(c, func(query *db.Query) *db.Query {
 		query = query.Filter("Namespace=", ns).
 			Filter("Status=", typ.Status)
-		if manager != "" {
-			query = query.Filter("HappenedOn=", manager)
+		if typ.Manager != "" {
+			query = query.Filter("HappenedOn=", typ.Manager)
 		}
 		return query
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	bugs = append(bugs, extraBugs...)
 	state, err := loadReportingState(c)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	managers, err := managerList(c, ns)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	sort.Slice(bugs, func(i, j int) bool {
+		iFixed := bugs[i].Status == BugStatusFixed
+		jFixed := bugs[j].Status == BugStatusFixed
+		if iFixed != jFixed {
+			// Not-yet-fully-patched bugs come first.
+			return jFixed
+		}
+		return bugs[i].Closed.After(bugs[j].Closed)
+	})
+	stats := &uiBugStats{}
 	res := &uiBugGroup{
-		Now:       timeNow(c),
-		ShowPatch: typ.ShowPatch,
-		Namespace: ns,
+		Now:         timeNow(c),
+		ShowPatch:   typ.ShowPatch,
+		ShowPatched: typ.ShowPatched,
+		Namespace:   ns,
 	}
 	for _, bug := range bugs {
 		if accessLevel < bug.sanitizeAccess(accessLevel) {
 			continue
 		}
-		res.Bugs = append(res.Bugs, createUIBug(c, bug, state, managers))
+		if typ.OneManager && len(bug.HappenedOn) > 1 {
+			continue
+		}
+		if typ.Subsystem != "" && !bug.hasSubsystem(typ.Subsystem) {
+			continue
+		}
+		uiBug := createUIBug(c, bug, state, managers)
+		res.Bugs = append(res.Bugs, uiBug)
+		stats.Record(bug, &bug.Reporting[uiBug.ReportingIndex])
 	}
-	sort.Slice(res.Bugs, func(i, j int) bool {
-		return res.Bugs[i].ClosedTime.After(res.Bugs[j].ClosedTime)
-	})
-	return res, nil
+	return res, stats, nil
 }
 
 func loadDupsForBug(c context.Context, r *http.Request, bug *Bug, state *ReportingState, managers []string) (
@@ -744,37 +1027,26 @@ func loadDupsForBug(c context.Context, r *http.Request, bug *Bug, state *Reporti
 	return group, nil
 }
 
-func loadSimilarBugs(c context.Context, r *http.Request, bug *Bug, state *ReportingState) (*uiBugGroup, error) {
+func loadSimilarBugsUI(c context.Context, r *http.Request, bug *Bug, state *ReportingState) (*uiBugGroup, error) {
 	managers := make(map[string][]string)
-	var results []*uiBug
 	accessLevel := accessLevel(c, r)
-	domain := config.Namespaces[bug.Namespace].SimilarityDomain
-	dedup := make(map[string]bool)
-	dedup[bug.keyHash()] = true
-	for _, title := range bug.AltTitles {
-		var similar []*Bug
-		_, err := db.NewQuery("Bug").
-			Filter("AltTitles=", title).
-			GetAll(c, &similar)
-		if err != nil {
-			return nil, err
+	similarBugs, err := loadSimilarBugs(c, bug)
+	if err != nil {
+		return nil, err
+	}
+	var results []*uiBug
+	for _, similar := range similarBugs {
+		if accessLevel < similar.sanitizeAccess(accessLevel) {
+			continue
 		}
-		for _, similar := range similar {
-			if accessLevel < similar.sanitizeAccess(accessLevel) ||
-				config.Namespaces[similar.Namespace].SimilarityDomain != domain ||
-				dedup[similar.keyHash()] {
-				continue
+		if managers[similar.Namespace] == nil {
+			mgrs, err := managerList(c, similar.Namespace)
+			if err != nil {
+				return nil, err
 			}
-			dedup[similar.keyHash()] = true
-			if managers[similar.Namespace] == nil {
-				mgrs, err := managerList(c, similar.Namespace)
-				if err != nil {
-					return nil, err
-				}
-				managers[similar.Namespace] = mgrs
-			}
-			results = append(results, createUIBug(c, similar, state, managers[similar.Namespace]))
+			managers[similar.Namespace] = mgrs
 		}
+		results = append(results, createUIBug(c, similar, state, managers[similar.Namespace]))
 	}
 	group := &uiBugGroup{
 		Now:           timeNow(c),
@@ -787,12 +1059,37 @@ func loadSimilarBugs(c context.Context, r *http.Request, bug *Bug, state *Report
 	return group, nil
 }
 
+func closedBugStatus(bug *Bug, bugReporting *BugReporting) string {
+	status := ""
+	switch bug.Status {
+	case BugStatusInvalid:
+		switch bug.StatusReason {
+		case dashapi.InvalidatedByNoActivity:
+			fallthrough
+		case dashapi.InvalidatedByRevokedRepro:
+			status = "obsoleted due to no activity"
+		default:
+			status = "closed as invalid"
+		}
+		if bugReporting.Auto {
+			status = "auto-" + status
+		}
+	case BugStatusFixed:
+		status = "fixed"
+	case BugStatusDup:
+		status = "closed as dup"
+	default:
+		status = fmt.Sprintf("unknown (%v)", bug.Status)
+	}
+	return fmt.Sprintf("%v on %v", status, html.FormatTime(bug.Closed))
+}
+
 func createUIBug(c context.Context, bug *Bug, state *ReportingState, managers []string) *uiBug {
 	reportingIdx, status, link := 0, "", ""
 	var reported time.Time
 	var err error
 	if bug.Status == BugStatusOpen {
-		_, _, _, _, reportingIdx, status, link, err = needReport(c, "", state, bug)
+		_, _, reportingIdx, status, link, err = needReport(c, "", state, bug)
 		reported = bug.Reporting[reportingIdx].Reported
 		if err != nil {
 			status = err.Error()
@@ -811,20 +1108,7 @@ func createUIBug(c context.Context, bug *Bug, state *ReportingState, managers []
 				reportingIdx = i
 				reported = bugReporting.Reported
 				link = bugReporting.Link
-				switch bug.Status {
-				case BugStatusInvalid:
-					status = "closed as invalid"
-					if bugReporting.Auto {
-						status = "auto-" + status
-					}
-				case BugStatusFixed:
-					status = "fixed"
-				case BugStatusDup:
-					status = "closed as dup"
-				default:
-					status = fmt.Sprintf("unknown (%v)", bug.Status)
-				}
-				status = fmt.Sprintf("%v on %v", status, html.FormatTime(bug.Closed))
+				status = closedBugStatus(bug, bugReporting)
 				break
 			}
 		}
@@ -852,6 +1136,12 @@ func createUIBug(c context.Context, bug *Bug, state *ReportingState, managers []
 		CreditEmail:    creditEmail,
 		NumManagers:    len(managers),
 		LastActivity:   bug.LastActivity,
+	}
+	for _, entry := range bug.Tags.Subsystems {
+		uiBug.Subsystems = append(uiBug.Subsystems, &uiBugSubsystem{
+			Name: entry.Name,
+			Link: html.AmendURL(getCurrentURL(c), "subsystem", entry.Name),
+		})
 	}
 	updateBugBadness(c, uiBug)
 	if len(bug.Commits) != 0 {
@@ -911,12 +1201,12 @@ func updateBugBadness(c context.Context, bug *uiBug) {
 	bug.NumCrashesBad = bug.NumCrashes >= 10000 && timeNow(c).Sub(bug.LastTime) < 24*time.Hour
 }
 
-func loadCrashesForBug(c context.Context, bug *Bug) ([]*uiCrash, []byte, error) {
+func loadCrashesForBug(c context.Context, bug *Bug) ([]*uiCrash, template.HTML, error) {
 	bugKey := bug.key(c)
 	// We can have more than maxCrashes crashes, if we have lots of reproducers.
-	crashes, _, err := queryCrashesForBug(c, bugKey, 2*maxCrashes+200)
+	crashes, _, err := queryCrashesForBug(c, bugKey, 2*maxCrashes()+200)
 	if err != nil || len(crashes) == 0 {
-		return nil, nil, err
+		return nil, "", err
 	}
 	builds := make(map[string]*Build)
 	var results []*uiCrash
@@ -925,7 +1215,7 @@ func loadCrashesForBug(c context.Context, bug *Bug) ([]*uiCrash, []byte, error) 
 		if build == nil {
 			build, err = loadBuild(c, bug.Namespace, crash.BuildID)
 			if err != nil {
-				return nil, nil, err
+				return nil, "", err
 			}
 			builds[crash.BuildID] = build
 		}
@@ -933,10 +1223,24 @@ func loadCrashesForBug(c context.Context, bug *Bug) ([]*uiCrash, []byte, error) 
 	}
 	sampleReport, _, err := getText(c, textCrashReport, crashes[0].Report)
 	if err != nil {
-		return nil, nil, err
+		return nil, "", err
 	}
-	return results, sampleReport, nil
+	sampleBuild := builds[crashes[0].BuildID]
+	linkifiedReport := linkifyReport(sampleReport, sampleBuild.KernelRepo, sampleBuild.KernelCommit)
+	return results, linkifiedReport, nil
 }
+
+func linkifyReport(report []byte, repo, commit string) template.HTML {
+	escaped := template.HTMLEscapeString(string(report))
+	return template.HTML(sourceFileRe.ReplaceAllStringFunc(escaped, func(match string) string {
+		sub := sourceFileRe.FindStringSubmatch(match)
+		line, _ := strconv.Atoi(sub[3])
+		url := vcs.FileLink(repo, commit, sub[2], line)
+		return fmt.Sprintf("%v<a href='%v'>%v:%v</a>%v", sub[1], url, sub[2], sub[3], sub[4])
+	}))
+}
+
+var sourceFileRe = regexp.MustCompile("( |\t|\n)([a-zA-Z0-9/_.-]+\\.(?:h|c|cc|cpp|s|S|go|rs)):([0-9]+)( |!|\\)|\t|\n)")
 
 func loadFixBisectionsForBug(c context.Context, bug *Bug) ([]*uiCrash, error) {
 	bugKey := bug.key(c)
@@ -963,16 +1267,26 @@ func loadFixBisectionsForBug(c context.Context, bug *Bug) ([]*uiCrash, error) {
 }
 
 func makeUICrash(crash *Crash, build *Build) *uiCrash {
+	uiAssets := []*uiAsset{}
+	for _, asset := range createAssetList(build, crash) {
+		uiAssets = append(uiAssets, &uiAsset{
+			Title:       asset.Title,
+			DownloadURL: asset.DownloadURL,
+		})
+	}
 	ui := &uiCrash{
 		Title:           crash.Title,
 		Manager:         crash.Manager,
 		Time:            crash.Time,
 		Maintainers:     strings.Join(crash.Maintainers, ", "),
 		LogLink:         textLink(textCrashLog, crash.Log),
+		LogHasStrace:    dashapi.CrashFlags(crash.Flags)&dashapi.CrashUnderStrace > 0,
 		ReportLink:      textLink(textCrashReport, crash.Report),
 		ReproSyzLink:    textLink(textReproSyz, crash.ReproSyz),
 		ReproCLink:      textLink(textReproC, crash.ReproC),
+		ReproIsRevoked:  crash.ReproIsRevoked,
 		MachineInfoLink: textLink(textMachineInfo, crash.MachineInfo),
+		Assets:          uiAssets,
 	}
 	if build != nil {
 		ui.uiBuild = makeUIBuild(build)
@@ -995,6 +1309,47 @@ func makeUIBuild(build *Build) *uiBuild {
 	}
 }
 
+func loadRepos(c context.Context, accessLevel AccessLevel, ns string) ([]*uiRepo, error) {
+	managers, _, err := loadManagerList(c, accessLevel, ns, "")
+	if err != nil {
+		return nil, err
+	}
+	var buildKeys []*db.Key
+	for _, mgr := range managers {
+		if mgr.CurrentBuild != "" {
+			buildKeys = append(buildKeys, buildKey(c, mgr.Namespace, mgr.CurrentBuild))
+		}
+	}
+	builds := make([]*Build, len(buildKeys))
+	err = db.GetMulti(c, buildKeys, builds)
+	if err != nil {
+		return nil, err
+	}
+	ret := []*uiRepo{}
+	dedupRepos := map[string]bool{}
+	for _, build := range builds {
+		if build == nil {
+			continue
+		}
+		hash := build.KernelRepo + "|" + build.KernelBranch
+		if dedupRepos[hash] {
+			continue
+		}
+		dedupRepos[hash] = true
+		ret = append(ret, &uiRepo{
+			URL:    build.KernelRepo,
+			Branch: build.KernelBranch,
+		})
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		if ret[i].URL != ret[j].URL {
+			return ret[i].URL < ret[j].URL
+		}
+		return ret[i].Branch < ret[j].Branch
+	})
+	return ret, nil
+}
+
 func loadManagers(c context.Context, accessLevel AccessLevel, ns, manager string) ([]*uiManager, error) {
 	now := timeNow(c)
 	date := timeDate(now)
@@ -1014,16 +1369,29 @@ func loadManagers(c context.Context, accessLevel AccessLevel, ns, manager string
 		}
 	}
 	builds := make([]*Build, len(buildKeys))
-	if err := db.GetMulti(c, buildKeys, builds); err != nil {
-		return nil, err
+	stats := make([]*ManagerStats, len(statsKeys))
+	coverAssets := map[string]Asset{}
+	g, _ := errgroup.WithContext(context.Background())
+	g.Go(func() error {
+		return db.GetMulti(c, buildKeys, builds)
+	})
+	g.Go(func() error {
+		return db.GetMulti(c, statsKeys, stats)
+	})
+	g.Go(func() error {
+		// Get the last coverage report asset for the last week.
+		const maxDuration = time.Hour * 24 * 7
+		var err error
+		coverAssets, err = queryLatestManagerAssets(c, ns, dashapi.HTMLCoverageReport, maxDuration)
+		return err
+	})
+	err = g.Wait()
+	if err != nil {
+		return nil, fmt.Errorf("failed to query manager-related info: %w", err)
 	}
 	uiBuilds := make(map[string]*uiBuild)
 	for _, build := range builds {
 		uiBuilds[build.Namespace+"|"+build.ID] = makeUIBuild(build)
-	}
-	stats := make([]*ManagerStats, len(statsKeys))
-	if err := db.GetMulti(c, statsKeys, stats); err != nil {
-		return nil, fmt.Errorf("fetching manager stats: %v", err)
 	}
 	var fullStats []*ManagerStats
 	for _, mgr := range managers {
@@ -1041,33 +1409,35 @@ func loadManagers(c context.Context, accessLevel AccessLevel, ns, manager string
 		if accessLevel < AccessUser {
 			link = ""
 		}
+		uptime := mgr.CurrentUpTime
+		if now.Sub(mgr.LastAlive) > 6*time.Hour {
+			uptime = 0
+		}
+		// TODO: also display how fresh the coverage report is (to display it on
+		// the main page -- this will reduce confusion).
+		coverURL := ""
+		if asset, ok := coverAssets[mgr.Name]; ok {
+			coverURL = asset.DownloadURL
+		} else if config.CoverPath != "" {
+			coverURL = config.CoverPath + mgr.Name + ".html"
+		}
 		ui := &uiManager{
 			Now:                   timeNow(c),
 			Namespace:             mgr.Namespace,
 			Name:                  mgr.Name,
 			Link:                  link,
-			CoverLink:             config.CoverPath + mgr.Name + ".html",
+			CoverLink:             coverURL,
 			CurrentBuild:          uiBuilds[mgr.Namespace+"|"+mgr.CurrentBuild],
 			FailedBuildBugLink:    bugLink(mgr.FailedBuildBug),
 			FailedSyzBuildBugLink: bugLink(mgr.FailedSyzBuildBug),
 			LastActive:            mgr.LastAlive,
-			LastActiveBad:         now.Sub(mgr.LastAlive) > 6*time.Hour,
-			CurrentUpTime:         mgr.CurrentUpTime,
+			CurrentUpTime:         uptime,
 			MaxCorpus:             stats.MaxCorpus,
 			MaxCover:              stats.MaxCover,
 			TotalFuzzingTime:      stats.TotalFuzzingTime,
 			TotalCrashes:          stats.TotalCrashes,
 			TotalExecs:            stats.TotalExecs,
 			TotalExecsBad:         stats.TotalExecs == 0,
-		}
-		if config.Namespaces[mgr.Namespace].Decommissioned {
-			// Don't show bold red highlight for decommissioned namespaces.
-			ui.Link = ""
-			ui.FailedBuildBugLink = ""
-			ui.FailedSyzBuildBugLink = ""
-			ui.CurrentUpTime = 0
-			ui.LastActiveBad = false
-			ui.TotalExecsBad = false
 		}
 		results = append(results, ui)
 	}
@@ -1113,15 +1483,44 @@ func loadRecentJobs(c context.Context) ([]*uiJob, error) {
 	if err != nil {
 		return nil, err
 	}
+	return getUIJobs(keys, jobs), nil
+}
+
+func loadPendingJobs(c context.Context) ([]*uiJob, error) {
+	var jobs []*Job
+	keys, err := db.NewQuery("Job").
+		Filter("Started=", time.Time{}).
+		Limit(50).
+		GetAll(c, &jobs)
+	if err != nil {
+		return nil, err
+	}
+	return getUIJobs(keys, jobs), nil
+}
+
+func loadRunningJobs(c context.Context) ([]*uiJob, error) {
+	var jobs []*Job
+	keys, err := db.NewQuery("Job").
+		Filter("IsRunning=", true).
+		Limit(50).
+		GetAll(c, &jobs)
+	if err != nil {
+		return nil, err
+	}
+	return getUIJobs(keys, jobs), nil
+}
+
+func getUIJobs(keys []*db.Key, jobs []*Job) []*uiJob {
 	var results []*uiJob
 	for i, job := range jobs {
 		results = append(results, makeUIJob(job, keys[i], nil, nil, nil))
 	}
-	return results, nil
+	return results
 }
 
 func loadTestPatchJobs(c context.Context, bug *Bug) ([]*uiJob, error) {
 	bugKey := bug.key(c)
+
 	var jobs []*Job
 	keys, err := db.NewQuery("Job").
 		Ancestor(bugKey).
@@ -1132,8 +1531,16 @@ func loadTestPatchJobs(c context.Context, bug *Bug) ([]*uiJob, error) {
 	if err != nil {
 		return nil, err
 	}
+	const maxAutomaticJobs = 10
+	autoJobsLeft := maxAutomaticJobs
 	var results []*uiJob
 	for i, job := range jobs {
+		if job.User == "" {
+			if autoJobsLeft == 0 {
+				continue
+			}
+			autoJobsLeft--
+		}
 		var build *Build
 		if job.BuildID != "" {
 			if build, err = loadBuild(c, bug.Namespace, job.BuildID); err != nil {
@@ -1146,31 +1553,36 @@ func loadTestPatchJobs(c context.Context, bug *Bug) ([]*uiJob, error) {
 }
 
 func makeUIJob(job *Job, jobKey *db.Key, bug *Bug, crash *Crash, build *Build) *uiJob {
+	kernelRepo, kernelCommit := job.KernelRepo, job.KernelBranch
+	if build != nil {
+		kernelRepo, kernelCommit = build.KernelRepo, build.KernelCommit
+	}
 	ui := &uiJob{
-		Type:            job.Type,
-		Flags:           job.Flags,
-		Created:         job.Created,
-		BugLink:         bugLink(jobKey.Parent().StringID()),
-		ExternalLink:    job.Link,
-		User:            job.User,
-		Reporting:       job.Reporting,
-		Namespace:       job.Namespace,
-		Manager:         job.Manager,
-		BugTitle:        job.BugTitle,
-		KernelAlias:     kernelRepoInfoRaw(job.Namespace, job.KernelRepo, job.KernelBranch).Alias,
-		PatchLink:       textLink(textPatch, job.Patch),
-		Attempts:        job.Attempts,
-		Started:         job.Started,
-		Finished:        job.Finished,
-		CrashTitle:      job.CrashTitle,
-		CrashLogLink:    textLink(textCrashLog, job.CrashLog),
-		CrashReportLink: textLink(textCrashReport, job.CrashReport),
-		LogLink:         textLink(textLog, job.Log),
-		ErrorLink:       textLink(textError, job.Error),
-		Reported:        job.Reported,
+		Type:             job.Type,
+		Flags:            job.Flags,
+		Created:          job.Created,
+		BugLink:          bugLink(jobKey.Parent().StringID()),
+		ExternalLink:     job.Link,
+		User:             job.User,
+		Reporting:        job.Reporting,
+		Namespace:        job.Namespace,
+		Manager:          job.Manager,
+		BugTitle:         job.BugTitle,
+		KernelAlias:      kernelRepoInfoRaw(job.Namespace, job.KernelRepo, job.KernelBranch).Alias,
+		KernelCommitLink: vcs.CommitLink(kernelRepo, kernelCommit),
+		PatchLink:        textLink(textPatch, job.Patch),
+		Attempts:         job.Attempts,
+		Started:          job.LastStarted,
+		Finished:         job.Finished,
+		CrashTitle:       job.CrashTitle,
+		CrashLogLink:     textLink(textCrashLog, job.CrashLog),
+		CrashReportLink:  textLink(textCrashReport, job.CrashReport),
+		LogLink:          textLink(textLog, job.Log),
+		ErrorLink:        textLink(textError, job.Error),
+		Reported:         job.Reported,
 	}
 	if !job.Finished.IsZero() {
-		ui.Duration = job.Finished.Sub(job.Started)
+		ui.Duration = job.Finished.Sub(job.LastStarted)
 	}
 	if job.Type == JobBisectCause || job.Type == JobBisectFix {
 		// We don't report these yet (or at all), see pollCompletedJobs.
@@ -1186,6 +1598,7 @@ func makeUIJob(job *Job, jobKey *db.Key, bug *Bug, crash *Crash, build *Build) *
 			Author: fmt.Sprintf("%v <%v>", com.AuthorName, com.Author),
 			CC:     strings.Split(com.CC, "|"),
 			Date:   com.Date,
+			Link:   vcs.CommitLink(kernelRepo, com.Hash),
 		})
 	}
 	if len(ui.Commits) == 1 {
@@ -1195,56 +1608,82 @@ func makeUIJob(job *Job, jobKey *db.Key, bug *Bug, crash *Crash, build *Build) *
 	if crash != nil {
 		ui.Crash = makeUICrash(crash, build)
 	}
-	if build != nil {
-		ui.KernelCommitLink = vcs.CommitLink(build.KernelRepo, build.KernelCommit)
-	} else {
-		ui.KernelCommitLink = vcs.CommitLink(job.KernelRepo, job.KernelBranch)
-	}
 	return ui
 }
 
-func fetchErrorLogs(c context.Context) ([]byte, error) {
-	const (
-		minLogLevel  = 3
-		maxLines     = 100
-		maxLineLen   = 1000
-		reportPeriod = 7 * 24 * time.Hour
-	)
-	q := &log.Query{
-		StartTime:     time.Now().Add(-reportPeriod),
-		AppLogs:       true,
-		ApplyMinLevel: true,
-		MinLevel:      minLogLevel,
+func formatLogLine(line string) string {
+	const maxLineLen = 1000
+
+	line = strings.Replace(line, "\n", " ", -1)
+	line = strings.Replace(line, "\r", "", -1)
+	if len(line) > maxLineLen {
+		line = line[:maxLineLen]
+		line += "..."
 	}
-	result := q.Run(c)
-	var lines []string
-	for i := 0; i < maxLines; i++ {
-		rec, err := result.Next()
-		if rec == nil {
+	return line + "\n"
+}
+
+func fetchErrorLogs(c context.Context) ([]byte, error) {
+	if !appengine.IsAppEngine() {
+		return nil, nil
+	}
+
+	const (
+		maxLines = 100
+	)
+	projID := os.Getenv("GOOGLE_CLOUD_PROJECT")
+
+	adminClient, err := logadmin.NewClient(c, projID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create the logging client: %v", err)
+	}
+	defer adminClient.Close()
+
+	lastWeek := time.Now().Add(-1 * 7 * 24 * time.Hour).Format(time.RFC3339)
+	iter := adminClient.Entries(c,
+		logadmin.Filter(
+			// We filter our instances.delete errors as false positives. Delete event happens every second.
+			fmt.Sprintf(`(NOT protoPayload.methodName:v1.compute.instances.delete) AND timestamp > "%s" AND severity>="ERROR"`,
+				lastWeek)),
+		logadmin.NewestFirst(),
+	)
+
+	var entries []*logging.Entry
+	for len(entries) < maxLines {
+		entry, err := iter.Next()
+		if err == iterator.Done {
 			break
 		}
 		if err != nil {
-			entry := fmt.Sprintf("ERROR FETCHING LOGS: %v\n", err)
-			lines = append(lines, entry)
-			break
+			return nil, err
 		}
-		for _, al := range rec.AppLogs {
-			if al.Level < minLogLevel {
-				continue
+		entries = append(entries, entry)
+	}
+
+	var lines []string
+	for _, entry := range entries {
+		requestLog, isRequestLog := entry.Payload.(*proto.RequestLog)
+		if isRequestLog {
+			for _, logLine := range requestLog.Line {
+				if logLine.GetSeverity() < ltype.LogSeverity_ERROR {
+					continue
+				}
+				line := fmt.Sprintf("%v: %v %v %v \"%v\"",
+					entry.Timestamp.Format(time.Stamp),
+					requestLog.GetStatus(),
+					requestLog.GetMethod(),
+					requestLog.GetResource(),
+					logLine.GetLogMessage())
+				lines = append(lines, formatLogLine(line))
 			}
-			text := strings.Replace(al.Message, "\n", " ", -1)
-			text = strings.Replace(text, "\r", "", -1)
-			if len(text) > maxLineLen {
-				text = text[:maxLineLen]
-			}
-			res := ""
-			if !strings.Contains(rec.Resource, "method=log_error") {
-				res = fmt.Sprintf(" (%v)", rec.Resource)
-			}
-			entry := fmt.Sprintf("%v: %v%v\n", al.Time.Format("Jan 02 15:04"), text, res)
-			lines = append(lines, entry)
+		} else {
+			line := fmt.Sprintf("%v: %v",
+				entry.Timestamp.Format(time.Stamp),
+				entry.Payload)
+			lines = append(lines, formatLogLine(line))
 		}
 	}
+
 	buf := new(bytes.Buffer)
 	for i := len(lines) - 1; i >= 0; i-- {
 		buf.WriteString(lines[i])

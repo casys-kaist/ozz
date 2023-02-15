@@ -11,7 +11,6 @@ package cover
 import (
 	"bytes"
 	"encoding/csv"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -31,21 +30,23 @@ import (
 )
 
 type Test struct {
-	Name     string
-	CFlags   []string
-	Progs    []Prog
-	AddCover bool
-	Result   string
-	Supports func(target *targets.Target) bool
+	Name      string
+	CFlags    []string
+	LDFlags   []string
+	Progs     []Prog
+	DebugInfo bool
+	AddCover  bool
+	Result    string
+	Supports  func(target *targets.Target) bool
 }
 
 func TestReportGenerator(t *testing.T) {
 	tests := []Test{
 		{
-			Name:     "no-coverage",
-			CFlags:   []string{"-g"},
-			AddCover: true,
-			Result:   `.* doesn't contain coverage callbacks \(set CONFIG_KCOV=y on linux\)`,
+			Name:      "no-coverage",
+			DebugInfo: true,
+			AddCover:  true,
+			Result:    `.* doesn't contain coverage callbacks \(set CONFIG_KCOV=y on linux\)`,
 		},
 		{
 			Name:     "no-debug-info",
@@ -54,26 +55,30 @@ func TestReportGenerator(t *testing.T) {
 			Result:   `failed to parse DWARF.*\(set CONFIG_DEBUG_INFO=y on linux\)`,
 		},
 		{
-			Name:   "no-pcs",
-			CFlags: []string{"-fsanitize-coverage=trace-pc", "-g"},
-			Result: `no coverage collected so far`,
+			Name:      "no-pcs",
+			CFlags:    []string{"-fsanitize-coverage=trace-pc"},
+			DebugInfo: true,
+			Result:    `no coverage collected so far`,
 		},
 		{
-			Name:   "bad-pcs",
-			CFlags: []string{"-fsanitize-coverage=trace-pc", "-g"},
-			Progs:  []Prog{{Data: "data", PCs: []uint64{0x1, 0x2}}},
-			Result: `coverage doesn't match any coverage callbacks`,
+			Name:      "bad-pcs",
+			CFlags:    []string{"-fsanitize-coverage=trace-pc"},
+			DebugInfo: true,
+			Progs:     []Prog{{Data: "data", PCs: []uint64{0x1, 0x2}}},
+			Result:    `coverage doesn't match any coverage callbacks`,
 		},
 		{
-			Name:     "good",
-			AddCover: true,
-			CFlags:   []string{"-fsanitize-coverage=trace-pc", "-g"},
+			Name:      "good",
+			AddCover:  true,
+			CFlags:    []string{"-fsanitize-coverage=trace-pc"},
+			DebugInfo: true,
 		},
 		{
-			Name:     "good-pie",
-			AddCover: true,
-			CFlags: []string{"-fsanitize-coverage=trace-pc", "-g", "-fpie", "-pie",
-				"-Wl,--section-start=.text=0x33300000"},
+			Name:      "good-pie",
+			AddCover:  true,
+			CFlags:    []string{"-fsanitize-coverage=trace-pc", "-fpie"},
+			LDFlags:   []string{"-pie", "-Wl,--section-start=.text=0x33300000"},
+			DebugInfo: true,
 			Supports: func(target *targets.Target) bool {
 				return target.OS == targets.Fuchsia ||
 					// Fails with "relocation truncated to fit: R_AARCH64_CALL26 against symbol `memcpy'".
@@ -86,8 +91,9 @@ func TestReportGenerator(t *testing.T) {
 			// This produces a binary that resembles CONFIG_RANDOMIZE_BASE=y.
 			// Symbols and .text section has addresses around 0x33300000,
 			// but debug info has all PC ranges around 0 address.
-			CFlags: []string{"-fsanitize-coverage=trace-pc", "-g", "-fpie", "-pie",
-				"-Wl,--section-start=.text=0x33300000,--emit-relocs"},
+			CFlags:    []string{"-fsanitize-coverage=trace-pc", "-fpie"},
+			LDFlags:   []string{"-pie", "-Wl,--section-start=.text=0x33300000,--emit-relocs"},
+			DebugInfo: true,
 			Supports: func(target *targets.Target) bool {
 				return target.OS == targets.Fuchsia ||
 					target.OS == targets.Linux && target.Arch != targets.ARM64 &&
@@ -143,17 +149,54 @@ func testReportGenerator(t *testing.T, target *targets.Target, test Test) {
 	_ = rep
 }
 
+const kcovCode = `
+#ifdef ASLR_BASE
+#define _GNU_SOURCE
+#endif
+
+#include <stdio.h>
+
+#ifdef ASLR_BASE
+#include <dlfcn.h>
+#include <link.h>
+#include <stddef.h>
+
+void* aslr_base() {
+       struct link_map* map = NULL;
+       void* handle = dlopen(NULL, RTLD_LAZY | RTLD_NOLOAD);
+       if (handle != NULL) {
+              dlinfo(handle, RTLD_DI_LINKMAP, &map);
+              dlclose(handle);
+       }
+       return map ? map->l_addr : NULL;
+}
+#else
+void* aslr_base() { return NULL; }
+#endif
+
+void __sanitizer_cov_trace_pc() { printf("%llu", (long long)(__builtin_return_address(0) - aslr_base())); }
+`
+
 func buildTestBinary(t *testing.T, target *targets.Target, test Test, dir string) string {
 	kcovSrc := filepath.Join(dir, "kcov.c")
 	kcovObj := filepath.Join(dir, "kcov.o")
-	if err := osutil.WriteFile(kcovSrc, []byte(`
-#include <stdio.h>
-void __sanitizer_cov_trace_pc() { printf("%llu", (long long)__builtin_return_address(0)); }
-`)); err != nil {
+	if err := osutil.WriteFile(kcovSrc, []byte(kcovCode)); err != nil {
 		t.Fatal(err)
 	}
-	kcovFlags := append([]string{"-c", "-w", "-x", "c", "-o", kcovObj, kcovSrc}, target.CFlags...)
+
+	aslrDefine := "-DNO_ASLR_BASE"
+	if target.OS == targets.Linux || target.OS == targets.OpenBSD ||
+		target.OS == targets.FreeBSD || target.OS == targets.NetBSD {
+		aslrDefine = "-DASLR_BASE"
+	}
+	aslrExtraLibs := []string{}
+	if target.OS == targets.Linux {
+		aslrExtraLibs = []string{"-ldl"}
+	}
+
+	kcovFlags := append([]string{"-c", "-fpie", "-w", "-x", "c", "-o", kcovObj, kcovSrc, aslrDefine}, target.CFlags...)
 	src := filepath.Join(dir, "main.c")
+	obj := filepath.Join(dir, "main.o")
 	bin := filepath.Join(dir, target.KernelObject)
 	if err := osutil.WriteFile(src, []byte(`int main() {}`)); err != nil {
 		t.Fatal(err)
@@ -161,8 +204,18 @@ void __sanitizer_cov_trace_pc() { printf("%llu", (long long)__builtin_return_add
 	if _, err := osutil.RunCmd(time.Hour, "", target.CCompiler, kcovFlags...); err != nil {
 		t.Fatal(err)
 	}
-	flags := append(append([]string{"-w", "-o", bin, src, kcovObj}, target.CFlags...), test.CFlags...)
-	if _, err := osutil.RunCmd(time.Hour, "", target.CCompiler, flags...); err != nil {
+
+	// We used to compile and link with a single compiler invocation,
+	// but clang has a bug that it tries to link in ubsan runtime when
+	// -fsanitize-coverage=trace-pc is provided during linking and
+	// ubsan runtime is missing for arm/arm64/riscv arches in the llvm packages.
+	// So we first compile with -fsanitize-coverage and then link w/o it.
+	cflags := append(append([]string{"-w", "-c", "-o", obj, src}, target.CFlags...), test.CFlags...)
+	if test.DebugInfo {
+		// TODO: pkg/cover doesn't support DWARF5 yet, which is the default in Clang.
+		cflags = append([]string{"-g", "-gdwarf-4"}, cflags...)
+	}
+	if _, err := osutil.RunCmd(time.Hour, "", target.CCompiler, cflags...); err != nil {
 		errText := err.Error()
 		errText = strings.ReplaceAll(errText, "‘", "'")
 		errText = strings.ReplaceAll(errText, "’", "'")
@@ -172,15 +225,40 @@ void __sanitizer_cov_trace_pc() { printf("%llu", (long long)__builtin_return_add
 		}
 		t.Fatal(err)
 	}
+
+	ldflags := append(append(append([]string{"-o", bin, obj, kcovObj}, aslrExtraLibs...),
+		target.CFlags...), test.LDFlags...)
+	staticIdx, pieIdx := -1, -1
+	for i, arg := range ldflags {
+		switch arg {
+		case "-static":
+			staticIdx = i
+		case "-pie":
+			pieIdx = i
+		}
+	}
+	if target.OS == targets.Fuchsia && pieIdx != -1 {
+		// Fuchsia toolchain fails when given -pie:
+		// clang-12: error: argument unused during compilation: '-pie'
+		ldflags[pieIdx] = ldflags[len(ldflags)-1]
+		ldflags = ldflags[:len(ldflags)-1]
+	} else if pieIdx != -1 && staticIdx != -1 {
+		// -static and -pie are incompatible during linking.
+		ldflags[staticIdx] = ldflags[len(ldflags)-1]
+		ldflags = ldflags[:len(ldflags)-1]
+	}
+	if _, err := osutil.RunCmd(time.Hour, "", target.CCompiler, ldflags...); err != nil {
+		// Arm linker in the big-env image has a bug when linking a clang-produced files.
+		if regexp.MustCompile(`arm-linux-gnueabi.* assertion fail`).MatchString(err.Error()) {
+			t.Skipf("skipping test, broken arm linker (%v)", err)
+		}
+		t.Fatal(err)
+	}
 	return bin
 }
 
 func generateReport(t *testing.T, target *targets.Target, test Test) ([]byte, []byte, error) {
-	dir, err := ioutil.TempDir("", "syz-cover-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	bin := buildTestBinary(t, target, test, dir)
 	subsystem := []mgrconfig.Subsystem{
 		{
@@ -192,13 +270,27 @@ func generateReport(t *testing.T, target *targets.Target, test Test) ([]byte, []
 		},
 	}
 
-	rg, err := MakeReportGenerator(target, "", dir, dir, dir, subsystem, nil, nil)
+	// Deep copy, as we are going to modify progs. Our test generate multiple reports from the same
+	// test object in parallel. Without copying we have a datarace here.
+	progs := []Prog{}
+	for _, p := range test.Progs {
+		progs = append(progs, Prog{Sig: p.Sig, Data: p.Data, PCs: append([]uint64{}, p.PCs...)})
+	}
+
+	rg, err := MakeReportGenerator(target, "", dir, dir, dir, subsystem, nil, nil, false)
 	if err != nil {
 		return nil, nil, err
 	}
 	if test.AddCover {
 		var pcs []uint64
-		if output, err := osutil.RunCmd(time.Minute, "", bin); err == nil {
+		// Sanitizers crash when installing signal handlers with static libc.
+		const sanitizerOptions = "handle_segv=0:handle_sigbus=0:handle_sigfpe=0"
+		cmd := osutil.Command(bin)
+		cmd.Env = append([]string{
+			"UBSAN_OPTIONS=" + sanitizerOptions,
+			"ASAN_OPTIONS=" + sanitizerOptions,
+		}, os.Environ()...)
+		if output, err := osutil.Run(time.Minute, cmd); err == nil {
 			pc, err := strconv.ParseUint(string(output), 10, 64)
 			if err != nil {
 				t.Fatal(err)
@@ -222,23 +314,23 @@ func generateReport(t *testing.T, target *targets.Target, test Test) ([]byte, []
 			}
 			t.Logf("using inexact coverage range 0x%x-0x%x", main.Addr, main.Addr+uint64(main.Size))
 		}
-		test.Progs = append(test.Progs, Prog{Data: "main", PCs: pcs})
+		progs = append(progs, Prog{Data: "main", PCs: pcs})
 	}
 	html := new(bytes.Buffer)
-	if err := rg.DoHTML(html, test.Progs, nil); err != nil {
+	if err := rg.DoHTML(html, progs, nil); err != nil {
 		return nil, nil, err
 	}
 	htmlTable := new(bytes.Buffer)
-	if err := rg.DoHTMLTable(htmlTable, test.Progs, nil); err != nil {
+	if err := rg.DoHTMLTable(htmlTable, progs, nil); err != nil {
 		return nil, nil, err
 	}
 	_ = htmlTable
 	csv := new(bytes.Buffer)
-	if err := rg.DoCSV(csv, test.Progs, nil); err != nil {
+	if err := rg.DoCSV(csv, progs, nil); err != nil {
 		return nil, nil, err
 	}
 	csvFiles := new(bytes.Buffer)
-	if err := rg.DoCSVFiles(csvFiles, test.Progs, nil); err != nil {
+	if err := rg.DoCSVFiles(csvFiles, progs, nil); err != nil {
 		return nil, nil, err
 	}
 	_ = csvFiles
@@ -259,10 +351,10 @@ func checkCSVReport(t *testing.T, CSVReport []byte) {
 
 	foundMain := false
 	for _, line := range lines {
-		if line[1] == "main" {
+		if line[2] == "main" {
 			foundMain = true
-			if line[2] != "1" && line[3] != "1" {
-				t.Fatalf("function coverage percentage doesn't match %v vs. %v", line[2], "100")
+			if line[3] != "1" && line[4] != "1" {
+				t.Fatalf("function coverage percentage doesn't match %v vs. %v", line[3], "100")
 			}
 		}
 	}

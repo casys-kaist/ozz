@@ -32,7 +32,10 @@ type Target struct {
 
 	// Neutralize neutralizes harmful calls by transforming them into non-harmful ones
 	// (e.g. an ioctl that turns off console output is turned into ioctl that turns on output).
-	Neutralize func(c *Call)
+	// fixStructure determines whether it's allowed to make structural changes (e.g. add or
+	// remove arguments). It is helpful e.g. when we do neutralization while iterating over the
+	// arguments.
+	Neutralize func(c *Call, fixStructure bool) error
 
 	// AnnotateCall annotates a syscall invocation in C reproducers.
 	// The returned string will be placed inside a comment except for the
@@ -122,7 +125,7 @@ func AllTargets() []*Target {
 }
 
 func (target *Target) lazyInit() {
-	target.Neutralize = func(c *Call) {}
+	target.Neutralize = func(c *Call, fixStructure bool) error { return nil }
 	target.AnnotateCall = func(c ExecCall) string { return "" }
 	target.initTarget()
 	target.initArch(target)
@@ -163,8 +166,6 @@ func (target *Target) initTarget() {
 	for i, c := range target.Syscalls {
 		c.ID = i
 		target.SyscallMap[c.Name] = c
-		c.inputResources = target.getInputResources(c)
-		c.outputResources = target.getOutputResources(c)
 	}
 
 	target.populateResourceCtors()
@@ -186,8 +187,10 @@ func (target *Target) GetConst(name string) uint64 {
 }
 
 func (target *Target) sanitize(c *Call, fix bool) error {
-	target.Neutralize(c)
-	return nil
+	// For now, even though we accept the fix argument, it does not have the full effect.
+	// It de facto only denies structural changes, e.g. deletions of arguments.
+	// TODO: rewrite the corresponding sys/*/init.go code.
+	return target.Neutralize(c, fix)
 }
 
 func RestoreLinks(syscalls []*Syscall, resources []*ResourceDesc, types []Type) {
@@ -217,7 +220,7 @@ func restoreLinks(syscalls []*Syscall, resources []*ResourceDesc, types []Type) 
 		resourceMap[res.Name] = res
 	}
 
-	ForeachType(syscalls, func(typ Type, ctx TypeCtx) {
+	ForeachType(syscalls, func(typ Type, ctx *TypeCtx) {
 		if ref, ok := typ.(Ref); ok {
 			typ = types[ref]
 			*ctx.Ptr = typ
@@ -242,7 +245,7 @@ func (target *Target) DefaultChoiceTable() *ChoiceTable {
 
 func (target *Target) GetGlobs() map[string]bool {
 	globs := make(map[string]bool)
-	ForeachType(target.Syscalls, func(typ Type, ctx TypeCtx) {
+	ForeachType(target.Syscalls, func(typ Type, ctx *TypeCtx) {
 		switch a := typ.(type) {
 		case *BufferType:
 			if a.Kind == BufferGlob {
@@ -254,7 +257,7 @@ func (target *Target) GetGlobs() map[string]bool {
 }
 
 func (target *Target) UpdateGlobs(globFiles map[string][]string) {
-	ForeachType(target.Syscalls, func(typ Type, ctx TypeCtx) {
+	ForeachType(target.Syscalls, func(typ Type, ctx *TypeCtx) {
 		switch a := typ.(type) {
 		case *BufferType:
 			if a.Kind == BufferGlob {

@@ -10,21 +10,25 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/google/syzkaller/dashboard/dashapi"
+	"github.com/google/syzkaller/pkg/asset"
 	"github.com/google/syzkaller/pkg/auth"
 	"github.com/google/syzkaller/pkg/email"
 	"github.com/google/syzkaller/pkg/hash"
+	subsystem "github.com/google/syzkaller/pkg/subsystem/legacy"
 	"github.com/google/syzkaller/sys/targets"
 	"golang.org/x/net/context"
-	"google.golang.org/appengine"
-	db "google.golang.org/appengine/datastore"
-	"google.golang.org/appengine/log"
+	"google.golang.org/appengine/v2"
+	db "google.golang.org/appengine/v2/datastore"
+	"google.golang.org/appengine/v2/log"
 )
 
 func initAPIHandlers() {
@@ -34,11 +38,15 @@ func initAPIHandlers() {
 var apiHandlers = map[string]APIHandler{
 	"log_error":             apiLogError,
 	"job_poll":              apiJobPoll,
+	"job_reset":             apiJobReset,
 	"job_done":              apiJobDone,
 	"reporting_poll_bugs":   apiReportingPollBugs,
 	"reporting_poll_notifs": apiReportingPollNotifications,
 	"reporting_poll_closed": apiReportingPollClosed,
 	"reporting_update":      apiReportingUpdate,
+	"new_test_job":          apiNewTestJob,
+	"needed_assets":         apiNeededAssetsList,
+	"load_full_bug":         apiLoadFullBug,
 }
 
 var apiNamespaceHandlers = map[string]APINamespaceHandler{
@@ -53,6 +61,8 @@ var apiNamespaceHandlers = map[string]APINamespaceHandler{
 	"upload_commits":      apiUploadCommits,
 	"bug_list":            apiBugList,
 	"load_bug":            apiLoadBug,
+	"update_report":       apiUpdateReport,
+	"add_build_assets":    apiAddBuildAssets,
 }
 
 type JSONHandler func(c context.Context, r *http.Request) (interface{}, error)
@@ -62,6 +72,10 @@ type APINamespaceHandler func(c context.Context, ns string, r *http.Request, pay
 const (
 	maxReproPerBug   = 10
 	reproRetryPeriod = 24 * time.Hour // try 1 repro per day until we have at least syz repro
+	// Attempt a new repro every ~ 3 months, even if we have already found it for the bug. This should:
+	// 1) Improve old repros over time (as we update descriptions / change syntax / repro algorithms).
+	// 2) Constrain the impact of bugs in syzkaller's backward compatibility. Fewer old repros, fewer problems.
+	reproStalePeriod = 100 * 24 * time.Hour
 )
 
 // Overridable for testing.
@@ -71,6 +85,11 @@ var timeNow = func(c context.Context) time.Time {
 
 func timeSince(c context.Context, t time.Time) time.Duration {
 	return timeNow(c).Sub(t)
+}
+
+var maxCrashes = func() int {
+	const maxCrashesPerBug = 40
+	return maxCrashesPerBug
 }
 
 func handleJSON(fn JSONHandler) http.Handler {
@@ -349,12 +368,23 @@ func apiJobPoll(c context.Context, r *http.Request, payload []byte) (interface{}
 	return pollPendingJobs(c, req.Managers)
 }
 
+// nolint: dupl
 func apiJobDone(c context.Context, r *http.Request, payload []byte) (interface{}, error) {
 	req := new(dashapi.JobDoneReq)
 	if err := json.Unmarshal(payload, req); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal request: %v", err)
 	}
 	err := doneJob(c, req)
+	return nil, err
+}
+
+// nolint: dupl
+func apiJobReset(c context.Context, r *http.Request, payload []byte) (interface{}, error) {
+	req := new(dashapi.JobResetReq)
+	if err := json.Unmarshal(payload, req); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal request: %v", err)
+	}
+	err := resetJobs(c, req)
 	return nil, err
 }
 
@@ -412,10 +442,17 @@ func apiUploadBuild(c context.Context, ns string, r *http.Request, payload []byt
 
 func uploadBuild(c context.Context, now time.Time, ns string, req *dashapi.Build, typ BuildType) (
 	*Build, bool, error) {
+	newAssets := []Asset{}
+	for i, toAdd := range req.Assets {
+		newAsset, err := parseIncomingAsset(c, toAdd)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to parse asset #%d: %w", i, err)
+		}
+		newAssets = append(newAssets, newAsset)
+	}
 	if build, err := loadBuild(c, ns, req.ID); err == nil {
 		return build, false, nil
 	}
-
 	checkStrLen := func(str, name string, maxLen int) error {
 		if str == "" {
 			return fmt.Errorf("%v is empty", name)
@@ -468,6 +505,7 @@ func uploadBuild(c context.Context, now time.Time, ns string, req *dashapi.Build
 		KernelCommitTitle:   req.KernelCommitTitle,
 		KernelCommitDate:    req.KernelCommitDate,
 		KernelConfig:        configID,
+		Assets:              newAssets,
 	}
 	if _, err := db.Put(c, buildKey(c, ns, req.ID), build); err != nil {
 		return nil, false, err
@@ -538,8 +576,8 @@ func addCommitsToBugsInStatus(c context.Context, status int, ns, manager string,
 	return nil
 }
 
-func addCommitsToBug(c context.Context, bug *Bug, manager string, managers []string,
-	fixCommits []string, presentCommits map[string]bool) error {
+func addCommitsToBug(c context.Context, bug *Bug, manager string, managers, fixCommits []string,
+	presentCommits map[string]bool) error {
 	if !bugNeedsCommitUpdate(c, bug, manager, fixCommits, presentCommits, true) {
 		return nil
 	}
@@ -676,7 +714,12 @@ func apiReportCrash(c context.Context, ns string, r *http.Request, payload []byt
 	return resp, nil
 }
 
+// nolint: gocyclo
 func reportCrash(c context.Context, build *Build, req *dashapi.Crash) (*Bug, error) {
+	assets, err := parseCrashAssets(c, req)
+	if err != nil {
+		return nil, err
+	}
 	req.Title = canonicalizeCrashTitle(req.Title, req.Corrupted, req.Suppressed)
 	if req.Corrupted || req.Suppressed {
 		req.AltTitles = []string{req.Title}
@@ -708,25 +751,26 @@ func reportCrash(c context.Context, build *Build, req *dashapi.Crash) (*Bug, err
 	} else if len(req.ReproSyz) != 0 {
 		reproLevel = ReproLevelSyz
 	}
+	newSubsystems := []string{}
 	save := reproLevel != ReproLevelNone ||
-		bug.NumCrashes < maxCrashes ||
+		bug.NumCrashes < int64(maxCrashes()) ||
 		now.Sub(bug.LastSavedCrash) > time.Hour ||
 		bug.NumCrashes%20 == 0 ||
 		!stringInList(bug.MergedTitles, req.Title)
 	if save {
-		if err := saveCrash(c, ns, req, bug, bugKey, build); err != nil {
+		newSubsystems = detectCrashSubsystems(c, req, build)
+		log.Infof(c, "determined subsystems: %q", newSubsystems)
+		if err := saveCrash(c, ns, req, bug, bugKey, build, assets); err != nil {
 			return nil, err
 		}
 	} else {
 		log.Infof(c, "not saving crash for %q", bug.Title)
 	}
-
 	tx := func(c context.Context) error {
 		bug = new(Bug)
 		if err := db.Get(c, bugKey, bug); err != nil {
 			return fmt.Errorf("failed to get bug: %v", err)
 		}
-		bug.NumCrashes++
 		bug.LastTime = now
 		if save {
 			bug.LastSavedCrash = now
@@ -737,10 +781,15 @@ func reportCrash(c context.Context, build *Build, req *dashapi.Crash) (*Bug, err
 		}
 		if bug.ReproLevel < reproLevel {
 			bug.ReproLevel = reproLevel
+			bug.HeadReproLevel = reproLevel
 		}
 		if len(req.Report) != 0 {
 			bug.HasReport = true
 		}
+		for _, name := range newSubsystems {
+			bug.addSubsystem(BugSubsystem{name})
+		}
+		bug.increaseCrashStats(now)
 		bug.HappenedOn = mergeString(bug.HappenedOn, build.Manager)
 		// Migration of older entities (for new bugs Title is always in MergedTitles).
 		bug.MergedTitles = mergeString(bug.MergedTitles, bug.Title)
@@ -760,20 +809,62 @@ func reportCrash(c context.Context, build *Build, req *dashapi.Crash) (*Bug, err
 	return bug, nil
 }
 
-func saveCrash(c context.Context, ns string, req *dashapi.Crash, bug *Bug, bugKey *db.Key, build *Build) error {
-	// Reporting priority of this crash.
-	prio := int64(kernelRepoInfo(build).ReportingPriority) * 1e6
-	if len(req.ReproC) != 0 {
-		prio += 4e12
-	} else if len(req.ReproSyz) != 0 {
-		prio += 2e12
+func parseCrashAssets(c context.Context, req *dashapi.Crash) ([]Asset, error) {
+	assets := []Asset{}
+	for i, toAdd := range req.Assets {
+		newAsset, err := parseIncomingAsset(c, toAdd)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse asset #%d: %w", i, err)
+		}
+		assets = append(assets, newAsset)
 	}
-	if req.Title == bug.Title {
+	return assets, nil
+}
+
+const overrideSubsystemsKey = "set_subsystems"
+
+func detectCrashSubsystems(c context.Context, req *dashapi.Crash, build *Build) []string {
+	val, ok := c.Value(overrideSubsystemsKey).([]string)
+	if ok {
+		return val
+	}
+	if build.OS == targets.Linux {
+		extractor := subsystem.MakeLinuxSubsystemExtractor()
+		return extractor.Extract(&subsystem.Crash{
+			GuiltyFiles: req.GuiltyFiles,
+			SyzRepro:    string(req.ReproSyz),
+		})
+	}
+	return nil
+}
+
+func subsystemMaintainers(ns, subsystemName string) []string {
+	nsConfig := config.Namespaces[ns]
+	return nsConfig.Subsystems.SubsystemCc(subsystemName)
+}
+
+func (crash *Crash) UpdateReportingPriority(build *Build, bug *Bug) {
+	prio := int64(kernelRepoInfo(build).ReportingPriority) * 1e6
+	divReproPrio := int64(1)
+	if crash.ReproIsRevoked {
+		divReproPrio = 10
+	}
+	if crash.ReproC > 0 {
+		prio += 4e12 / divReproPrio
+	} else if crash.ReproSyz > 0 {
+		prio += 2e12 / divReproPrio
+	}
+	if crash.Title == bug.Title {
 		prio += 1e8 // prefer reporting crash that matches bug title
 	}
 	if build.Arch == targets.AMD64 {
 		prio += 1e3
 	}
+	crash.ReportLen = prio
+}
+
+func saveCrash(c context.Context, ns string, req *dashapi.Crash, bug *Bug, bugKey *db.Key,
+	build *Build, assets []Asset) error {
 	crash := &Crash{
 		Title:   req.Title,
 		Manager: build.Manager,
@@ -783,7 +874,11 @@ func saveCrash(c context.Context, ns string, req *dashapi.Crash, bug *Bug, bugKe
 			GetEmails(req.Recipients, dashapi.To),
 			GetEmails(req.Recipients, dashapi.Cc)),
 		ReproOpts: req.ReproOpts,
-		ReportLen: prio,
+		Flags:     int64(req.Flags),
+		Assets:    assets,
+		ReportElements: CrashReportElements{
+			GuiltyFiles: req.GuiltyFiles,
+		},
 	}
 	var err error
 	if crash.Log, err = putText(c, ns, textCrashLog, req.Log, false); err != nil {
@@ -801,6 +896,7 @@ func saveCrash(c context.Context, ns string, req *dashapi.Crash, bug *Bug, bugKe
 	if crash.MachineInfo, err = putText(c, ns, textMachineInfo, req.MachineInfo, true); err != nil {
 		return err
 	}
+	crash.UpdateReportingPriority(build, bug)
 	crashKey := db.NewIncompleteKey(c, "Crash", bugKey)
 	if _, err = db.Put(c, crashKey, crash); err != nil {
 		return fmt.Errorf("failed to put crash: %v", err)
@@ -810,7 +906,7 @@ func saveCrash(c context.Context, ns string, req *dashapi.Crash, bug *Bug, bugKe
 
 func purgeOldCrashes(c context.Context, bug *Bug, bugKey *db.Key) {
 	const purgeEvery = 10
-	if bug.NumCrashes <= 2*maxCrashes || (bug.NumCrashes-1)%purgeEvery != 0 {
+	if bug.NumCrashes <= int64(2*maxCrashes()) || (bug.NumCrashes-1)%purgeEvery != 0 {
 		return
 	}
 	var crashes []*Crash
@@ -854,7 +950,7 @@ func purgeOldCrashes(c context.Context, bug *Bug, bugKey *db.Key) {
 		if crash.ReproSyz != 0 || crash.ReproC != 0 {
 			count = &reproCount
 		}
-		if *count < maxCrashes {
+		if *count < maxCrashes() {
 			*count++
 			continue
 		}
@@ -1019,6 +1115,36 @@ func apiBugList(c context.Context, ns string, r *http.Request, payload []byte) (
 	return resp, nil
 }
 
+func apiUpdateReport(c context.Context, ns string, r *http.Request, payload []byte) (interface{}, error) {
+	req := new(dashapi.UpdateReportReq)
+	if err := json.Unmarshal(payload, req); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal request: %v", err)
+	}
+	bug := new(Bug)
+	bugKey := db.NewKey(c, "Bug", req.BugID, 0, nil)
+	if err := db.Get(c, bugKey, bug); err != nil {
+		return nil, fmt.Errorf("failed to get bug: %v", err)
+	}
+	if bug.Namespace != ns {
+		return nil, fmt.Errorf("no such bug")
+	}
+	tx := func(c context.Context) error {
+		crash := new(Crash)
+		crashKey := db.NewKey(c, "Crash", "", req.CrashID, bugKey)
+		if err := db.Get(c, crashKey, crash); err != nil {
+			return fmt.Errorf("failed to query the crash: %v", err)
+		}
+		if req.GuiltyFiles != nil {
+			crash.ReportElements.GuiltyFiles = *req.GuiltyFiles
+		}
+		if _, err := db.Put(c, crashKey, crash); err != nil {
+			return fmt.Errorf("failed to put reported crash: %v", err)
+		}
+		return nil
+	}
+	return nil, db.RunInTransaction(c, tx, &db.TransactionOptions{Attempts: 5})
+}
+
 func apiLoadBug(c context.Context, ns string, r *http.Request, payload []byte) (interface{}, error) {
 	req := new(dashapi.LoadBugReq)
 	if err := json.Unmarshal(payload, req); err != nil {
@@ -1032,10 +1158,23 @@ func apiLoadBug(c context.Context, ns string, r *http.Request, payload []byte) (
 	if bug.Namespace != ns {
 		return nil, fmt.Errorf("no such bug")
 	}
-	if bug.sanitizeAccess(AccessPublic) > AccessPublic {
-		return nil, nil
-	}
 	return loadBugReport(c, bug)
+}
+
+func apiLoadFullBug(c context.Context, r *http.Request, payload []byte) (interface{}, error) {
+	req := new(dashapi.LoadFullBugReq)
+	if err := json.Unmarshal(payload, req); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal request: %v", err)
+	}
+	bug, bugKey, err := findBugByReportingID(c, req.BugID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find the bug: %w", err)
+	}
+	bugReporting, _ := bugReportingByID(bug, req.BugID)
+	if bugReporting == nil {
+		return nil, fmt.Errorf("failed to find the bug reporting: %w", err)
+	}
+	return loadFullBugInfo(c, bug, bugKey, bugReporting)
 }
 
 func loadBugReport(c context.Context, bug *Bug) (*dashapi.BugReport, error) {
@@ -1050,6 +1189,46 @@ func loadBugReport(c context.Context, bug *Bug) (*dashapi.BugReport, error) {
 		return nil, fmt.Errorf("reporting %v is missing in config", bugReporting.Name)
 	}
 	return createBugReport(c, bug, crash, crashKey, bugReporting, reporting)
+}
+
+func apiAddBuildAssets(c context.Context, ns string, r *http.Request, payload []byte) (interface{}, error) {
+	req := new(dashapi.AddBuildAssetsReq)
+	if err := json.Unmarshal(payload, req); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal request: %v", err)
+	}
+	assets := []Asset{}
+	for i, toAdd := range req.Assets {
+		asset, err := parseIncomingAsset(c, toAdd)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse asset #%d: %w", i, err)
+		}
+		assets = append(assets, asset)
+	}
+	_, err := appendBuildAssets(c, ns, req.BuildID, assets)
+	if err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+func parseIncomingAsset(c context.Context, newAsset dashapi.NewAsset) (Asset, error) {
+	typeInfo := asset.GetTypeDescription(newAsset.Type)
+	if typeInfo == nil {
+		return Asset{}, fmt.Errorf("unknown asset type")
+	}
+	_, err := url.ParseRequestURI(newAsset.DownloadURL)
+	if err != nil {
+		return Asset{}, fmt.Errorf("invalid URL: %w", err)
+	}
+	return Asset{
+		Type:        newAsset.Type,
+		DownloadURL: newAsset.DownloadURL,
+		CreateDate:  timeNow(c),
+	}, nil
+}
+
+func apiNeededAssetsList(c context.Context, r *http.Request, payload []byte) (interface{}, error) {
+	return queryNeededAssets(c)
 }
 
 func findExistingBugForCrash(c context.Context, ns string, titles []string) (*Bug, error) {
@@ -1186,7 +1365,10 @@ func createBugForCrash(c context.Context, ns string, req *dashapi.Crash) (*Bug, 
 					FirstTime:    now,
 					LastTime:     now,
 				}
-				createBugReporting(bug, config.Namespaces[ns])
+				err = bug.updateReportings(config.Namespaces[ns], now)
+				if err != nil {
+					return err
+				}
 				if _, err = db.Put(c, bugKey, bug); err != nil {
 					return fmt.Errorf("failed to put new bug: %v", err)
 				}
@@ -1209,16 +1391,6 @@ func createBugForCrash(c context.Context, ns string, req *dashapi.Crash) (*Bug, 
 		return nil, err
 	}
 	return bug, nil
-}
-
-func createBugReporting(bug *Bug, cfg *Config) {
-	for len(bug.Reporting) < len(cfg.Reporting) {
-		rep := &cfg.Reporting[len(bug.Reporting)]
-		bug.Reporting = append(bug.Reporting, BugReporting{
-			Name: rep.Name,
-			ID:   bugReportingHash(bug.keyHash(), rep.Name),
-		})
-	}
 }
 
 func isActiveBug(c context.Context, bug *Bug) (bool, error) {
@@ -1244,15 +1416,31 @@ func needRepro(c context.Context, bug *Bug) bool {
 	return needReproForBug(c, canon)
 }
 
+var syzErrorTitleRe = regexp.MustCompile(`^SYZFAIL:|^SYZFATAL:`)
+
 func needReproForBug(c context.Context, bug *Bug) bool {
-	return bug.ReproLevel < ReproLevelC &&
-		len(bug.Commits) == 0 &&
-		bug.Title != corruptedReportTitle &&
-		bug.Title != suppressedReportTitle &&
-		config.Namespaces[bug.Namespace].NeedRepro(bug) &&
-		(bug.NumRepro < maxReproPerBug ||
-			bug.ReproLevel == ReproLevelNone &&
-				timeSince(c, bug.LastReproTime) > reproRetryPeriod)
+	// We already have fixing commits.
+	if len(bug.Commits) > 0 {
+		return false
+	}
+	if bug.Title == corruptedReportTitle ||
+		bug.Title == suppressedReportTitle {
+		return false
+	}
+	if !config.Namespaces[bug.Namespace].NeedRepro(bug) {
+		return false
+	}
+	bestReproLevel := ReproLevelC
+	// For some bugs there's anyway no chance to find a C repro.
+	if syzErrorTitleRe.MatchString(bug.Title) {
+		bestReproLevel = ReproLevelSyz
+	}
+	if bug.HeadReproLevel < bestReproLevel {
+		// We have not found a best-level repro yet, try until we do.
+		return bug.NumRepro < maxReproPerBug || timeSince(c, bug.LastReproTime) >= reproRetryPeriod
+	}
+	// When the best repro is already found, still do a repro attempt once in a while.
+	return timeSince(c, bug.LastReproTime) >= reproStalePeriod
 }
 
 func putText(c context.Context, ns, tag string, data []byte, dedup bool) (int64, error) {
@@ -1373,4 +1561,17 @@ func checkClient(conf *GlobalConfig, name0, secretPassword, oauthSubject string)
 		}
 	}
 	return "", ErrAccess
+}
+
+func handleRetestRepros(w http.ResponseWriter, r *http.Request) {
+	c := appengine.NewContext(r)
+	for ns, cfg := range config.Namespaces {
+		if !cfg.RetestRepros {
+			continue
+		}
+		err := updateRetestReproJobs(c, ns)
+		if err != nil {
+			log.Errorf(c, "failed to update retest repro jobs for %s: %v", ns, err)
+		}
+	}
 }

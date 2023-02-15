@@ -299,12 +299,21 @@ func parseProg(target *prog.Target, dir, filename string) (*prog.Prog, map[strin
 		"ENOMEM":     12,
 		"EACCES":     13,
 		"EFAULT":     14,
+		"EXDEV":      18,
 		"EINVAL":     22,
 		"ENOTTY":     25,
 		"EOPNOTSUPP": 95,
 
 		// Fuchsia specific errors.
-		"ZX_ERR_BAD_HANDLE": 11,
+		"ZX_ERR_NO_RESOURCES":   3,
+		"ZX_ERR_INVALID_ARGS":   10,
+		"ZX_ERR_BAD_HANDLE":     11,
+		"ZX_ERR_BAD_STATE":      20,
+		"ZX_ERR_TIMED_OUT":      21,
+		"ZX_ERR_SHOULD_WAIT":    22,
+		"ZX_ERR_PEER_CLOSED":    24,
+		"ZX_ERR_ALREADY_EXISTS": 26,
+		"ZX_ERR_ACCESS_DENIED":  30,
 	}
 	info := &ipc.ProgInfo{Calls: make([]ipc.CallInfo, len(p.Calls))}
 	for i, call := range p.Calls {
@@ -369,7 +378,7 @@ func (ctx *Context) produceTest(progs chan *RunRequest, req *RunRequest, name st
 	progs <- req
 }
 
-func match(props map[string]bool, requires map[string]bool) bool {
+func match(props, requires map[string]bool) bool {
 	for req, positive := range requires {
 		if positive {
 			if !props[req] {
@@ -403,7 +412,7 @@ func (ctx *Context) createSyzTest(p *prog.Prog, sandbox string, threaded, cov bo
 	}
 	cfg.Flags |= sandboxFlags
 	if threaded {
-		opts.Flags |= ipc.FlagThreaded | ipc.FlagCollide
+		opts.Flags |= ipc.FlagThreaded
 	}
 	if cov {
 		cfg.Flags |= ipc.FlagSignal
@@ -411,6 +420,9 @@ func (ctx *Context) createSyzTest(p *prog.Prog, sandbox string, threaded, cov bo
 	}
 	if ctx.Features[host.FeatureExtraCoverage].Enabled {
 		cfg.Flags |= ipc.FlagExtraCover
+	}
+	if ctx.Features[host.FeatureDelayKcovMmap].Enabled {
+		cfg.Flags |= ipc.FlagDelayKcovMmap
 	}
 	if ctx.Features[host.FeatureNetInjection].Enabled {
 		cfg.Flags |= ipc.FlagEnableTun
@@ -422,6 +434,9 @@ func (ctx *Context) createSyzTest(p *prog.Prog, sandbox string, threaded, cov bo
 	cfg.Flags |= ipc.FlagEnableCgroups
 	if ctx.Features[host.FeatureDevlinkPCI].Enabled {
 		cfg.Flags |= ipc.FlagEnableDevlinkPCI
+	}
+	if ctx.Features[host.FeatureNicVF].Enabled {
+		cfg.Flags |= ipc.FlagEnableNicVF
 	}
 	if ctx.Features[host.FeatureVhciInjection].Enabled {
 		cfg.Flags |= ipc.FlagEnableVhciInjection
@@ -444,7 +459,6 @@ func (ctx *Context) createSyzTest(p *prog.Prog, sandbox string, threaded, cov bo
 func (ctx *Context) createCTest(p *prog.Prog, sandbox string, threaded bool, times int) (*RunRequest, error) {
 	opts := csource.Options{
 		Threaded:    threaded,
-		Collide:     false,
 		Repeat:      times > 1,
 		RepeatTimes: times,
 		Procs:       1,
@@ -482,7 +496,7 @@ func (ctx *Context) createCTest(p *prog.Prog, sandbox string, threaded bool, tim
 	}
 	var ipcFlags ipc.ExecFlags
 	if threaded {
-		ipcFlags |= ipc.FlagThreaded | ipc.FlagCollide
+		ipcFlags |= ipc.FlagThreaded
 	}
 	req := &RunRequest{
 		P:   p,

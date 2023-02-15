@@ -6,8 +6,6 @@ package vm
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
-	"os"
 	"testing"
 	"time"
 
@@ -29,6 +27,10 @@ func (pool *testPool) Create(workdir string, index int) (vmimpl.Instance, error)
 		outc: make(chan []byte, 10),
 		errc: make(chan error, 1),
 	}, nil
+}
+
+func (pool *testPool) Close() error {
+	return nil
 }
 
 type testInstance struct {
@@ -71,7 +73,7 @@ func (inst *testInstance) Close() {
 }
 
 func init() {
-	beforeContext = maxErrorLength + 100
+	beforeContextDefault = maxErrorLength + 100
 	tickerPeriod = 1 * time.Second
 	waitForOutputTimeout = 3 * time.Second
 
@@ -333,11 +335,7 @@ func TestMonitorExecution(t *testing.T) {
 }
 
 func testMonitorExecution(t *testing.T, test *Test) {
-	dir, err := ioutil.TempDir("", "syz-vm-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	cfg := &mgrconfig.Config{
 		Derived: mgrconfig.Derived{
 			TargetOS:     targets.Linux,
@@ -356,6 +354,7 @@ func testMonitorExecution(t *testing.T, test *Test) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer pool.Close()
 	reporter, err := report.NewReporter(cfg)
 	if err != nil {
 		t.Fatal(err)

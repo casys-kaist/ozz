@@ -5,6 +5,7 @@ package prog
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/google/syzkaller/pkg/ssb"
 )
@@ -22,13 +23,34 @@ type Prog struct {
 	ssb.FlushVector
 }
 
+// These properties are parsed and serialized according to the tag and the type
+// of the corresponding fields.
+// IMPORTANT: keep the exact values of "key" tag for existing props unchanged,
+// otherwise the backwards compatibility would be broken.
+type CallProps struct {
+	FailNth int  `key:"fail_nth"`
+	Async   bool `key:"async"`
+	Rerun   int  `key:"rerun"`
+}
+
 type Call struct {
 	Meta    *Syscall
 	Args    []Arg
 	Ret     *ResultArg
+	Props   CallProps
 	Thread  uint64
 	Epoch   uint64
 	Comment string
+}
+
+func MakeCall(meta *Syscall, args []Arg) *Call {
+	return &Call{
+		Meta:   meta,
+		Args:   args,
+		Ret:    MakeReturnArg(meta.Ret),
+		Thread: ^uint64(0),
+		Epoch:  ^uint64(0),
+	}
 }
 
 type Arg interface {
@@ -411,8 +433,13 @@ func removeArg(arg0 Arg) {
 	})
 }
 
+// The public alias for the removeArg method.
+func RemoveArg(arg Arg) {
+	removeArg(arg)
+}
+
 // removeCall removes call idx from p.
-func (p *Prog) removeCall(idx int) {
+func (p *Prog) RemoveCall(idx int) {
 	c := p.Calls[idx]
 	for _, arg := range c.Args {
 		removeArg(arg)
@@ -444,6 +471,17 @@ func (p *Prog) sanitize(fix bool) error {
 	return nil
 }
 
+// TODO: This method might be more generic - it can be applied to any struct.
+func (props *CallProps) ForeachProp(f func(fieldName, key string, value reflect.Value)) {
+	valueObj := reflect.ValueOf(props).Elem()
+	typeObj := valueObj.Type()
+	for i := 0; i < valueObj.NumField(); i++ {
+		fieldValue := valueObj.Field(i)
+		fieldType := typeObj.Field(i)
+		f(fieldType.Name, fieldType.Tag.Get("key"), fieldValue)
+	}
+}
+
 type epochContext struct {
 	p      *Prog
 	epoch  uint64
@@ -472,6 +510,10 @@ func (p *Prog) fixupEpoch() {
 		return
 	}
 
+	if len(p.Calls) == 0 {
+		return
+	}
+
 	const undefined = ^uint64(0)
 	// TODO: fix maxThr
 	maxThr := 3
@@ -481,6 +523,10 @@ func (p *Prog) fixupEpoch() {
 		thr:    make([]bool, maxThr),
 		maxThr: maxThr,
 	}
+
+	// The first call always runs in the thread0 at the epoch0
+	// NOTE: p is  a sequential prog
+	p.Calls[0].Thread, p.Calls[0].Epoch = 0, 0
 
 	for _, c := range p.Calls {
 		newepoch := false

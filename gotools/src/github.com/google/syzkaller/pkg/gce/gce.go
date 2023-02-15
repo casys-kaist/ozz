@@ -43,7 +43,12 @@ type Context struct {
 	apiRateGate <-chan time.Time
 }
 
-func NewContext() (*Context, error) {
+type CreateArgs struct {
+	Preemptible   bool
+	DisplayDevice bool
+}
+
+func NewContext(customZoneID string) (*Context, error) {
 	ctx := &Context{
 		apiRateGate: time.NewTicker(time.Second).C,
 	}
@@ -64,18 +69,23 @@ func NewContext() (*Context, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query gce project-id: %v", err)
 	}
-	ctx.ZoneID, err = ctx.getMeta("instance/zone")
+	myZoneID, err := ctx.getMeta("instance/zone")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query gce zone: %v", err)
 	}
-	if i := strings.LastIndexByte(ctx.ZoneID, '/'); i != -1 {
-		ctx.ZoneID = ctx.ZoneID[i+1:] // the query returns some nonsense prefix
+	if i := strings.LastIndexByte(myZoneID, '/'); i != -1 {
+		myZoneID = myZoneID[i+1:] // the query returns some nonsense prefix
+	}
+	if customZoneID != "" {
+		ctx.ZoneID = customZoneID
+	} else {
+		ctx.ZoneID = myZoneID
 	}
 	ctx.Instance, err = ctx.getMeta("instance/name")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query gce instance name: %v", err)
 	}
-	inst, err := ctx.computeService.Instances.Get(ctx.ProjectID, ctx.ZoneID, ctx.Instance).Do()
+	inst, err := ctx.computeService.Instances.Get(ctx.ProjectID, myZoneID, ctx.Instance).Do()
 	if err != nil {
 		return nil, fmt.Errorf("error getting instance info: %v", err)
 	}
@@ -97,7 +107,8 @@ func NewContext() (*Context, error) {
 	return ctx, nil
 }
 
-func (ctx *Context) CreateInstance(name, machineType, image, sshkey string, preemptible bool) (string, error) {
+func (ctx *Context) CreateInstance(name, machineType, image, sshkey string,
+	preemptible, displayDevice bool) (string, error) {
 	prefix := "https://www.googleapis.com/compute/v1/projects/" + ctx.ProjectID
 	sshkeyAttr := "syzkaller:" + sshkey
 	oneAttr := "1"
@@ -141,7 +152,7 @@ func (ctx *Context) CreateInstance(name, machineType, image, sshkey string, pree
 			OnHostMaintenance: "TERMINATE",
 		},
 		DisplayDevice: &compute.DisplayDevice{
-			EnableDisplay: true,
+			EnableDisplay: displayDevice,
 		},
 	}
 retry:

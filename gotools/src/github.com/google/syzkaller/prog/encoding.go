@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -83,6 +84,35 @@ func (ctx *serializer) call(c *Call) {
 		ctx.arg(a)
 	}
 	ctx.printf(")")
+
+	anyChangedProps := false
+	c.Props.ForeachProp(func(name, key string, value reflect.Value) {
+		// reflect.Value.IsZero is added in go1.13, not available in Appengine SDK.
+		if reflect.DeepEqual(value.Interface(), reflect.Zero(value.Type()).Interface()) {
+			return
+		}
+
+		if !anyChangedProps {
+			ctx.printf(" (")
+			anyChangedProps = true
+		} else {
+			ctx.printf(", ")
+		}
+
+		ctx.printf(key)
+		switch kind := value.Kind(); kind {
+		case reflect.Int:
+			ctx.printf(": %d", value.Int())
+		case reflect.Bool:
+		default:
+			panic("unable to serialize call prop of type " + kind.String())
+		}
+	})
+	if anyChangedProps {
+		ctx.printf(")")
+	}
+
+	ctx.printf(")")
 	ctx.printf(" <0x%x, 0x%x>", c.Thread, c.Epoch)
 	ctx.printf("\n")
 }
@@ -131,19 +161,23 @@ func (a *DataArg) serialize(ctx *serializer) {
 		return
 	}
 	data := a.Data()
-	// Statically typed data will be padded with 0s during deserialization,
-	// so we can strip them here for readability always. For variable-size
-	// data we strip trailing 0s only if we strip enough of them.
-	sz := len(data)
-	for len(data) >= 2 && data[len(data)-1] == 0 && data[len(data)-2] == 0 {
-		data = data[:len(data)-1]
-	}
-	if typ.Varlen() && len(data)+8 >= sz {
-		data = data[:sz]
-	}
-	serializeData(ctx.buf, data, isReadableDataType(typ))
-	if typ.Varlen() && sz != len(data) {
-		ctx.printf("/%v", sz)
+	if typ.IsCompressed() {
+		serializeCompressedData(ctx.buf, data)
+	} else {
+		// Statically typed data will be padded with 0s during deserialization,
+		// so we can strip them here for readability always. For variable-size
+		// data we strip trailing 0s only if we strip enough of them.
+		sz := len(data)
+		for len(data) >= 2 && data[len(data)-1] == 0 && data[len(data)-2] == 0 {
+			data = data[:len(data)-1]
+		}
+		if typ.Varlen() && len(data)+8 >= sz {
+			data = data[:sz]
+		}
+		serializeData(ctx.buf, data, isReadableDataType(typ))
+		if typ.Varlen() && sz != len(data) {
+			ctx.printf("/%v", sz)
+		}
 	}
 }
 
@@ -277,13 +311,9 @@ func (p *parser) parseProg() (*Prog, error) {
 		if meta == nil {
 			return nil, fmt.Errorf("unknown syscall %v", name)
 		}
-		c := &Call{
-			Meta:    meta,
-			Ret:     MakeReturnArg(meta.Ret),
-			Thread:  0,
-			Epoch:   0,
-			Comment: p.comment,
-		}
+		c := MakeCall(meta, nil)
+		c.Thread, c.Epoch = 0, 0
+		c.Comment = p.comment
 		prog.Calls = append(prog.Calls, c)
 		p.Parse('(')
 		for i := 0; p.Char() != ')'; i++ {
@@ -305,7 +335,12 @@ func (p *parser) parseProg() (*Prog, error) {
 			}
 		}
 		p.Parse(')')
-		p.SkipWs()
+
+		if !p.EOF() && p.Char() == '(' {
+			p.Parse('(')
+			c.Props = p.parseCallProps()
+			p.Parse(')')
+		}
 
 		if !p.EOF() {
 			if p.Char() == '<' {
@@ -432,6 +467,45 @@ func (p *parser) parseSchedule(prog *Prog) error {
 	return nil
 }
 
+func (p *parser) parseCallProps() CallProps {
+	nameToValue := map[string]reflect.Value{}
+	callProps := CallProps{}
+	callProps.ForeachProp(func(_, key string, value reflect.Value) {
+		nameToValue[key] = value
+	})
+
+	for p.e == nil && p.Char() != ')' {
+		propName := p.Ident()
+		value, ok := nameToValue[propName]
+		if !ok {
+			p.eatExcessive(true, "unknown call property: %s", propName)
+			if p.Char() == ',' {
+				p.Parse(',')
+			}
+			continue
+		}
+		switch kind := value.Kind(); kind {
+		case reflect.Int:
+			p.Parse(':')
+			strVal := p.Ident()
+			intV, err := strconv.ParseInt(strVal, 0, 64)
+			if err != nil {
+				p.strictFailf("invalid int value: %s", strVal)
+			} else {
+				value.SetInt(intV)
+			}
+		case reflect.Bool:
+			value.SetBool(true)
+		default:
+			panic("unable to handle call props of type " + kind.String())
+		}
+		if p.Char() != ')' {
+			p.Parse(',')
+		}
+	}
+	return callProps
+}
+
 func (p *parser) parseArg(typ Type, dir Dir) (Arg, error) {
 	r := ""
 	if p.Char() == '<' {
@@ -454,6 +528,8 @@ func (p *parser) parseArg(typ Type, dir Dir) (Arg, error) {
 	if r != "" {
 		if res, ok := arg.(*ResultArg); ok {
 			p.vars[r] = res
+		} else {
+			p.strictFailf("variable %v doesn't refers to a resource", r)
 		}
 	}
 	return arg, nil
@@ -634,7 +710,7 @@ func (p *parser) parseArgString(t Type, dir Dir) (Arg, error) {
 		p.eatExcessive(true, "wrong string arg")
 		return t.DefaultArg(dir), nil
 	}
-	data, err := p.deserializeData()
+	data, b64, err := p.deserializeData()
 	if err != nil {
 		return nil, err
 	}
@@ -643,11 +719,11 @@ func (p *parser) parseArgString(t Type, dir Dir) (Arg, error) {
 		if err := image.DecompressCheck(data); err != nil {
 			p.strictFailf("invalid compressed data in arg: %v", err)
 			// In non-strict mode, empty the data slice.
-			data = image.Compress([]byte{})
+			data = image.Compress(nil)
 		}
 	}
 	size := ^uint64(0)
-	if p.Char() == '/' {
+	if p.Char() == '/' && !b64 {
 		p.Parse('/')
 		sizeStr := p.Ident()
 		size, err = strconv.ParseUint(sizeStr, 0, 64)
@@ -920,6 +996,13 @@ func serializeData(buf *bytes.Buffer, data []byte, readable bool) {
 	buf.WriteByte('\'')
 }
 
+func serializeCompressedData(buf *bytes.Buffer, data []byte) {
+	buf.WriteByte('"')
+	buf.WriteByte('$')
+	buf.Write(image.EncodeB64(data))
+	buf.WriteByte('"')
+}
+
 func EncodeData(buf *bytes.Buffer, data []byte, readable bool) {
 	if !readable && isReadableData(data) {
 		readable = true
@@ -997,10 +1080,26 @@ func isReadableData(data []byte) bool {
 	return true
 }
 
-func (p *parser) deserializeData() ([]byte, error) {
+// Deserialize data, returning the data and whether it was encoded in Base64.
+func (p *parser) deserializeData() ([]byte, bool, error) {
 	var data []byte
 	if p.Char() == '"' {
 		p.Parse('"')
+		if p.Char() == '$' {
+			// Read Base64 data.
+			p.consume()
+			var rawData []byte
+			for !p.EOF() && p.Char() != '"' {
+				v := p.consume()
+				rawData = append(rawData, v)
+			}
+			p.Parse('"')
+			decoded, err := image.DecodeB64(rawData)
+			if err != nil {
+				return nil, false, fmt.Errorf("data arg is corrupt: %v", err)
+			}
+			return decoded, true, nil
+		}
 		val := ""
 		if p.Char() != '"' {
 			val = p.Ident()
@@ -1009,11 +1108,11 @@ func (p *parser) deserializeData() ([]byte, error) {
 		var err error
 		data, err = hex.DecodeString(val)
 		if err != nil {
-			return nil, fmt.Errorf("data arg has bad value %q", val)
+			return nil, false, fmt.Errorf("data arg has bad value %q", val)
 		}
 	} else {
 		if p.consume() != '\'' {
-			return nil, fmt.Errorf("data arg does not start with \" nor with '")
+			return nil, false, fmt.Errorf("data arg does not start with \" nor with '")
 		}
 		for p.Char() != '\'' && p.Char() != 0 {
 			v := p.consume()
@@ -1028,7 +1127,7 @@ func (p *parser) deserializeData() ([]byte, error) {
 				lo := p.consume()
 				b, ok := hexToByte(lo, hi)
 				if !ok {
-					return nil, fmt.Errorf("invalid hex \\x%v%v in data arg", hi, lo)
+					return nil, false, fmt.Errorf("invalid hex \\x%v%v in data arg", hi, lo)
 				}
 				data = append(data, b)
 			case 'a':
@@ -1052,12 +1151,12 @@ func (p *parser) deserializeData() ([]byte, error) {
 			case '\\':
 				data = append(data, '\\')
 			default:
-				return nil, fmt.Errorf("invalid \\%c escape sequence in data arg", v)
+				return nil, false, fmt.Errorf("invalid \\%c escape sequence in data arg", v)
 			}
 		}
 		p.Parse('\'')
 	}
-	return data, nil
+	return data, false, nil
 }
 
 func isPrintable(v byte) bool {

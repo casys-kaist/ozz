@@ -9,7 +9,11 @@
 package prog
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+
+	"github.com/google/syzkaller/pkg/image"
 )
 
 type state struct {
@@ -168,20 +172,34 @@ func foreachArgImpl(arg Arg, ctx *ArgCtx, f func(Arg, *ArgCtx)) {
 	}
 }
 
-func RequiredFeatures(p *Prog) (bitmasks, csums bool) {
+type RequiredFeatures struct {
+	Bitmasks       bool
+	Csums          bool
+	FaultInjection bool
+	Async          bool
+}
+
+func (p *Prog) RequiredFeatures() RequiredFeatures {
+	features := RequiredFeatures{}
 	for _, c := range p.Calls {
 		ForeachArg(c, func(arg Arg, _ *ArgCtx) {
 			if a, ok := arg.(*ConstArg); ok {
 				if a.Type().BitfieldOffset() != 0 || a.Type().BitfieldLength() != 0 {
-					bitmasks = true
+					features.Bitmasks = true
 				}
 			}
 			if _, ok := arg.Type().(*CsumType); ok {
-				csums = true
+				features.Csums = true
 			}
 		})
+		if c.Props.FailNth > 0 {
+			features.FaultInjection = true
+		}
+		if c.Props.Async {
+			features.Async = true
+		}
 	}
-	return
+	return features
 }
 
 type CallFlags int
@@ -322,5 +340,28 @@ func decodeFallbackSignal(s uint32) (typ, id, aux int) {
 func checkMaxCallID(id int) {
 	if id & ^fallbackCallMask != 0 {
 		panic(fmt.Sprintf("too many syscalls, have %v, max supported %v", id, fallbackCallMask+1))
+	}
+}
+
+type AssetType int
+
+const (
+	MountInRepro AssetType = iota
+)
+
+func (p *Prog) ForEachAsset(cb func(name string, typ AssetType, r io.Reader)) {
+	for id, c := range p.Calls {
+		ForeachArg(c, func(arg Arg, _ *ArgCtx) {
+			a, ok := arg.(*DataArg)
+			if !ok || a.Type().(*BufferType).Kind != BufferCompressed {
+				return
+			}
+			data, dtor := image.MustDecompress(a.Data())
+			defer dtor()
+			if len(data) == 0 {
+				return
+			}
+			cb(fmt.Sprintf("mount_%v", id), MountInRepro, bytes.NewReader(data))
+		})
 	}
 }

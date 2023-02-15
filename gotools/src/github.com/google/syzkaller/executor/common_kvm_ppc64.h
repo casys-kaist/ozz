@@ -84,6 +84,10 @@ struct kvm_ppc_mmuv3_cfg {
 #define KVM_PPC_MMUV3_GTSE 2 // global translation shootdown enb
 #endif
 
+#ifndef KVM_CAP_PPC_NESTED_HV
+#define KVM_CAP_PPC_NESTED_HV 160
+#endif
+
 struct kvm_text {
 	uintptr_t typ;
 	const void* text;
@@ -122,6 +126,16 @@ static int kvm_vcpu_enable_cap(int cpufd, uint32 capability)
 	return ioctl(cpufd, KVM_ENABLE_CAP, &cap);
 }
 
+static int kvm_vm_enable_cap(int vmfd, uint32 capability, uint64 p1, uint64 p2)
+{
+	struct kvm_enable_cap cap = {
+	    .cap = capability,
+	    .flags = 0,
+	    .args = {p1, p2},
+	};
+	return ioctl(vmfd, KVM_ENABLE_CAP, &cap);
+}
+
 static void dump_text(const char* mem, unsigned start, unsigned cw, uint32 debug_inst_opcode)
 {
 #ifdef DEBUG
@@ -147,7 +161,7 @@ static void dump_text(const char* mem, unsigned start, unsigned cw, uint32 debug
 #define KVM_SETUP_PPC64_PID1 (1 << 4) // Set PID=1 i.e. not kernel's PID
 
 // syz_kvm_setup_cpu(fd fd_kvmvm, cpufd fd_kvmcpu, usermem vma[24], text ptr[in, array[kvm_text, 1]], ntext len[text], flags flags[kvm_setup_flags_ppc64], opts ptr[in, array[kvm_setup_opt, 0:2]], nopt len[opts])
-static long syz_kvm_setup_cpu(volatile long a0, volatile long a1, volatile long a2, volatile long a3, volatile long a4, volatile long a5, volatile long a6, volatile long a7)
+static volatile long syz_kvm_setup_cpu(volatile long a0, volatile long a1, volatile long a2, volatile long a3, volatile long a4, volatile long a5, volatile long a6, volatile long a7)
 {
 	const int vmfd = a0;
 	const int cpufd = a1;
@@ -171,6 +185,9 @@ static long syz_kvm_setup_cpu(volatile long a0, volatile long a1, volatile long 
 	if (kvm_vcpu_enable_cap(cpufd, KVM_CAP_PPC_PAPR))
 		return -1;
 
+	if (kvm_vm_enable_cap(vmfd, KVM_CAP_PPC_NESTED_HV, true, 0))
+		return -1;
+
 	for (uintptr_t i = 0; i < guest_mem_size / page_size; i++) {
 		struct kvm_userspace_memory_region memreg;
 		memreg.slot = i;
@@ -178,9 +195,8 @@ static long syz_kvm_setup_cpu(volatile long a0, volatile long a1, volatile long 
 		memreg.guest_phys_addr = i * page_size;
 		memreg.memory_size = page_size;
 		memreg.userspace_addr = (uintptr_t)host_mem + i * page_size;
-		if (ioctl(vmfd, KVM_SET_USER_MEMORY_REGION, &memreg)) {
+		if (ioctl(vmfd, KVM_SET_USER_MEMORY_REGION, &memreg))
 			return -1;
-		}
 	}
 
 	struct kvm_regs regs;
@@ -374,14 +390,14 @@ static long syz_kvm_setup_cpu(volatile long a0, volatile long a1, volatile long 
 		// Hypercalls need to be enable so we enable them all here to
 		// allow fuzzing
 #define MAX_HCALL 0x450
-	for (unsigned hcall = 4; hcall < MAX_HCALL; hcall += 4) {
-		struct kvm_enable_cap cap = {
-		    .cap = KVM_CAP_PPC_ENABLE_HCALL,
-		    .flags = 0,
-		    .args = {hcall, 1},
-		};
-		ioctl(vmfd, KVM_ENABLE_CAP, &cap);
-	}
+	for (unsigned hcall = 4; hcall < MAX_HCALL; hcall += 4)
+		kvm_vm_enable_cap(vmfd, KVM_CAP_PPC_ENABLE_HCALL, hcall, 1);
+
+	for (unsigned hcall = 0xf000; hcall < 0xf810; hcall += 4)
+		kvm_vm_enable_cap(vmfd, KVM_CAP_PPC_ENABLE_HCALL, hcall, 1);
+
+	for (unsigned hcall = 0xef00; hcall < 0xef20; hcall += 4)
+		kvm_vm_enable_cap(vmfd, KVM_CAP_PPC_ENABLE_HCALL, hcall, 1);
 
 	// Only a few of many RTAS calls are actually in the KVM and the rest
 	// are handled in QEMU, enable the KVM handling for those 4 here.

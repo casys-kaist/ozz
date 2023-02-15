@@ -38,7 +38,14 @@ func MakeRotator(target *Target, calls map[*Syscall]bool, rnd *rand.Rand) *Rotat
 		syscallUses: make(map[*Syscall][]*ResourceDesc),
 		resources:   make(map[*ResourceDesc]rotatorResource),
 	}
+	var sorted []*Syscall
 	for call := range calls {
+		sorted = append(sorted, call)
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Name < sorted[j].Name
+	})
+	for _, call := range sorted {
 		r.syscallUses[call] = append(r.syscallUses[call], call.inputResources...)
 		r.syscallUses[call] = append(r.syscallUses[call], call.outputResources...)
 		var inputs []*ResourceDesc
@@ -50,7 +57,7 @@ func MakeRotator(target *Target, calls map[*Syscall]bool, rnd *rand.Rand) *Rotat
 		}
 		// VMAs and filenames are effectively resources for our purposes
 		// (but they don't have ctors).
-		ForeachCallType(call, func(t Type, _ TypeCtx) {
+		ForeachCallType(call, func(t Type, _ *TypeCtx) {
 			switch a := t.(type) {
 			case *BufferType:
 				switch a.Kind {
@@ -174,11 +181,11 @@ func (rs *rotatorState) Select() map[*Syscall]bool {
 			if nctors0 {
 				continue
 			}
-			rs.selectCalls(info.ctors[1], 2, !nctors0)
+			rs.selectCalls(info.ctors[1], 2, true)
 			if nctors1 {
 				continue
 			}
-			rs.selectCalls(info.ctors[0], 2, !nctors1)
+			rs.selectCalls(info.ctors[2], 2, true)
 			continue
 		}
 		if len(rs.topQueue) == 0 {
@@ -212,7 +219,7 @@ func (rs *rotatorState) Select() map[*Syscall]bool {
 		nctors1 := nctors0 || len(info.ctors[1]) != 0
 		rs.selectCalls(info.ctors[0], 5, true)
 		rs.selectCalls(info.ctors[1], 3, !nctors0)
-		rs.selectCalls(info.ctors[0], 2, !nctors1)
+		rs.selectCalls(info.ctors[2], 2, !nctors1)
 		rs.selectCalls(info.uses[0], 20, true)
 		rs.selectCalls(info.uses[1], 2, len(info.uses[0]) == 0)
 	}

@@ -61,9 +61,11 @@ func (*linux) prepareArch(arch *Arch) error {
 #define va_copy __builtin_va_copy
 #define __va_copy __builtin_va_copy
 `,
-		"asm/a.out.h": "",
-		"asm/prctl.h": "",
-		"asm/mce.h":   "",
+		"asm/a.out.h":    "",
+		"asm/prctl.h":    "",
+		"asm/mce.h":      "",
+		"asm/msr.h":      "",
+		"uapi/asm/msr.h": "",
 	} {
 		fullPath := filepath.Join(arch.buildDir, "syzkaller", hdr)
 		if err := osutil.MkdirAll(filepath.Dir(fullPath)); err != nil {
@@ -77,7 +79,7 @@ func (*linux) prepareArch(arch *Arch) error {
 		return nil
 	}
 	kernelDir := arch.sourceDir
-	makeArgs := build.LinuxMakeArgs(arch.target, "", "", arch.buildDir)
+	makeArgs := build.LinuxMakeArgs(arch.target, "", "", "", arch.buildDir)
 	out, err := osutil.RunCmd(time.Hour, kernelDir, "make", append(makeArgs, "defconfig")...)
 	if err != nil {
 		return fmt.Errorf("make defconfig failed: %v\n%s", err, out)
@@ -86,6 +88,8 @@ func (*linux) prepareArch(arch *Arch) error {
 		// powerpc arch is configured to be big-endian by default, but we want little-endian powerpc.
 		// Since all of our archs are little-endian for now, we just blindly switch it.
 		"-d", "CPU_BIG_ENDIAN", "-e", "CPU_LITTLE_ENDIAN",
+		// s390 enables BTF in defconfig, but our packaged toolchains can't build it.
+		"-d", "DEBUG_INFO_BTF",
 		// Without CONFIG_NETFILTER kernel does not build.
 		"-e", "NETFILTER",
 		// include/net/mptcp.h is the only header in kernel that guards some

@@ -5,12 +5,16 @@ package osutil
 
 import (
 	"bytes"
+	"compress/gzip"
+	"context"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -38,7 +42,7 @@ func Run(timeout time.Duration, cmd *exec.Cmd) ([]byte, error) {
 	if cmd.Stderr == nil {
 		cmd.Stderr = output
 	}
-	setPdeathsig(cmd)
+	setPdeathsig(cmd, true)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start %v %+v: %v", cmd.Path, cmd.Args, err)
 	}
@@ -61,7 +65,7 @@ func Run(timeout time.Duration, cmd *exec.Cmd) ([]byte, error) {
 	if err != nil {
 		text := fmt.Sprintf("failed to run %q: %v", cmd.Args, err)
 		if <-timedout {
-			text = fmt.Sprintf("timedout %q", cmd.Args)
+			text = fmt.Sprintf("timedout after %v %q", timeout, cmd.Args)
 		}
 		exitCode := 0
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -78,10 +82,28 @@ func Run(timeout time.Duration, cmd *exec.Cmd) ([]byte, error) {
 	return output.Bytes(), nil
 }
 
-// Command is similar to os/exec.Command, but also sets PDEATHSIG on linux.
+// CommandContext is similar to os/exec.CommandContext, but also sets PDEATHSIG to SIGKILL on linux,
+// i.e. the child will be killed immediately.
+func CommandContext(ctx context.Context, bin string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, bin, args...)
+	setPdeathsig(cmd, true)
+	return cmd
+}
+
+// Command is similar to os/exec.Command, but also sets PDEATHSIG to SIGKILL on linux,
+// i.e. the child will be killed immediately.
 func Command(bin string, args ...string) *exec.Cmd {
 	cmd := exec.Command(bin, args...)
-	setPdeathsig(cmd)
+	setPdeathsig(cmd, true)
+	return cmd
+}
+
+// Command is similar to os/exec.Command, but also sets PDEATHSIG to SIGTERM on linux,
+// i.e. the child has a chance to exit gracefully. This may be important when running
+// e.g. syz-manager. If it is killed immediately, it can leak GCE instances.
+func GraciousCommand(bin string, args ...string) *exec.Cmd {
+	cmd := exec.Command(bin, args...)
+	setPdeathsig(cmd, false)
 	return cmd
 }
 
@@ -106,6 +128,11 @@ func PrependContext(ctx string, err error) error {
 	default:
 		return fmt.Errorf("%v: %v", ctx, err)
 	}
+}
+
+func IsDir(name string) bool {
+	fileInfo, err := os.Stat(name)
+	return err == nil && fileInfo.IsDir()
 }
 
 // IsExist returns true if the file name exists.
@@ -249,6 +276,18 @@ func WriteFile(filename string, data []byte) error {
 	return ioutil.WriteFile(filename, data, DefaultFilePerm)
 }
 
+func WriteGzipStream(filename string, reader io.Reader) error {
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gz := gzip.NewWriter(f)
+	defer gz.Close()
+	_, err = io.Copy(gz, reader)
+	return err
+}
+
 func WriteExecFile(filename string, data []byte) error {
 	os.Remove(filename)
 	return ioutil.WriteFile(filename, data, DefaultExecPerm)
@@ -275,17 +314,19 @@ func ListDir(dir string) ([]string, error) {
 	return f.Readdirnames(-1)
 }
 
-var wd string
-
-func init() {
-	var err error
-	wd, err = os.Getwd()
-	if err != nil {
-		panic(fmt.Sprintf("failed to get wd: %v", err))
-	}
-}
+var (
+	wd     string
+	wdOnce sync.Once
+)
 
 func Abs(path string) string {
+	wdOnce.Do(func() {
+		var err error
+		wd, err = os.Getwd()
+		if err != nil {
+			panic(fmt.Sprintf("failed to get wd: %v", err))
+		}
+	})
 	if wd1, err := os.Getwd(); err == nil && wd1 != wd {
 		panic(fmt.Sprintf("wd changed: %q -> %q", wd, wd1))
 	}

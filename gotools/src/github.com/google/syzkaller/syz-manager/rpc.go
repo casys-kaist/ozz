@@ -51,7 +51,7 @@ type RPCServer struct {
 type Fuzzer struct {
 	name                string
 	rotated             bool
-	inputs              []rpctype.RPCInput
+	inputs              []rpctype.Input
 	newMaxSignal        signal.Signal
 	newMaxInterleaving  interleaving.Signal
 	newMaxCommunication interleaving.Signal
@@ -69,11 +69,11 @@ type BugFrames struct {
 // RPCManagerView restricts interface between RPCServer and Manager.
 type RPCManagerView interface {
 	fuzzerConnect([]host.KernelModule) (
-		[]rpctype.RPCInput, BugFrames, map[uint32]uint32, []byte, error)
+		[]rpctype.Input, BugFrames, map[uint32]uint32, []byte, error)
 	machineChecked(result *rpctype.CheckArgs, enabledSyscalls map[*prog.Syscall]bool)
-	newInput(inp rpctype.RPCInput, sign signal.Signal) bool
-	newScheduledInput(inp rpctype.RPCScheduledInput, signal interleaving.Signal) bool
-	candidateBatch(size int) []rpctype.RPCCandidate
+	newInput(inp rpctype.Input, sign signal.Signal) bool
+	newScheduledInput(inp rpctype.ScheduledInput, signal interleaving.Signal) bool
+	candidateBatch(size int) []rpctype.Candidate
 	rotateCorpus() bool
 }
 
@@ -130,6 +130,7 @@ func (serv *RPCServer) Connect(a *rpctype.ConnectArgs, r *rpctype.ConnectRes) er
 	r.DataRaceFrames = bugFrames.dataRaces
 	r.CoverFilterBitmap = coverBitmap
 	r.EnabledCalls = serv.cfg.Syscalls
+	r.NoMutateCalls = serv.cfg.NoMutateCalls
 	r.GitRevision = prog.GitRevision
 	r.TargetRevision = serv.cfg.Target.Revision
 	if serv.mgr.rotateCorpus() && serv.rnd.Intn(5) == 0 {
@@ -154,7 +155,7 @@ func (serv *RPCServer) Connect(a *rpctype.ConnectArgs, r *rpctype.ConnectRes) er
 	return nil
 }
 
-func (serv *RPCServer) rotateCorpus(f *Fuzzer, corpus []rpctype.RPCInput) *rpctype.CheckArgs {
+func (serv *RPCServer) rotateCorpus(f *Fuzzer, corpus []rpctype.Input) *rpctype.CheckArgs {
 	// Fuzzing tends to stuck in some local optimum and then it fails to cover
 	// other state space points since code coverage is only a very approximate
 	// measure of logic coverage. To overcome this we introduce some variation
@@ -203,8 +204,8 @@ func (serv *RPCServer) rotateCorpus(f *Fuzzer, corpus []rpctype.RPCInput) *rpcty
 	return &result
 }
 
-func (serv *RPCServer) selectInputs(enabled map[string]bool, inputs0 []rpctype.RPCInput, signal0 signal.Signal) (
-	inputs []rpctype.RPCInput, signal signal.Signal) {
+func (serv *RPCServer) selectInputs(enabled map[string]bool, inputs0 []rpctype.Input, signal0 signal.Signal) (
+	inputs []rpctype.Input, signal signal.Signal) {
 	signal = signal0.Copy()
 	for _, inp := range inputs0 {
 		calls, _, err := prog.CallSet(inp.Prog)
@@ -279,9 +280,9 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 	inputSignal := a.Signal.Deserialize()
 	log.Logf(4, "new input from %v for syscall %v (signal=%v, cover=%v)",
 		a.Name, a.Call, inputSignal.Len(), len(a.Cover))
-	bad, disabled := checkProgram(serv.cfg.Target, serv.targetEnabledSyscalls, true, a.RPCInput.Prog)
+	bad, disabled := checkProgram(serv.cfg.Target, serv.targetEnabledSyscalls, true, a.Input.Prog)
 	if bad || disabled {
-		log.Logf(0, "rejecting program from fuzzer (bad=%v, disabled=%v):\n%s", bad, disabled, a.RPCInput.Prog)
+		log.Logf(0, "rejecting program from fuzzer (bad=%v, disabled=%v):\n%s", bad, disabled, a.Input.Prog)
 		return nil
 	}
 	serv.mu.Lock()
@@ -298,7 +299,7 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 	if !genuine && !rotated {
 		return nil
 	}
-	if !serv.mgr.newInput(a.RPCInput, inputSignal) {
+	if !serv.mgr.newInput(a.Input, inputSignal) {
 		return nil
 	}
 
@@ -330,12 +331,13 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 		serv.corpusSignal.Merge(inputSignal)
 		serv.stats.corpusSignal.set(serv.corpusSignal.Len())
 
-		a.RPCInput.Cover = nil // Don't send coverage back to all fuzzers.
+		a.Input.Cover = nil // Don't send coverage back to all fuzzers.
+		a.Input.RawCover = nil
 		for _, other := range serv.fuzzers {
 			if other == f || other.rotated {
 				continue
 			}
-			other.inputs = append(other.inputs, a.RPCInput)
+			other.inputs = append(other.inputs, a.Input)
 		}
 	}
 	return nil
@@ -343,9 +345,9 @@ func (serv *RPCServer) NewInput(a *rpctype.NewInputArgs, r *int) error {
 
 func (serv *RPCServer) NewScheduledInput(a *rpctype.NewScheduledInputArgs, r *int) error {
 	log.Logf(4, "new scheduled input from %v (knots=%v)", a.Name, len(a.Signal))
-	bad, disabled := checkProgram(serv.cfg.Target, serv.targetEnabledSyscalls, true, a.RPCScheduledInput.Prog)
+	bad, disabled := checkProgram(serv.cfg.Target, serv.targetEnabledSyscalls, true, a.ScheduledInput.Prog)
 	if bad || disabled {
-		log.Logf(0, "rejecting program from fuzzer (bad=%v, disabled=%v):\n%s", bad, disabled, a.RPCScheduledInput.Prog)
+		log.Logf(0, "rejecting program from fuzzer (bad=%v, disabled=%v):\n%s", bad, disabled, a.ScheduledInput.Prog)
 		return nil
 	}
 
@@ -358,7 +360,7 @@ func (serv *RPCServer) NewScheduledInput(a *rpctype.NewScheduledInputArgs, r *in
 	if diff.Empty() {
 		return nil
 	}
-	if !serv.mgr.newScheduledInput(a.RPCScheduledInput, inputSignal) {
+	if !serv.mgr.newScheduledInput(a.ScheduledInput, inputSignal) {
 		return nil
 	}
 	serv.corpusKnots.Merge(a.Cover)
@@ -447,7 +449,7 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 		for i := 0; i < batchSize && len(f.inputs) > 0; i++ {
 			last := len(f.inputs) - 1
 			r.NewInputs = append(r.NewInputs, f.inputs[last])
-			f.inputs[last] = rpctype.RPCInput{}
+			f.inputs[last] = rpctype.Input{}
 			f.inputs = f.inputs[:last]
 		}
 		if len(f.inputs) == 0 {

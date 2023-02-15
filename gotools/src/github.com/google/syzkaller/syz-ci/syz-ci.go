@@ -62,7 +62,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"sync"
+	"time"
 
+	"github.com/google/syzkaller/dashboard/dashapi"
+	"github.com/google/syzkaller/pkg/asset"
 	"github.com/google/syzkaller/pkg/config"
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/pkg/mgrconfig"
@@ -89,18 +92,32 @@ type Config struct {
 	Goroot          string `json:"goroot"`           // Go 1.8+ toolchain dir.
 	SyzkallerRepo   string `json:"syzkaller_repo"`
 	SyzkallerBranch string `json:"syzkaller_branch"` // Defaults to "master".
-	// Dir with additional syscall descriptions (.txt and .const files).
+	// Dir with additional syscall descriptions.
+	// - *.txt and *.const files are copied to syzkaller/sys/linux/
+	// - *.test files are copied to syzkaller/sys/linux/test/
+	// - *.h files are copied to syzkaller/executor/
 	SyzkallerDescriptions string `json:"syzkaller_descriptions"`
-	// Protocol-specific path to upload coverage reports from managers (optional).
+	// Path to upload coverage reports from managers (optional).
 	// Supported protocols: GCS (gs://) and HTTP PUT (http:// or https://).
-	CoverUploadPath string           `json:"cover_upload_path"`
-	BisectBinDir    string           `json:"bisect_bin_dir"`
-	Ccache          string           `json:"ccache"`
-	Managers        []*ManagerConfig `json:"managers"`
+	CoverUploadPath string `json:"cover_upload_path"`
+	// Path to upload corpus.db from managers (optional).
+	// Supported protocols: GCS (gs://) and HTTP PUT (http:// or https://).
+	CorpusUploadPath string `json:"corpus_upload_path"`
+	// BinDir must point to a dir that contains compilers required to build
+	// older versions of the kernel. For linux, it needs to include several
+	// compiler versions.
+	BisectBinDir string           `json:"bisect_bin_dir"`
+	Ccache       string           `json:"ccache"`
+	Managers     []*ManagerConfig `json:"managers"`
 	// Poll period for jobs in seconds (optional, defaults to 10 seconds)
 	JobPollPeriod int `json:"job_poll_period"`
+	// Set up a second (parallel) job processor to speed up processing.
+	// For now, this second job processor only handles patch testing requests.
+	ParallelJobs bool `json:"parallel_jobs"`
 	// Poll period for commits in seconds (optional, defaults to 3600 seconds)
 	CommitPollPeriod int `json:"commit_poll_period"`
+	// Asset Storage config.
+	AssetStorage *asset.Config `json:"asset_storage"`
 }
 
 type ManagerConfig struct {
@@ -138,9 +155,13 @@ type ManagerConfig struct {
 	DashboardKey    string `json:"dashboard_key"`
 	Repo            string `json:"repo"`
 	// Short name of the repo (e.g. "linux-next"), used only for reporting.
-	RepoAlias    string `json:"repo_alias"`
-	Branch       string `json:"branch"` // Defaults to "master".
+	RepoAlias string `json:"repo_alias"`
+	Branch    string `json:"branch"` // Defaults to "master".
+	// Currently either 'gcc' or 'clang'. Note that pkg/bisect requires
+	// explicit plumbing for every os/compiler combination.
+	CompilerType string `json:"compiler_type"` // Defaults to "gcc"
 	Compiler     string `json:"compiler"`
+	Linker       string `json:"linker"`
 	Ccache       string `json:"ccache"`
 	Userspace    string `json:"userspace"`
 	KernelConfig string `json:"kernel_config"`
@@ -161,6 +182,19 @@ type ManagerJobs struct {
 	PollCommits bool `json:"poll_commits"` // poll info about fix commits
 	BisectCause bool `json:"bisect_cause"` // do cause bisection
 	BisectFix   bool `json:"bisect_fix"`   // do fix bisection
+}
+
+func (m *ManagerJobs) AnyEnabled() bool {
+	return m.TestPatches || m.PollCommits || m.BisectCause || m.BisectFix
+}
+
+func (m *ManagerJobs) Filter(filter *ManagerJobs) *ManagerJobs {
+	return &ManagerJobs{
+		TestPatches: m.TestPatches && filter.TestPatches,
+		PollCommits: m.PollCommits && filter.PollCommits,
+		BisectCause: m.BisectCause && filter.BisectCause,
+		BisectFix:   m.BisectFix && filter.BisectFix,
+	}
 }
 
 func main() {
@@ -193,19 +227,7 @@ func main() {
 		}()
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(1)
 	stop := make(chan struct{})
-	go func() {
-		select {
-		case <-shutdownPending:
-		case <-updatePending:
-		}
-		kernelBuildSem <- struct{}{} // wait for all current builds
-		close(stop)
-		wg.Done()
-	}()
-
 	var managers []*Manager
 	for _, mgrcfg := range cfg.Managers {
 		mgr, err := createManager(cfg, mgrcfg, stop, *flagDebug)
@@ -218,6 +240,7 @@ func main() {
 	if len(managers) == 0 {
 		log.Fatalf("failed to create all managers")
 	}
+	var wg sync.WaitGroup
 	if *flagManagers {
 		for _, mgr := range managers {
 			mgr := mgr
@@ -228,16 +251,11 @@ func main() {
 			}()
 		}
 	}
-
-	jp, err := newJobProcessor(cfg, managers, stop, shutdownPending)
+	jp, err := newJobManager(cfg, managers, shutdownPending)
 	if err != nil {
 		log.Fatalf("failed to create dashapi connection %v", err)
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		jp.loop()
-	}()
+	stopJobs := jp.startLoop(&wg)
 
 	// For testing. Racy. Use with care.
 	http.HandleFunc("/upload_cover", func(w http.ResponseWriter, r *http.Request) {
@@ -250,12 +268,54 @@ func main() {
 		}
 	})
 
-	wg.Wait()
+	wg.Add(1)
+	go deprecateAssets(cfg, stop, &wg)
 
 	select {
 	case <-shutdownPending:
 	case <-updatePending:
+	}
+	stopJobs() // Gracefully wait for the running jobs to finish.
+	close(stop)
+	wg.Wait()
+
+	select {
+	case <-shutdownPending:
+	default:
 		updater.UpdateAndRestart()
+	}
+}
+
+func deprecateAssets(cfg *Config, stop chan struct{}, wg *sync.WaitGroup) {
+	defer wg.Done()
+	if cfg.DashboardAddr == "" || cfg.AssetStorage.IsEmpty() ||
+		!cfg.AssetStorage.DoDeprecation {
+		return
+	}
+	dash, err := dashapi.New(cfg.DashboardClient, cfg.DashboardAddr, cfg.DashboardKey)
+	if err != nil {
+		log.Fatalf("failed to create dashapi during asset deprecation: %v", err)
+		return
+	}
+	storage, err := asset.StorageFromConfig(cfg.AssetStorage, dash)
+	if err != nil {
+		dash.LogError("syz-ci",
+			"failed to create asset storage during asset deprecation: %v", err)
+		return
+	}
+loop:
+	for {
+		const sleepDuration = 6 * time.Hour
+		select {
+		case <-stop:
+			break loop
+		case <-time.After(sleepDuration):
+		}
+		log.Logf(0, "deprecating assets")
+		err := storage.DeprecateAssets()
+		if err != nil {
+			dash.LogError("syz-ci", "asset deprecation failed: %v", err)
+		}
 	}
 }
 
@@ -306,6 +366,11 @@ func loadConfig(filename string) (*Config, error) {
 	if len(cfg.Managers) == 0 {
 		return nil, fmt.Errorf("no managers specified")
 	}
+	if cfg.AssetStorage != nil {
+		if err := cfg.AssetStorage.Validate(); err != nil {
+			return nil, fmt.Errorf("asset storage config error: %w", err)
+		}
+	}
 	return cfg, nil
 }
 
@@ -330,12 +395,13 @@ func loadManagerConfig(cfg *Config, mgr *ManagerConfig) error {
 	if !managerNameRe.MatchString(mgr.Name) {
 		return fmt.Errorf("param 'managers.name' has bad value: %q", mgr.Name)
 	}
+	if mgr.CompilerType == "" {
+		mgr.CompilerType = "gcc"
+	}
 	if mgr.Branch == "" {
 		mgr.Branch = "master"
 	}
-	if (mgr.Jobs.TestPatches || mgr.Jobs.PollCommits ||
-		mgr.Jobs.BisectCause || mgr.Jobs.BisectFix) &&
-		(cfg.DashboardAddr == "" || cfg.DashboardClient == "") {
+	if mgr.Jobs.AnyEnabled() && (cfg.DashboardAddr == "" || cfg.DashboardClient == "") {
 		return fmt.Errorf("manager %v: has jobs but no dashboard info", mgr.Name)
 	}
 	if mgr.Jobs.PollCommits && (cfg.DashboardAddr == "" || mgr.DashboardClient == "") {

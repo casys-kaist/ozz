@@ -7,6 +7,7 @@
 
 # This was generated on unknown tree.
 meta noextract
+meta arches["386", "amd64", "arm", "arm64"]
 
 include <linux/ioctl.h>
 include <linux/types.h>

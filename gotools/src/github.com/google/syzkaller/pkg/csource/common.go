@@ -28,10 +28,10 @@ const (
 func createCommonHeader(p, mmapProg *prog.Prog, replacements map[string]string, opts Options) ([]byte, error) {
 	defines := defineList(p, mmapProg, opts)
 	sysTarget := targets.Get(p.Target.OS, p.Target.Arch)
-	// TODO(HerrSpace): -fdirectives-only isn't supported by clang. This code
-	// is relevant for producing C reproducers. Hence that doesn't work for
-	// darwin at the moment.
-	cmd := osutil.Command(sysTarget.CPP, "-nostdinc", "-undef", "-fdirectives-only", "-dDI", "-E", "-P", "-")
+	// Note: -fdirectives-only isn't supported by clang. This code is relevant
+	// for producing C++ reproducers. Hence reproducers don't work when setting
+	// CPP in targets.go to clang++ at the moment.
+	cmd := osutil.Command(sysTarget.CPP, "-nostdinc", "-undef", "-fdirectives-only", "-dDI", "-E", "-P", "-CC", "-")
 	for _, def := range defines {
 		cmd.Args = append(cmd.Args, "-D"+def)
 	}
@@ -91,23 +91,23 @@ func defineList(p, mmapProg *prog.Prog, opts Options) (defines []string) {
 
 func commonDefines(p *prog.Prog, opts Options) map[string]bool {
 	sysTarget := targets.Get(p.Target.OS, p.Target.Arch)
-	bitmasks, csums := prog.RequiredFeatures(p)
+	features := p.RequiredFeatures()
 	return map[string]bool{
 		"GOOS_" + p.Target.OS:           true,
 		"GOARCH_" + p.Target.Arch:       true,
 		"HOSTGOOS_" + runtime.GOOS:      true,
-		"SYZ_USE_BITMASKS":              bitmasks,
-		"SYZ_USE_CHECKSUMS":             csums,
+		"SYZ_USE_BITMASKS":              features.Bitmasks,
+		"SYZ_USE_CHECKSUMS":             features.Csums,
 		"SYZ_SANDBOX_NONE":              opts.Sandbox == sandboxNone,
 		"SYZ_SANDBOX_SETUID":            opts.Sandbox == sandboxSetuid,
 		"SYZ_SANDBOX_NAMESPACE":         opts.Sandbox == sandboxNamespace,
 		"SYZ_SANDBOX_ANDROID":           opts.Sandbox == sandboxAndroid,
 		"SYZ_THREADED":                  opts.Threaded,
-		"SYZ_COLLIDE":                   opts.Collide,
+		"SYZ_ASYNC":                     features.Async,
 		"SYZ_REPEAT":                    opts.Repeat,
 		"SYZ_REPEAT_TIMES":              opts.RepeatTimes > 1,
 		"SYZ_MULTI_PROC":                opts.Procs > 1,
-		"SYZ_FAULT":                     opts.Fault,
+		"SYZ_FAULT":                     features.FaultInjection,
 		"SYZ_LEAK":                      opts.Leak,
 		"SYZ_NET_INJECTION":             opts.NetInjection,
 		"SYZ_NET_DEVICES":               opts.NetDevices,
@@ -117,6 +117,7 @@ func commonDefines(p *prog.Prog, opts Options) map[string]bool {
 		"SYZ_CLOSE_FDS":                 opts.CloseFDs,
 		"SYZ_KCSAN":                     opts.KCSAN,
 		"SYZ_DEVLINK_PCI":               opts.DevlinkPCI,
+		"SYZ_NIC_VF":                    opts.NicVF,
 		"SYZ_USB":                       opts.USB,
 		"SYZ_VHCI_INJECTION":            opts.VhciInjection,
 		"SYZ_USE_TMP_DIR":               opts.UseTmpDir,

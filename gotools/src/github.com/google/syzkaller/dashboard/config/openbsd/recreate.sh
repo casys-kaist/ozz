@@ -16,9 +16,15 @@
 #  User syzkaller
 #  IdentityFile ~/.ssh/id_syzkaller
 
+# Before running first time do:
+# sudo apt-get install genisoimage growisofs qemu qemu-kvm qemu-system-x86-64 expect
+
+# The script does not require any arguments/env vars, run just as:
+# $GOPATH/src/github.com/google/syzkaller/dashboard/config/openbsd/recreate.sh
+
 set -eux
 
-TODAY=jul30
+TODAY=$(date -u +%Y-%m-%d)
 
 SYZ_DIR="$(cd "$(dirname "${0}")"/../../..; pwd -P)"
 [[ -d "${SYZ_DIR}/tools" ]] || { echo "Requires syzkaller dir $SYZ_DIR" ; exit 1; }
@@ -69,5 +75,5 @@ ssh syzkaller@"${INSTANCE}" ln -sf /syzkaller/{gopath/src/github.com/google/syzk
 scp "${SYZ_DIR}"/dashboard/config/openbsd/config.ci "${INSTANCE}":/syzkaller/config-openbsd.ci
 scp worker_key syzkaller@"${INSTANCE}":/syzkaller/userspace/key
 scp -C worker_disk.raw syzkaller@"${INSTANCE}":/syzkaller/userspace/image
-ssh syzkaller@"${INSTANCE}" 'D=/syzkaller/userspace-multicore && mkdir -p $D && ln -sf ../userspace/{image,key} $D && ln -sf ../config/overlays/ci-openbsd-multicore $D/overlay'
+ssh syzkaller@"${INSTANCE}" 'D=/syzkaller/userspace-multicore && mkdir -p $D && ln -sf ../userspace/{image,key} $D && ln -sf ../config/openbsd/overlays/ci-openbsd-multicore $D/overlay'
 ssh root@"${INSTANCE}" reboot

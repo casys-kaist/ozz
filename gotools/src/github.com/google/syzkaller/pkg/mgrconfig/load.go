@@ -34,8 +34,9 @@ type Derived struct {
 	ExecprogBin string
 	ExecutorBin string
 
-	Syscalls []int
-	Timeouts targets.Timeouts
+	Syscalls      []int
+	NoMutateCalls map[int]bool // Set of IDs of syscalls which should not be mutated.
+	Timeouts      targets.Timeouts
 }
 
 func LoadData(data []byte) (*Config, error) {
@@ -78,13 +79,14 @@ func LoadPartialFile(filename string) (*Config, error) {
 
 func defaultValues() *Config {
 	return &Config{
-		SSHUser:      "root",
-		Cover:        true,
-		Reproduce:    true,
-		Sandbox:      "none",
-		RPC:          ":0",
-		MaxCrashLogs: 100,
-		Procs:        6,
+		SSHUser:        "root",
+		Cover:          true,
+		Reproduce:      true,
+		Sandbox:        "none",
+		RPC:            ":0",
+		MaxCrashLogs:   100,
+		Procs:          6,
+		PreserveCorpus: true,
 	}
 }
 
@@ -167,10 +169,27 @@ func Complete(cfg *Config) error {
 			return err
 		}
 	}
+	if cfg.FuzzingVMs < 0 {
+		return fmt.Errorf("fuzzing_vms cannot be less than 0")
+	}
+
 	var err error
 	cfg.Syscalls, err = ParseEnabledSyscalls(cfg.Target, cfg.EnabledSyscalls, cfg.DisabledSyscalls)
 	if err != nil {
 		return err
+	}
+	cfg.NoMutateCalls, err = ParseNoMutateSyscalls(cfg.Target, cfg.NoMutateSyscalls)
+	if err != nil {
+		return err
+	}
+	if !cfg.AssetStorage.IsEmpty() {
+		if cfg.DashboardClient == "" {
+			return fmt.Errorf("asset storage also requires dashboard client")
+		}
+		err = cfg.AssetStorage.Validate()
+		if err != nil {
+			return err
+		}
 	}
 	cfg.initTimeouts()
 	return nil
@@ -188,6 +207,11 @@ func (cfg *Config) initTimeouts() {
 		// but a smaller value should be enough to finish at least some syscalls.
 		// Note: the name check is a hack.
 		slowdown = 10
+	case strings.Contains(cfg.Name, "kssb"):
+		// The store buffer emulation is slow. TODO: Test how much the
+		// store buffer emulation slows down the kernel.
+		// Note: the name check is a hack.
+		slowdown = 5
 	}
 	// Note: we could also consider heavy debug tools (KASAN/KMSAN/KCSAN/KMEMLEAK) if necessary.
 	cfg.Timeouts = cfg.SysTarget.Timeouts(slowdown)
@@ -250,6 +274,12 @@ func (cfg *Config) completeBinaries() error {
 	}
 	if cfg.ExecutorBin != "" && !osutil.IsExist(cfg.ExecutorBin) {
 		return fmt.Errorf("bad config syzkaller param: can't find %v", cfg.ExecutorBin)
+	}
+	if cfg.StraceBin != "" {
+		if !osutil.IsExist(cfg.StraceBin) {
+			return fmt.Errorf("bad config param strace_bin: can't find %v", cfg.StraceBin)
+		}
+		cfg.StraceBin = osutil.Abs(cfg.StraceBin)
 	}
 	return nil
 }
@@ -316,6 +346,25 @@ func ParseEnabledSyscalls(target *prog.Target, enabled, disabled []string) ([]in
 		arr = append(arr, id)
 	}
 	return arr, nil
+}
+
+func ParseNoMutateSyscalls(target *prog.Target, syscalls []string) (map[int]bool, error) {
+	var result = make(map[int]bool)
+
+	for _, c := range syscalls {
+		n := 0
+		for _, call := range target.Syscalls {
+			if MatchSyscall(call.Name, c) {
+				result[call.ID] = true
+				n++
+			}
+		}
+		if n == 0 {
+			return nil, fmt.Errorf("unknown no_mutate syscall: %v", c)
+		}
+	}
+
+	return result, nil
 }
 
 func MatchSyscall(name, pattern string) bool {
