@@ -1,4 +1,6 @@
-// syz_mount_image$erofs(&(0x7f0000000180), &(0x7f00000001c0)='./file0\x00', 0x0, &(0x7f0000000200), 0x1, 0x17e, &(0x7f0000000240)="$eJzsmDFP8kAYx/935YW8xvgBXBwkEWMsbVHDwoCJu4mocZNIJWgBAzUREgc/gKODiYuDX8DRycFvoYM6uTA61/TuoCcR0EET4/MbHn5Hnx7Xh+Q/FARB/Fmen14fT5ezBQPAOJJIqO9fjKiHa/0P54dzZ7mVi+v7q7vaxPFN/34MQBB8/vdjAG7zBny1DoL3dyfVZwG85+vgmFW+CQZT+TY4NpS7YNhSvqd5Pew3zd2K55o7da8UihUWOyxOWDL95+ucMJS08zHterPV3i96ntv4Rhk1v06eI6edT/+/urOxtPnZ4LCVZ8CwpjyLRHc2ciTa80/Gov2NH35+EhKS3yZRPgWXDDNaPsW0/Ej71YN0s9Wer1SLZbfs1hwns2QtWNaikxZBJOuQ/Psv8mlM2//fgN44i+Oo6PsNW9be2pH1o8TlIv84UtNyHWZ/fOBp5HWm7mPCUsaQdoIgCIIgCIIgCIIgCIIgiC8wBSbego7AWRXdbwEAAP//gYN3SA==")
+// syz_mount_image$erofs(&(0x7f0000000180), &(0x7f00000001c0)='./file0\x00',
+// 0x0, &(0x7f0000000200), 0x1, 0x17e,
+// &(0x7f0000000240)="$eJzsmDFP8kAYx/935YW8xvgBXBwkEWMsbVHDwoCJu4mocZNIJWgBAzUREgc/gKODiYuDX8DRycFvoYM6uTA61/TuoCcR0EET4/MbHn5Hnx7Xh+Q/FARB/Fmen14fT5ezBQPAOJJIqO9fjKiHa/0P54dzZ7mVi+v7q7vaxPFN/34MQBB8/vdjAG7zBny1DoL3dyfVZwG85+vgmFW+CQZT+TY4NpS7YNhSvqd5Pew3zd2K55o7da8UihUWOyxOWDL95+ucMJS08zHterPV3i96ntv4Rhk1v06eI6edT/+/urOxtPnZ4LCVZ8CwpjyLRHc2ciTa80/Gov2NH35+EhKS3yZRPgWXDDNaPsW0/Ej71YN0s9Wer1SLZbfs1hwns2QtWNaikxZBJOuQ/Psv8mlM2//fgN44i+Oo6PsNW9be2pH1o8TlIv84UtNyHWZ/fOBp5HWm7mPCUsaQdoIgCIIgCIIgCIIgCIIgiC8wBSbego7AWRXdbwEAAP//gYN3SA==")
 // open(&(0x7f0000000000)='./file1\x00', 0x0, 0x0)
 
 #define _GNU_SOURCE
@@ -6,17 +8,19 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/loop.h>
+#include <pthread.h>
+#include <setjmp.h> // for setjmp(), longjmp(), and jmp_buf
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include <pthread.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/xattr.h>
 #include <syscall.h>
 #include <unistd.h>
-#include <setjmp.h> // for setjmp(), longjmp(), and jmp_buf
 
 #define MAXBITS 15    // maximum bits in a code
 #define MAXLCODES 286 // maximum number of literal/length codes
@@ -627,8 +631,8 @@ void *th0(void *unused) {
 }
 
 void *th1(void *unused) {
-  if (open("./file0/file0", O_RDONLY, 0) < 0)
-    perror("open");
+  char *buf = malloc(1024);
+  listxattr("./file0/file0", buf, 1024);
   return NULL;
 }
 
@@ -668,7 +672,6 @@ int main() {
   pthread_t pth0, pth1;
   pthread_create(&pth0, NULL, th0, NULL);
   pthread_create(&pth1, NULL, th1, NULL);
-
   pthread_join(pth0, NULL);
   pthread_join(pth1, NULL);
   return 0;
