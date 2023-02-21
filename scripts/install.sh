@@ -36,9 +36,9 @@ __install_tool() {
 		echo "Already installed"
 		return 0
 	fi
-	_download || __exit "$TOOLNAME: download failed"
-	_build    || __exit "$TOOLNAME: build failed"
-	_install  || __exit "$TOOLNAME: install failed"
+	_download "$DOWNLOAD_OPTS" || __exit "$TOOLNAME: download failed"
+	_build    "$BUILD_OPTS"    || __exit "$TOOLNAME: build failed"
+	_install  "$INSTALL_OPTS"  || __exit "$TOOLNAME: install failed"
 	__mark_installed "$_target"
 	echo "Installing $TOOLNAME... done"
 }
