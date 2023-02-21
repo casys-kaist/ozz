@@ -31,7 +31,7 @@ __install_tool() {
 		echo "Unknown target program and/or version"
 		return 1
 	fi
-	if __check_installed "$_target"; then
+	if __check_installed "$_target" "$FORCE"; then
 		# Just skip if it is already installed
 		echo "Already installed"
 		return 0

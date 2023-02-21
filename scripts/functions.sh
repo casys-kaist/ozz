@@ -80,12 +80,12 @@ __mark_installed() {
 	touch "$DIR/$1"
 }
 
-## Usage: __mark_installed TARGET
+## Usage: __check_installed TARGET [FORCE]
 __check_installed() {
 	if [ -z "$PROJECT_HOME" -o "$#" -lt 1 ]; then
 		return 1
 	fi
 	DIR="$PROJECT_HOME/.installed"
 	mkdir -p $DIR
-	[ -f "$DIR/$1" ]
+	[ -z "$2" -a -f "$DIR/$1" ]
 }
