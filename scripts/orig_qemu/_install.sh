@@ -7,19 +7,28 @@
 _TAR="$TMP_DIR/qemu-$ORIG_QEMU_VERSION.tar.xz"
 
 _download() {
+	if [ -n $1 ]; then
+		return
+	fi
 	URL="https://download.qemu.org/qemu-$ORIG_QEMU_VERSION.tar.xz"
 	wget $URL -O $_TAR
+	tar xvf "$_TAR" --directory "$TOOLCHAINS_DIR"
+	mv "$TOOLCHAINS_DIR/qemu-$ORIG_QEMU_VERSION" "$TOOLCHAINS_DIR/orig_qemu"
 }
 
 _build() {
-	tar xvf "$_TAR" --directory "$TOOLCHAINS_DIR"
-	mv "$TOOLCHAINS_DIR/qemu-$ORIG_QEMU_VERSION" "$TOOLCHAINS_DIR/orig_qemu"
+	PRE_COMMAND=
+	case $1 in
+		*"--rebuild"*)
+			PRE_COMMAND="ninja clean" ;;
+	esac
 	# XXX: copy from scripts/qemu/_install.sh
 	TARGETS="x86_64-softmmu,aarch64-softmmu,riscv64-softmmu,aarch64-linux-user,riscv64-linux-user,x86_64-linux-user"
-	_DEPS="--ninja=$NINJA --meson=$MESON --cc=$GCC --cxx=$GXX"
-	_OPTS="--enable-curses --enable-kvm --prefix=$ORIG_QEMU_INSTALL $OPTS"
+	_DEPS="--ninja=$NINJA --meson=$MESON --cc=$GCC --cxx=$GXX --gdb=$GDB"
+	_OPTS="--enable-curses --enable-kvm --enable-debug --prefix=$ORIG_QEMU_INSTALL $OPTS"
 	__make_dir_and_exec_cmd "$ORIG_QEMU_BUILD" \
 							"$ORIG_QEMU_PATH/configure --target-list=$TARGETS $_DEPS $_OPTS" \
+							"$PRE_COMMAND" \
 							"ninja"
 }
 
