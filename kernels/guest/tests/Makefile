@@ -9,10 +9,10 @@ prep:
 	@mkdir -p $(OUTDIR)/tests
 
 build/tests/%: tests/%.c
-	@gcc $< -o $@ -x86_64 -lpthread --static -lkeyutils
+	@gcc $< -o $@ -x86_64 -lpthread --static -I./include
 
 build/poc/%: poc/%.c
-	@gcc $< -o $@ -x86_64 -lpthread --static -lkeyutils
+	@gcc $< -o $@ -x86_64 -lpthread --static -lkeyutils -I./include
 
 clean:
 	@rm -rf $(OUTDIR)
