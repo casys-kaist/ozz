@@ -17,7 +17,6 @@
 #define _GNU_SOURCE
 
 #include <fcntl.h>
-#include <keyutils.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +25,8 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+
+#include <keyutils.h>
 
 #define O_NOTIFICATION_PIPE O_EXCL
 #define KEYCTL_WATCH_KEY 0x20
