@@ -197,6 +197,7 @@ private:
   bool isSoftIRQEntryOfTargetArch(Function &F);
   bool isIRQEntryOfTargetArch(Function &F);
   bool isSyscallEntryOfTargetArch(Function &F);
+  BasicBlock *SSBDoEmulateHelper(Instruction *I);
   void SetNoSanitizeMetadata(Instruction *I) {
     I->setMetadata(I->getModule()->getMDKindID("nosanitize"),
                    MDNode::get(I->getContext(), None));
@@ -255,6 +256,22 @@ static bool shouldInstrumentReadWriteFromAddress(const Module *M, Value *Addr) {
   }
 
   return true;
+}
+
+BasicBlock *SoftStoreBuffer::SSBDoEmulateHelper(Instruction *I) {
+  IRBuilder<> IRB(I);
+  auto *DoEmulate = IRB.CreateLoad(SSBDoEmulate);
+  SetNoSanitizeMetadata(DoEmulate);
+  // If __do_emulate == 1
+  Value *CmpInst = IRB.CreateICmpEQ(DoEmulate, IRB.getInt8(1));
+  MDBuilder MDB(I->getContext());
+  MDNode *BranchWeights =
+      MDB.createBranchWeights(1 /*ThenBlock*/, 10 /*ElseBlock*/);
+  Instruction *CheckTerm =
+      SplitBlockAndInsertIfThen(CmpInst, I, false, BranchWeights);
+  BasicBlock *ThenBlock = CheckTerm->getParent();
+  // ThenBlock -- slowpath (store buffer emulation)
+  return ThenBlock;
 }
 
 bool SoftStoreBuffer::addrPointsToConstantData(Value *Addr) {
@@ -625,20 +642,10 @@ bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
   if (!ClInstrumentFlush)
     return false;
 
-  IRBuilder<> IRB(I);
   LLVM_DEBUG(dbgs() << "Instrumenting a membarrier callback at " << *I << "\n");
   NumInstrumentedFlushes++;
 
-  auto *DoEmulate = IRB.CreateLoad(SSBDoEmulate);
-  SetNoSanitizeMetadata(DoEmulate);
-  // If __do_emulate == 1
-  Value *CmpInst = IRB.CreateICmpEQ(DoEmulate, IRB.getInt8(1));
-  MDBuilder MDB(I->getContext());
-  MDNode *BranchWeights =
-      MDB.createBranchWeights(1 /*ThenBlock*/, 10 /*ElseBlock*/);
-  Instruction *CheckTerm =
-      SplitBlockAndInsertIfThen(CmpInst, I, false, BranchWeights);
-  BasicBlock *ThenBlock = CheckTerm->getParent();
+  BasicBlock *ThenBlock = SSBDoEmulateHelper(I);
   // ThenBlock -- slowpath (store buffer emulation)
   IRBuilder<> IRBThen(ThenBlock->getFirstNonPHI());
   IRBThen.CreateCall(SSBFlush);
@@ -650,26 +657,16 @@ bool SoftStoreBuffer::instrumentRetCheck(Instruction *I) {
     // Retchk is also a kind of flush callback
     return false;
 
-  IRBuilder<> IRB(I);
   LLVM_DEBUG(dbgs() << "Instrumenting a retchk callback at " << *I << "\n");
-  auto Args = SmallVector<Value *, 8>();
 
-  auto *DoEmulate = IRB.CreateLoad(SSBDoEmulate);
-  SetNoSanitizeMetadata(DoEmulate);
-  // If __do_emulate == 1
-  Value *CmpInst = IRB.CreateICmpEQ(DoEmulate, IRB.getInt8(1));
-  MDBuilder MDB(I->getContext());
-  MDNode *BranchWeights =
-      MDB.createBranchWeights(1 /*ThenBlock*/, 10 /*ElseBlock*/);
-  Instruction *CheckTerm =
-      SplitBlockAndInsertIfThen(CmpInst, I, false, BranchWeights);
-  BasicBlock *ThenBlock = CheckTerm->getParent();
-  // ThenBlock -- slowpath (store buffer emulation)
+  BasicBlock *ThenBlock = SSBDoEmulateHelper(I);
   IRBuilder<> IRBThen(ThenBlock->getFirstNonPHI());
 
   Value *ReturnAddress = IRBThen.CreateCall(
       Intrinsic::getDeclaration(I->getModule(), Intrinsic::returnaddress),
-      IRB.getInt32(0));
+      IRBThen.getInt32(0));
+
+  auto Args = SmallVector<Value *, 8>();
   Args.push_back(ReturnAddress);
   IRBThen.CreateCall(SSBRetCheck, Args);
   NumInstrumentedRetCheck++;
