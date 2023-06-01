@@ -32,14 +32,12 @@ void *th2(void *_arg) {
   return NULL;
 }
 
-void do_test(void) {
+void run(int *flush_vector, int size) {
   pthread_t pth1, pth2;
   int go = 0;
-  int flush_vector[] = {1, 0};
 
   syscall(SYS_PSO_CLEAR);
-
-  syscall(SYS_SSB_FEEDINPUT, flush_vector, 2);
+  syscall(SYS_SSB_FEEDINPUT, flush_vector, size);
 
   pthread_create(&pth1, NULL, th1, (void *)&go);
   pthread_create(&pth2, NULL, th2, (void *)&go);
@@ -48,6 +46,25 @@ void do_test(void) {
 
   pthread_join(pth1, NULL);
   pthread_join(pth2, NULL);
+}
+
+void do_test(void) {
+  struct vec_t {
+    int size;
+    int vec[3];
+  } flush_vectors[] = {
+      {2, {1, 0}},    {2, {0, 1}},    {3, {1, 1, 0}}, {3, {1, 0, 1}},
+      {3, {0, 1, 1}}, {3, {1, 0, 0}}, {3, {0, 1, 0}}, {3, {0, 0, 1}},
+  };
+
+  for (int i = 0; i < sizeof(flush_vectors) / sizeof(flush_vectors[0]); i++) {
+    struct vec_t *v = &flush_vectors[i];
+    printf("Flush vector:\n");
+    for (int j = 0; j < v->size; j++)
+      printf("%d ", v->vec[j]);
+    printf("\n");
+    run(v->vec, v->size);
+  }
 }
 
 int main(void) {
