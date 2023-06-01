@@ -653,11 +653,25 @@ bool SoftStoreBuffer::instrumentRetCheck(Instruction *I) {
   IRBuilder<> IRB(I);
   LLVM_DEBUG(dbgs() << "Instrumenting a retchk callback at " << *I << "\n");
   auto Args = SmallVector<Value *, 8>();
-  Value *ReturnAddress = IRB.CreateCall(
+
+  auto *DoEmulate = IRB.CreateLoad(SSBDoEmulate);
+  SetNoSanitizeMetadata(DoEmulate);
+  // If __do_emulate == 1
+  Value *CmpInst = IRB.CreateICmpEQ(DoEmulate, IRB.getInt8(1));
+  MDBuilder MDB(I->getContext());
+  MDNode *BranchWeights =
+      MDB.createBranchWeights(1 /*ThenBlock*/, 10 /*ElseBlock*/);
+  Instruction *CheckTerm =
+      SplitBlockAndInsertIfThen(CmpInst, I, false, BranchWeights);
+  BasicBlock *ThenBlock = CheckTerm->getParent();
+  // ThenBlock -- slowpath (store buffer emulation)
+  IRBuilder<> IRBThen(ThenBlock->getFirstNonPHI());
+
+  Value *ReturnAddress = IRBThen.CreateCall(
       Intrinsic::getDeclaration(I->getModule(), Intrinsic::returnaddress),
       IRB.getInt32(0));
   Args.push_back(ReturnAddress);
-  IRB.CreateCall(SSBRetCheck, Args);
+  IRBThen.CreateCall(SSBRetCheck, Args);
   NumInstrumentedRetCheck++;
   return true;
 }
