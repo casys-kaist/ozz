@@ -74,9 +74,12 @@ STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
 STATISTIC(NumInstrumentedFlushes, "Number of instrumented flushed");
 STATISTIC(NumInstrumentedRetCheck, "Number of instrumented return check");
+STATISTIC(NumInstrumentedFuncEntry, "Number of instrumented function entry");
 STATISTIC(NumAccessesWithBadSize, "Number of accesses with bad size");
 
 namespace {
+
+static BasicBlock::iterator getFirstNonPHIOrDbgOrAlloca(BasicBlock *bb);
 
 static std::string getIFLFileName() {
   // TODO: Clarify lifetimes of string variations (i.e., StringRef,
@@ -183,6 +186,7 @@ private:
   bool instrumentLoadOrStore(Instruction *I, const DataLayout &DL);
   bool instrumentFlush(Instruction *I);
   bool instrumentRetCheck(Instruction *I);
+  bool instrumentFuncEntry(Instruction *I);
   FunctionCallee findCallbackFunction();
   bool addrPointsToConstantData(Value *Addr);
   void chooseInstructionsToInstrument(SmallVectorImpl<Instruction *> &Local,
@@ -198,6 +202,7 @@ private:
   bool isIRQEntryOfTargetArch(Function &F);
   bool isSyscallEntryOfTargetArch(Function &F);
   BasicBlock *SSBDoEmulateHelper(Instruction *I);
+  void instrumentHelper(Instruction *I, FunctionCallee callback);
   void SetNoSanitizeMetadata(Instruction *I) {
     I->setMetadata(I->getModule()->getMDKindID("nosanitize"),
                    MDNode::get(I->getContext(), None));
@@ -219,6 +224,7 @@ private:
   FunctionCallee SSBStore[kNumberOfAccessSizes];
   FunctionCallee SSBFlush;
   FunctionCallee SSBRetCheck;
+  FunctionCallee SSBFuncEntry;
   Constant *SSBDoEmulate;
   enum Architecture { X86_64, Aarch64, kNumberOfArchitectures };
   Architecture TargetArchitecture;
@@ -535,6 +541,11 @@ bool SoftStoreBuffer::instrumentAll(Function &F, const TargetLibraryInfo &TLI,
     for (auto Inst : OutofScopeCalls)
       Res |= instrumentFlush(Inst);
 
+  // Function entry callbacks
+  auto &entryBB = F.getEntryBlock();
+  auto *firstInst = &*getFirstNonPHIOrDbgOrAlloca(&entryBB);
+  instrumentFuncEntry(firstInst);
+
   if (F.getName() != "pso_test_breakpoint")
     // TODO: As our return check callback is incomplete, it flushes
     // the store buffer when returning from pso_test_breakpoint()
@@ -652,13 +663,8 @@ bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
   return true;
 }
 
-bool SoftStoreBuffer::instrumentRetCheck(Instruction *I) {
-  if (!ClInstrumentFlush)
-    // Retchk is also a kind of flush callback
-    return false;
-
-  LLVM_DEBUG(dbgs() << "Instrumenting a retchk callback at " << *I << "\n");
-
+void SoftStoreBuffer::instrumentHelper(Instruction *I,
+                                       FunctionCallee callback) {
   BasicBlock *ThenBlock = SSBDoEmulateHelper(I);
   IRBuilder<> IRBThen(ThenBlock->getFirstNonPHI());
 
@@ -668,8 +674,28 @@ bool SoftStoreBuffer::instrumentRetCheck(Instruction *I) {
 
   auto Args = SmallVector<Value *, 8>();
   Args.push_back(ReturnAddress);
-  IRBThen.CreateCall(SSBRetCheck, Args);
+  IRBThen.CreateCall(callback, Args);
+}
+
+bool SoftStoreBuffer::instrumentRetCheck(Instruction *I) {
+  if (!ClInstrumentFlush)
+    // Retchk is also a kind of flush callback
+    return false;
+  LLVM_DEBUG(dbgs() << "Instrumenting a retchk callback at " << *I << "\n");
   NumInstrumentedRetCheck++;
+  instrumentHelper(I, SSBRetCheck);
+  return true;
+}
+
+bool SoftStoreBuffer::instrumentFuncEntry(Instruction *I) {
+  if (!ClInstrumentFlush)
+    // Entry callbacks are for helping retchk callbacks. So if we do
+    // not retchk, then entry callbacks are pointless
+    return false;
+  LLVM_DEBUG(dbgs() << "Instrumenting an function-entry callback at " << *I
+                    << "\n");
+  NumInstrumentedFuncEntry++;
+  instrumentHelper(I, SSBFuncEntry);
   return true;
 }
 
@@ -726,6 +752,10 @@ void SoftStoreBuffer::initialize(Module &M) {
     SmallString<32> RetCheckName("__ssb_" + TargetMemoryModelStr + "_retchk");
     SSBRetCheck = M.getOrInsertFunction(RetCheckName, Attr, IRB.getVoidTy(),
                                         IRB.getInt8PtrTy());
+    SmallString<32> FuncEntryName("__ssb_" + TargetMemoryModelStr +
+                                  "_funcentry");
+    SSBFuncEntry = M.getOrInsertFunction(FuncEntryName, Attr, IRB.getVoidTy(),
+                                         IRB.getInt8PtrTy());
     SSBDoEmulate = M.getOrInsertGlobal("__ssb_do_emulate", IRB.getInt8Ty());
   }
 }
@@ -761,6 +791,37 @@ void SoftStoreBuffer::appendFunctionName(Function &F) {
   else
     LLVM_DEBUG(dbgs() << "error opening file for writing");
   out.close();
+}
+
+static bool isEntryBlock(BasicBlock *bb) {
+  const Function *F = bb->getParent();
+  assert(F && "Block must have a parent function to use this API");
+  return bb == &F->getEntryBlock();
+}
+
+// NOTE: Copied from a recent version of LLVM
+static BasicBlock::iterator getFirstNonPHIOrDbgOrAlloca(BasicBlock *bb) {
+  Instruction *FirstNonPHI = bb->getFirstNonPHI();
+  if (!FirstNonPHI)
+    return bb->end();
+
+  BasicBlock::iterator InsertPt = FirstNonPHI->getIterator();
+  if (InsertPt->isEHPad())
+    ++InsertPt;
+
+  if (isEntryBlock(bb)) {
+    BasicBlock::const_iterator End = bb->end();
+    while (InsertPt != End &&
+           (isa<AllocaInst>(*InsertPt) || isa<DbgInfoIntrinsic>(*InsertPt) ||
+            isa<PseudoProbeInst>(*InsertPt))) {
+      if (const AllocaInst *AI = dyn_cast<AllocaInst>(&*InsertPt)) {
+        if (!AI->isStaticAlloca())
+          break;
+      }
+      ++InsertPt;
+    }
+  }
+  return InsertPt;
 }
 
 static bool isIndirectCall(CallBase *CB) { return CB->isIndirectCall(); }
