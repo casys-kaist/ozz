@@ -19,7 +19,7 @@ void *th1(void *_arg) {
   syscall(SYS_SSB_SWITCH);
   while (!go)
     ;
-  syscall(SYS_PSO_WRITER, 1, 1, 0);
+  syscall(SYS_PSO_WRITER, 1, 1, 1);
   return NULL;
 }
 
