@@ -28,6 +28,9 @@
 
 #include <keyutils.h>
 
+#include "hypercall.h"
+#include "test.h"
+
 #define O_NOTIFICATION_PIPE O_EXCL
 #define KEYCTL_WATCH_KEY 0x20
 #define IOC_WATCH_QUEUE_SET_SIZE 0x5760
@@ -37,23 +40,42 @@ int r[2];
 
 void *read_thread(void *arg) {
   char buf[1024];
+
+  pin(2);
+
+  hypercall(HCALL_INSTALL_BP, 0xffffffffffffffff, 1, 0);
+
+  activate_bp_sync();
+
+  syscall(SYS_SSB_SWITCH);
   if (read(r[0], buf, sizeof(buf)) == -1) {
     perror("read");
     exit(EXIT_FAILURE);
   }
 
-  printf("%s", buf);
+  /* printf("%s", buf); */
+  hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
 
   return NULL;
 }
 
 void *ketctl_set_timeout_thread(void *arg) {
+  pin(1);
+
+  hypercall(HCALL_INSTALL_BP, 0xffffffff81b5e83e, 0, 0);
+
+  activate_bp_sync();
+
+  syscall(SYS_SSB_SWITCH);
   keyctl(KEYCTL_SET_TIMEOUT, key, -1, 0);
-  printf("ketctl_set_timeout_thread done\n");
+  /* printf("ketctl_set_timeout_thread done\n"); */
+  hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
   return NULL;
 }
 
-int main(int argc, char *argv[]) {
+void run() {
+  hypercall(HCALL_RESET, 0, 0, 0);
+  hypercall(HCALL_PREPARE, 2, 2, 0);
 
   key = add_key("cifs.spnego", "syz", 0, 0, KEY_SPEC_USER_KEYRING);
   if (key == -1) {
@@ -61,7 +83,7 @@ int main(int argc, char *argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  printf("key: %x\n", key);
+  /* printf("key: %x\n", key); */
 
   if (pipe2(r, O_NOTIFICATION_PIPE)) {
     perror("pipe2");
@@ -85,5 +107,11 @@ int main(int argc, char *argv[]) {
   pthread_join(pth1, NULL);
   pthread_join(pth2, NULL);
 
-  exit(EXIT_SUCCESS);
+  hypercall(HCALL_RESET, 0, 0, 0);
+}
+
+int main(int argc, char *argv[]) {
+  pin(0);
+  do_test(true);
+  return 0;
 }

@@ -1,14 +1,34 @@
 #ifndef __TEST_H
 #define __TEST_H
 
+#include <sched.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 #include "hypercall.h"
 
 #define SYS_SSB_FEEDINPUT 500
 #define SYS_SSB_SWITCH 503
+
+#define EINVAL 22
+#define EAGAIN 11
+
+bool do_sleep() {
+  for (int i = 0; i < 10000000; i++)
+    ;
+  return true;
+}
+
+void activate_bp_sync(void) {
+  unsigned long ret;
+  do {
+    ret = hypercall(HCALL_ACTIVATE_BP, 0, 0, 0);
+    if (ret == -EINVAL)
+      exit(-1);
+  } while (ret == -EAGAIN && do_sleep());
+}
 
 struct vec_t {
   int size;
@@ -34,6 +54,13 @@ void do_test(bool enable_kssb) {
   }
   if (enable_kssb)
     hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
+}
+
+void pin(int cpu) {
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  CPU_SET(cpu, &set);
+  sched_setaffinity(0, sizeof(set), &set);
 }
 
 #endif
