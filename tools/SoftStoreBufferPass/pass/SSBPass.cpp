@@ -531,15 +531,26 @@ bool SoftStoreBuffer::instrumentAll(Function &F, const TargetLibraryInfo &TLI,
   for (auto Inst : AllLoadsAndStores)
     Res |= instrumentLoadOrStore(Inst, DL);
 
-  for (auto Inst : MemBarrier)
+  for (auto Inst : MemBarrier) {
+    LLVM_DEBUG(dbgs() << "Instrumenting flush callbacks for membarriers"
+                      << "\n");
     Res |= instrumentFlush(Inst);
+  }
 
-  for (auto Inst : AtomicAccesses)
+  for (auto Inst : AtomicAccesses) {
+    LLVM_DEBUG(dbgs() << "Instrumenting flush callbacks for atomic ops"
+                      << "\n");
     Res |= instrumentFlush(Inst);
+  }
 
-  if (ClInstrumentOutofScopeCalls)
+  if (ClInstrumentOutofScopeCalls) {
+    LLVM_DEBUG(
+        dbgs()
+        << "Instrumenting flush callbacks for out-of-scope function calls"
+        << "\n");
     for (auto Inst : OutofScopeCalls)
       Res |= instrumentFlush(Inst);
+  }
 
   // Function entry callbacks
   auto &entryBB = F.getEntryBlock();
@@ -861,12 +872,16 @@ static bool isAssumeLikeIntrinsic(IntrinsicInst *II) {
   return false;
 }
 
-static bool is__kasan_check_read_write(StringRef name) {
+static bool is__kasan_check_read_write(CallBase *CB) {
+  auto *F = CB->getCalledFunction();
+  if (!F)
+    return false;
+  StringRef name = F->getName();
   return name.startswith("__kasan_check_read") ||
          name.startswith("__kasan_check_write");
 }
 
-static bool isCallingAnnotatedInlineAsm(CallBase *CB) {
+static bool isAnnotatedInlineAsm(CallBase *CB) {
 #define NO_BARRIER_SEMANTIC "no kssb"
   if (CB->isInlineAsm()) {
     auto *Asm = cast<InlineAsm>(CB->getCalledOperand());
@@ -878,6 +893,17 @@ static bool isCallingAnnotatedInlineAsm(CallBase *CB) {
     return annotated;
   }
   return false;
+}
+
+static bool isIntrinsicImplyingBarrier(IntrinsicInst *II) {
+  auto *F = II->getCalledFunction();
+  if (!F)
+    return false;
+  StringRef name = F->getName();
+  // TODO: My assumption is that almost all intrinsic functions do not
+  // imply a memory barrier, and llvm.gc* intrinsics may imply a
+  // barrier. I'm not sure this is correct.
+  return name.startswith("llvm.gc");
 }
 
 bool SoftStoreBuffer::isOutofScopeCall(Instruction *I,
@@ -892,14 +918,21 @@ bool SoftStoreBuffer::isOutofScopeCall(Instruction *I,
     return false;
   }
 
-  if (auto *II = dyn_cast<IntrinsicInst>(I))
+  if (auto *II = dyn_cast<IntrinsicInst>(I)) {
     // Intrinsic function calls are sometimes used to annotate
     // semantics, and do not generate any real code. We don't need to
     // instrument the flush callback in this case.
-    return !isAssumeLikeIntrinsic(II);
+    if (isAssumeLikeIntrinsic(II))
+      return false;
 
-  auto *F = CB->getCalledFunction();
-  if (F && is__kasan_check_read_write(F->getName())) {
+    // There are LLVM intrinsic functions that do not imply memory
+    // barriers. One example is llvm.ctpop.* which counts the bits set
+    // in a value and is used is in is_power_of_2(). Do not instrument
+    // a flush callback in front of them.
+    return isIntrinsicImplyingBarrier(II);
+  }
+
+  if (is__kasan_check_read_write(CB)) {
     // __SANITIZE_ADDRESS__ is defined when building Linux with clang,
     // and accordingly, __kasan_check_{read, write} is called during
     // the runtime. As we don't want to flush the store buffer when
@@ -908,7 +941,7 @@ bool SoftStoreBuffer::isOutofScopeCall(Instruction *I,
     return false;
   }
 
-  if (isCallingAnnotatedInlineAsm(CB)) {
+  if (isAnnotatedInlineAsm(CB)) {
     // We annotate inline assemblies that does not surely have memory
     // barrier semantics. We don't need to instrument the flush
     // callback before those inline assemblies.
