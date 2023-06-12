@@ -19,7 +19,7 @@ int sk;
 void *th1(void *unused) {
   pin(1);
 
-  hypercall(HCALL_INSTALL_BP, 0xffffffff8e5fff1f, 0, 0);
+  hypercall(HCALL_INSTALL_BP, 0xffffffff8e60001f, 0, 0);
 
   activate_bp_sync();
 
