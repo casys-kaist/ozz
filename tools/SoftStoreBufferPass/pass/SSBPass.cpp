@@ -872,13 +872,26 @@ static bool isAssumeLikeIntrinsic(IntrinsicInst *II) {
   return false;
 }
 
-static bool is__kasan_check_read_write(CallBase *CB) {
+static bool calleeFunctionStartsWith(CallBase *CB, StringRef name) {
   auto *F = CB->getCalledFunction();
   if (!F)
     return false;
-  StringRef name = F->getName();
-  return name.startswith("__kasan_check_read") ||
-         name.startswith("__kasan_check_write");
+  StringRef calleeName = F->getName();
+  return calleeName.startswith(name);
+}
+
+static bool isKasanCheckReadWrite(CallBase *CB) {
+#define KASAN_CHECK_READ "__kasan_check_read"
+#define KASAN_CHECK_WRITE "__kasan_check_write"
+  return calleeFunctionStartsWith(CB, KASAN_CHECK_READ) ||
+         calleeFunctionStartsWith(CB, KASAN_CHECK_WRITE);
+}
+
+static bool isKmemcovTraceCallback(CallBase *CB) {
+#define KMEMCOV_TRACE_LOAD "sanitize_memcov_trace_load"
+#define KMEMCOV_TRACE_STORE "sanitize_memcov_trace_store"
+  return calleeFunctionStartsWith(CB, KMEMCOV_TRACE_LOAD) ||
+         calleeFunctionStartsWith(CB, KMEMCOV_TRACE_STORE);
 }
 
 static bool isAnnotatedInlineAsm(CallBase *CB) {
@@ -932,12 +945,17 @@ bool SoftStoreBuffer::isOutofScopeCall(Instruction *I,
     return isIntrinsicImplyingBarrier(II);
   }
 
-  if (is__kasan_check_read_write(CB)) {
+  if (isKasanCheckReadWrite(CB)) {
     // __SANITIZE_ADDRESS__ is defined when building Linux with clang,
     // and accordingly, __kasan_check_{read, write} is called during
     // the runtime. As we don't want to flush the store buffer when
     // KASAN callbacks are called, do not treat the callbacks as
     // out-of-scope-calls.
+    return false;
+  }
+
+  if (isKmemcovTraceCallback(CB)) {
+    // Do not call flush callbacks in front of kmemcov callbacks.
     return false;
   }
 
