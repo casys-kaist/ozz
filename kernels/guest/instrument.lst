@@ -8366,6 +8366,7 @@ batadv_dat_cache_dump
 batadv_dat_check_dhcp_ack
 batadv_dat_drop_broadcast_packet
 batadv_dat_entry_add
+batadv_dat_entry_put
 batadv_dat_forward_data
 batadv_dat_free
 batadv_dat_init
@@ -8431,7 +8432,6 @@ batadv_hardif_neigh_dump
 batadv_hardif_neigh_get
 batadv_hardif_neigh_release
 batadv_hardif_no_broadcast
-batadv_hardif_put
 batadv_hardif_release
 batadv_hash_add
 batadv_hash_destroy
@@ -8466,7 +8466,6 @@ batadv_iv_ogm_iface_update_mac
 batadv_iv_ogm_neigh_cmp
 batadv_iv_ogm_neigh_dump
 batadv_iv_ogm_neigh_dump_hardif
-batadv_iv_ogm_neigh_get_tq_avg
 batadv_iv_ogm_neigh_is_sob
 batadv_iv_ogm_orig_dump
 batadv_iv_ogm_orig_get
@@ -8504,7 +8503,7 @@ batadv_nc_init_orig
 batadv_nc_mesh_free
 batadv_nc_mesh_init
 batadv_nc_node_put
-batadv_nc_packet_free
+batadv_nc_path_put
 batadv_nc_purge_orig
 batadv_nc_purge_paths
 batadv_nc_recv_coded_packet
@@ -8548,6 +8547,7 @@ batadv_orig_dump
 batadv_orig_hash_find
 batadv_orig_ifinfo_get
 batadv_orig_ifinfo_new
+batadv_orig_ifinfo_put
 batadv_orig_ifinfo_release
 batadv_originator_free
 batadv_originator_init
@@ -8595,6 +8595,7 @@ batadv_skb_head_push
 batadv_skb_set_priority
 batadv_softif_create_vlan
 batadv_softif_destroy_netlink
+batadv_softif_destroy_vlan
 batadv_softif_free
 batadv_softif_init_early
 batadv_softif_init_late
@@ -8656,6 +8657,7 @@ batadv_tt_orig_list_entry_put
 batadv_tt_prepare_tvlv_global_data
 batadv_tt_prepare_tvlv_local_data
 batadv_tt_purge
+batadv_tt_req_node_put
 batadv_tt_tvlv_container_update
 batadv_tt_tvlv_ogm_handler_v1
 batadv_tt_tvlv_unicast_handler_v1
@@ -8666,6 +8668,7 @@ batadv_tvlv_container_register
 batadv_tvlv_containers_process
 batadv_tvlv_container_unregister
 batadv_tvlv_handler_get
+batadv_tvlv_handler_put
 batadv_tvlv_handler_register
 batadv_tvlv_handler_unregister
 batadv_tvlv_ogm_receive
@@ -10852,7 +10855,6 @@ bpf_iter_sockmap
 bpf_iter_tcp
 bpf_iter_tcp_batch
 bpf_iter_tcp_get_func_proto
-bpf_iter_tcp_put_batch
 bpf_iter_tcp_seq_next
 bpf_iter_tcp_seq_show
 bpf_iter_tcp_seq_start
@@ -10863,7 +10865,6 @@ bpf_iter_udp_seq_stop
 bpf_iter_unix
 bpf_iter_unix_batch
 bpf_iter_unix_get_func_proto
-bpf_iter_unix_put_batch
 bpf_iter_unix_seq_next
 bpf_iter_unix_seq_show
 bpf_iter_unix_seq_start
@@ -18059,6 +18060,7 @@ client_init_data
 client_opens_release
 client_options_open
 client_options_show
+client_put
 client_states_open
 clip_arp_rcv
 clip_constructor
@@ -22746,6 +22748,7 @@ device_is_rq_stackable
 device_link_add
 __device_link_del
 device_link_del
+device_link_drop_managed
 device_link_release_fn
 device_link_remove
 device_links_busy
@@ -36176,6 +36179,7 @@ gb_connection_latency_tag_disable
 gb_connection_latency_tag_enable
 gb_connection_mode_switch_complete
 gb_connection_mode_switch_prepare
+gb_connection_put
 gb_connection_recv
 gb_connection_recv_request
 gb_connection_recv_response
@@ -42743,6 +42747,7 @@ i915_ttm_get_pages
 i915_ttm_io_mem_pfn
 i915_ttm_io_mem_reserve
 i915_ttm_memcpy_init
+i915_ttm_memcpy_release
 i915_ttm_migrate
 i915_ttm_mmap_offset
 __i915_ttm_move
@@ -50022,6 +50027,7 @@ ip_vs_conn_new
 ip_vs_conn_out_get
 ip_vs_conn_out_get_proto
 ip_vs_conn_put
+__ip_vs_conn_put_timer
 ip_vs_conn_rcu_free
 ip_vs_conn_seq_next
 ip_vs_conn_seq_show
@@ -51276,7 +51282,6 @@ j1939_tp_recv
 j1939_tp_rxtimer
 j1939_tp_schedule_txtimer
 j1939_tp_send
-j1939_tp_set_rxtimeout
 j1939_tp_tx_dat_new
 j1939_tp_txtimer
 j1939_xtp_abort_to_errno
@@ -63085,6 +63090,7 @@ nfs_flock
 nfs_flush_incompatible
 nfs_force_lookup_revalidate
 nfs_free_client
+nfs_free_delegation
 nfs_free_inode
 nfs_free_request
 nfs_free_seqid
@@ -63164,6 +63170,7 @@ nfs_instantiate
 nfs_invalidate_atime
 nfs_invalidate_folio
 nfs_io_completion_commit
+nfs_io_completion_put
 nfs_iocounter_wait
 nfs_join_page_group
 nfs_key_timeout_notify
@@ -65555,6 +65562,7 @@ nsim_dev_get_vfs
 nsim_dev_health_break_write
 nsim_dev_health_exit
 nsim_dev_health_init
+nsim_dev_hwsdev_fini
 nsim_dev_hwstats_do_write
 nsim_dev_hwstats_exit
 nsim_dev_hwstats_init
@@ -65639,6 +65647,7 @@ nsim_rate_leaf_parent_set
 nsim_rate_node_del
 nsim_rate_node_new
 nsim_rate_node_parent_set
+nsim_rt6_release
 nsim_set_channels
 nsim_set_coalesce
 nsim_set_features
@@ -67320,6 +67329,7 @@ ocfs2_dlm_seq_show
 ocfs2_dlm_seq_start
 ocfs2_dlm_seq_stop
 ocfs2_dlm_shutdown
+ocfs2_dlm_shutdown_debug
 ocfs2_dlm_unlock
 ocfs2_do_extend_dir
 ocfs2_do_insert_extent
@@ -67713,6 +67723,7 @@ ocfs2_refcount_rec_merge
 ocfs2_refcount_tree_extent_contig
 ocfs2_refcount_tree_fill_root_el
 ocfs2_refcount_tree_get_last_eb_blk
+ocfs2_refcount_tree_put
 ocfs2_refcount_tree_set_last_eb_blk
 ocfs2_refcount_tree_update_clusters
 ocfs2_refcount_unlock
@@ -75908,6 +75919,7 @@ put_files_struct
 put_filesystem
 put_fragment
 put_fs_context
+put_gid_entry
 put_gid_ndev
 put_io_context
 put_iova_domain
@@ -75949,6 +75961,7 @@ put_rpccred
 put_rsb
 put_rxbuf_data
 put_rxbuf_data_and_resubmit_bulk_urb
+__put_seccomp_filter
 put_sg_io_hdr
 puts_queue
 __put_super
@@ -78898,7 +78911,6 @@ refcount_dec_and_lock
 refcount_dec_and_lock_irqsave
 refcount_dec_and_mutex_lock
 refcount_dec_and_rtnl_lock
-refcount_dec_and_test
 refcount_dec_if_one
 refcount_dec_not_one
 refcount_read
@@ -79846,7 +79858,6 @@ remove_save_link
 remove_serial
 remove_session_caps
 remove_session_caps_cb
-remove_ticket_handler
 remove_trail_spaces
 remove_tree
 remove_uuid
@@ -87114,6 +87125,7 @@ sk_msg_trim
 sk_msg_zerocopy_from_iter
 sk_net_capable
 sk_ns_capable
+sk_nulls_del_node_init_rcu
 sk_page_frag_refill
 skp_epaddr_len
 sk_prot_alloc
@@ -91586,7 +91598,6 @@ sunrpc_cache_unhash
 sunrpc_cache_unregister_pipefs
 sunrpc_cache_update
 sunrpc_destroy_cache_detail
-sunrpc_end_cache_remove_entry
 sunrpc_exit_net
 sunrpc_init_cache_detail
 sunrpc_init_net
@@ -92022,6 +92033,7 @@ sync_thread_backup
 sync_thread_master
 sync_timeline_debug_add
 sync_timeline_debug_remove
+sync_timeline_put
 sync_timeline_signal
 synproxy_core_exit
 synproxy_core_init
@@ -93375,7 +93387,6 @@ tcindex_delete
 tcindex_destroy
 __tcindex_destroy_fexts
 tcindex_destroy_fexts_work
-__tcindex_destroy_rexts
 tcindex_destroy_rexts_work
 tcindex_destroy_work
 tcindex_dump
@@ -94055,6 +94066,7 @@ team_nl_send_multicast
 team_nl_send_options_get
 team_nl_send_port_list_get
 team_nl_send_unicast
+team_nl_team_put
 team_notify_peers_count_get
 team_notify_peers_count_set
 team_notify_peers_interval_get
@@ -102985,6 +102997,7 @@ typec_unregister_port
 type_store
 u132_bus_resume
 u132_bus_suspend
+u132_endp_cancel_work
 u132_endp_delete
 u132_endpoint_disable
 u132_endp_urb_dequeue
@@ -103015,6 +103028,7 @@ u132_hub_status_data
 u132_probe
 u132_remove
 u132_resume
+u132_ring_cancel_work
 u132_start_port_reset
 u132_suspend
 u132_urb_dequeue
@@ -108689,6 +108703,7 @@ virtio_fs_init_fs_context
 virtio_fs_init_vq
 virtio_fs_parse_param
 virtio_fs_probe
+virtio_fs_put
 virtio_fs_remove
 virtio_fs_request_complete
 virtio_fs_request_dispatch_work
