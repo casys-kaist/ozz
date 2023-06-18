@@ -31,10 +31,15 @@ func _loadTestdata(raw []byte) (threads [2]interleaving.SerialAccess, e error) {
 		}
 
 		var typ uint32
-		if bytes.Equal(toks[2], []byte("R")) {
+		switch t := string(toks[2]); t {
+		case "R":
 			typ = interleaving.TypeLoad
-		} else {
+		case "W":
 			typ = interleaving.TypeStore
+		case "F":
+			typ = interleaving.TypeFlush
+		default:
+			panic("wrong type")
 		}
 
 		inst, err := strconv.ParseUint(string(toks[0]), 16, 64)
