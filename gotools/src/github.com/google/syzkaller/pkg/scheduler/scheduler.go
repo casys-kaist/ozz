@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"sort"
-	"time"
 
 	"github.com/google/syzkaller/pkg/interleaving"
 )
@@ -38,6 +37,12 @@ type Knotter struct {
 func GetKnotter(opts KnotterOpts) Knotter {
 	if !opts.flagSet(FlagWantParallel) {
 		opts.Flags &= ^FlagWantMessagePassing
+	}
+	if !opts.flagSet(FlagWantMessagePassing) {
+		opts.Flags &= ^FlagWantStrictMessagePassing
+	}
+	if opts.flagSet(FlagWantStrictMessagePassing) {
+		opts.Flags |= FlagDifferentAccessTypeOnly
 	}
 	return Knotter{
 		opts: opts,
@@ -112,7 +117,6 @@ func (knotter *Knotter) ExcavateKnots() {
 		return
 	}
 	knotter.loopAllowed = loopAllowed
-	time.Sleep(time.Microsecond * 100)
 	knotter.fastenKnots()
 }
 
@@ -289,6 +293,10 @@ func (knotter *Knotter) formCommunicationAddr(accesses []interleaving.Access) {
 				continue
 			}
 
+			if knotter.opts.flagSet(FlagDifferentAccessTypeOnly) && (acc1.Typ == acc2.Typ) {
+				continue
+			}
+
 			if !acc1.Overlapped(acc2) {
 				continue
 			}
@@ -401,6 +409,10 @@ func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication) 
 		if !(comm0.Former().Typ == comm1.Former().Typ &&
 			comm0.Latter().Typ == comm1.Latter().Typ &&
 			comm0.Former().Typ != comm0.Latter().Typ) {
+			return
+		}
+		if knotter.opts.flagSet(FlagWantStrictMessagePassing) &&
+			(comm1.Former().Typ != interleaving.TypeStore || comm0.Former().Addr == comm1.Former().Addr) {
 			return
 		}
 	}

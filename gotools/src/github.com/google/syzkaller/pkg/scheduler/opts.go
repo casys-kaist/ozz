@@ -19,6 +19,8 @@ const (
 	FlagStrictTimestamp
 	FlagWantParallel
 	FlagWantMessagePassing
+	FlagDifferentAccessTypeOnly
+	FlagWantStrictMessagePassing
 )
 
 func (opts KnotterOpts) flagSet(flag KnotterFlags) bool {
