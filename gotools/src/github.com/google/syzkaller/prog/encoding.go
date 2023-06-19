@@ -47,6 +47,7 @@ func (p *Prog) serialize(verbose bool) []byte {
 		ctx.call(c)
 	}
 	ctx.schedule(p)
+	ctx.flushVector(p)
 	return ctx.buf.Bytes()
 }
 
@@ -122,6 +123,10 @@ func (ctx *serializer) schedule(p *Prog) {
 		idx := sched.CallIndex(pnt.call, p)
 		ctx.printf("#-- 0x%x, 0x%x, 0x%x\n", idx, pnt.addr, pnt.order)
 	}
+}
+
+func (ctx *serializer) flushVector(p *Prog) {
+	ctx.printf("# flush vector: %v", p.FlushVector)
 }
 
 func (ctx *serializer) arg(arg Arg) {
