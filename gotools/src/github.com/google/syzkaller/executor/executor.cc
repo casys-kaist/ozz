@@ -1203,6 +1203,13 @@ void execute_one()
 void feed_flush_vector(unsigned long* vector, int size)
 {
 #define SYS_FEEDINPUT 500
+	debug("flush vector: %d [", size);
+	for (int i = 0; i < size; i++) {
+		if (i != 0)
+			debug_noprefix(", ");
+		debug_noprefix("%lu", vector[i]);
+	}
+	debug_noprefix("]\n");
 	syscall(SYS_FEEDINPUT, vector, size);
 }
 
