@@ -49,7 +49,7 @@ var (
 	flagConfig       = flag.String("config", "", "configuration file")
 	flagDebug        = flag.Bool("debug", false, "dump all VM output to console")
 	flagBench        = flag.String("bench", "", "write execution statistics into this file periodically")
-	flagSeed         = flag.String("seed", "normal", "seed type (normal, threaded-cve, cve, test)")
+	flagSeed         = flag.String("seed", "normal", "seed type (normal, threaded-cve, cve, test, reorderings)")
 	flagGen          = flag.Bool("gen", true, "generate/mutate inputs")
 	flagCorpus       = flag.Bool("load-corpus", true, "load corpus")
 	flagNewKernel    = flag.Bool("new-kernel", false, "set true if using a new kernel version")
@@ -614,6 +614,7 @@ func (mgr *Manager) seedDir(typ string) (dir string) {
 		{"cve", "cve", "loading seeds for CVEs..."},
 		{"test", "test", "loading seeds for testing..."},
 		{"threaded-cve", "threaded-cve", "loading threaded seeds for CVEs..."},
+		{"reorderings", "reorderings", "loading seeds for reordering bugs..."},
 	}
 	for _, o := range options {
 		if o.typ == typ {
