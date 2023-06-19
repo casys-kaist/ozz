@@ -370,24 +370,9 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 }
 
 func (proc *Proc) executeThreading(p *prog.Prog) []interleaving.Segment {
-	const n = 1
-	if n > 2 {
-		panic("n should be less than (\"relrazzer\") or equal to 2 (\"SegFuzz\")")
-	}
-
-	knotter := scheduler.GetKnotter(proc.knotterOptsThreading)
-	p0 := p.Clone()
-	for i := 0; i < n; i++ {
-		inf := proc.executeRaw(proc.execOpts, p0, StatThreading)
-		seq := proc.sequentialAccesses(inf, p0.Contender)
-		if !knotter.AddSequentialTrace(seq) {
-			log.Logf(1, "Failed to add sequential traces")
-			return nil
-		}
-		p0.Reverse()
-	}
-	knotter.ExcavateKnots()
-	return knotter.GetKnots()
+	inf := proc.executeRaw(proc.execOpts, p, StatThreading)
+	seq := proc.sequentialAccesses(inf, p.Contender)
+	return scheduler.ComputePotentialBuggyKnots(seq)
 }
 
 func (proc *Proc) failCall(p *prog.Prog, call int) {
