@@ -112,7 +112,6 @@ func (ctx *serializer) call(c *Call) {
 		ctx.printf(")")
 	}
 
-	ctx.printf(")")
 	ctx.printf(" <0x%x, 0x%x>", c.Thread, c.Epoch)
 	ctx.printf("\n")
 }
