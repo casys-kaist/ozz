@@ -456,7 +456,7 @@ static int lookup_available_cpu(int id);
 static void coverage_pre_call(thread_t* th);
 static void coverage_post_call(thread_t* th);
 static void thread_create(thread_t* th, int id, bool need_coverage);
-static void thread_mmap_cover(thread_t* th);
+static void thread_mmap_cover(cover_t* cov);
 static void* worker_thread(void* arg);
 static uint64 read_input(uint64** input_posp, bool peek = false);
 static uint64 read_arg(uint64** input_posp);
@@ -588,8 +588,8 @@ int main(int argc, char** argv)
 		cover_mmap(&extra_cov);
 		cover_protect(&extra_cov);
 #ifdef __EXTRA_RFCOV
-		extra_rfcov.type = read_from_coverage
-		    cover_open(&extra_rfcov, true);
+		extra_rfcov.type = read_from_coverage;
+		cover_open(&extra_rfcov, true);
 		cover_protect(&extra_rfcov);
 #endif
 		if (flag_extra_coverage) {
@@ -1174,8 +1174,10 @@ void execute_one()
 				for (int j = 0; j < kMaxFallbackThreads; j++) {
 					thread_t* th = &set->set[j];
 					if (th->executing) {
-						if (flag_coverage)
+						if (flag_coverage) {
 							cover_collect(&th->cov);
+							cover_collect(&th->rfcov);
+						}
 						write_call_output(th, false);
 					}
 				}
@@ -1579,7 +1581,7 @@ void write_extra_output()
 
 void thread_create(thread_t* th, int id, bool need_coverage)
 {
-	debug("creating a thread %d\n", id);
+	debug("creating a thread %d (need_coverage: %d)\n", id, need_coverage);
 	th->created = true;
 	th->id = id;
 	th->executing = false;
@@ -1588,7 +1590,8 @@ void thread_create(thread_t* th, int id, bool need_coverage)
 	if (need_coverage) {
 		if (!th->cov.fd)
 			exitf("out of opened kcov threads");
-		thread_mmap_cover(th);
+		thread_mmap_cover(&th->cov);
+		thread_mmap_cover(&th->rfcov);
 	}
 	event_init(&th->ready);
 	event_init(&th->done);
@@ -1598,14 +1601,12 @@ void thread_create(thread_t* th, int id, bool need_coverage)
 		thread_start(worker_thread, th);
 }
 
-void thread_mmap_cover(thread_t* th)
+void thread_mmap_cover(cover_t* cov)
 {
-	if (th->cov.data != NULL)
+	if (cov->data != NULL)
 		return;
-	cover_mmap(&th->cov);
-	cover_protect(&th->cov);
-	cover_mmap(&th->rfcov);
-	cover_protect(&th->rfcov);
+	cover_mmap(cov);
+	cover_protect(cov);
 }
 
 void* worker_thread(void* arg)
@@ -1626,11 +1627,7 @@ void* worker_thread(void* arg)
 		// the notification.
 		wait_epoch(th);
 		event_reset(&th->ready);
-		// Turn on the ssb switch
-		syscall(kSSBSwitch);
 		execute_call(th);
-		// Then turn off the ssb switch
-		syscall(kSSBSwitch);
 		event_set(&th->done);
 	}
 	return 0;
@@ -1657,16 +1654,18 @@ void execute_call(thread_t* th)
 		th->soft_fail_state = true;
 	}
 
-	if (flag_coverage)
-		cover_reset(&th->cov);
 	// For pseudo-syscalls and user-space functions NONFAILING can abort before assigning to th->res.
 	// Arrange for res = -1 and errno = EFAULT result for such case.
 	th->res = -1;
 	errno = EFAULT;
 	setup_schedule(th->num_sched, th->sched);
+	// Turn on the ssb switch
+	syscall(kSSBSwitch);
 	coverage_pre_call(th);
 	NONFAILING(th->res = execute_syscall(call, th->args));
 	coverage_post_call(th);
+	// Then turn off the ssb switch
+	syscall(kSSBSwitch);
 	th->retry = clear_schedule(th->num_sched, &th->num_filter, th->footprint);
 	th->reserrno = errno;
 	// Our pseudo-syscalls may misbehave.
