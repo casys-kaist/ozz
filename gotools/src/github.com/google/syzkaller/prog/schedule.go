@@ -4,7 +4,6 @@ import (
 	"math/rand"
 
 	"github.com/google/syzkaller/pkg/interleaving"
-	"github.com/google/syzkaller/pkg/scheduler"
 )
 
 type Point struct {
@@ -89,48 +88,14 @@ func (p *Prog) MutateScheduleFromHint(rs rand.Source, hint []interleaving.Segmen
 		return false, nil, nil
 	}
 
-	orch := scheduler.Orchestrator{Segs: hint}
-	selected := orch.SelectHarmoniousKnots()
-
-	scheduler := scheduler.Scheduler{Knots: selected}
-	schedule, ok := scheduler.GenerateSchedPoints()
-	if !ok {
-		return false, nil, hint
-	}
+	r := newRand(p.Target, rs)
+	idx := r.Intn(len(hint))
+	knot := hint[idx].(interleaving.Knot)
+	schedule := []interleaving.Access{knot[1][0]}
 	p.applySchedule(schedule)
 
-	return ok, orch.Used, orch.Segs
-
-	// TODO: Below code can be used to generate a scheduler if we
-	// don't have more hints. I don't delete the code (even though it
-	// is stored in Git) just in case.
-
-	// r := newRand(p.Target, rs)
-	// ctx := &scheduler{
-	// 	p:          p,
-	// 	r:          r,
-	// 	maxPoints:  maxPoints,
-	// 	minPoints:  minPoints,
-	// 	readfrom:   readfrom,
-	// 	staleCount: staleCount,
-	// 	selected:   make(map[uint32]struct{}),
-	// 	serial:     serial,
-	// }
-	// ctx.initialize()
-	// // If the length of actual scheduling point is 1, try to
-	// // mutate more to increase the diversity of interleavings.
-	// for stop := false; !stop; stop = r.oneOf(3) || (len(ctx.schedule) < ctx.minPoints && !r.oneOf(5)) {
-	// 	switch {
-	// 	case r.nOutOf(2, 5): // 40%
-	// 		ctx.addPoint()
-	// 	case r.nOutOf(5, 6): // 50%
-	// 		ctx.movePoint()
-	// 	default: // 10%
-	// 		ctx.removePoint()
-	// 	}
-	// }
-	// ctx.finalize()
-	// return ctx.mutated
+	hint = append(hint[:idx], hint[idx+1:]...)
+	return true, []interleaving.Segment{knot}, hint
 }
 
 func (p *Prog) applySchedule(schedule []interleaving.Access) {

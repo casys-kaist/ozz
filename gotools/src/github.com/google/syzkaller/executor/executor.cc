@@ -154,6 +154,14 @@ static void receive_handshake();
 static void reply_handshake();
 #endif
 
+#define turn_onoff_kssb_switch()                    \
+	do {                                        \
+		if (syscall(kSSBSwitch))            \
+			fail("kssb switch failed"); \
+	} while (0)
+#define turn_on_kssb_switch turn_onoff_kssb_switch
+#define turn_off_kssb_switch turn_onoff_kssb_switch
+
 #if SYZ_EXECUTOR_USES_SHMEM
 // The output region is the only thing in executor process for which consistency matters.
 // If it is corrupted ipc package will fail to parse its contents and panic.
@@ -456,7 +464,7 @@ static int lookup_available_cpu(int id);
 static void coverage_pre_call(thread_t* th);
 static void coverage_post_call(thread_t* th);
 static void thread_create(thread_t* th, int id, bool need_coverage);
-static void thread_mmap_cover(thread_t* th);
+static void thread_mmap_cover(cover_t* cov);
 static void* worker_thread(void* arg);
 static uint64 read_input(uint64** input_posp, bool peek = false);
 static uint64 read_arg(uint64** input_posp);
@@ -470,7 +478,7 @@ static void setup_features(char** enable, int n);
 static void setup_affinity_mask(int mask);
 static bool __run_in_epoch(uint32 epoch, uint32 global);
 static bool run_in_epoch(thread_t* th);
-static void feed_flush_vector(unsigned long* vector, int size);
+static void feed_flush_vector(int* vector, int size);
 
 #include "syscalls.h"
 
@@ -588,8 +596,8 @@ int main(int argc, char** argv)
 		cover_mmap(&extra_cov);
 		cover_protect(&extra_cov);
 #ifdef __EXTRA_RFCOV
-		extra_rfcov.type = read_from_coverage
-		    cover_open(&extra_rfcov, true);
+		extra_rfcov.type = read_from_coverage;
+		cover_open(&extra_rfcov, true);
 		cover_protect(&extra_rfcov);
 #endif
 		if (flag_extra_coverage) {
@@ -980,7 +988,7 @@ void execute_one()
 	int filter[kMaxSchedule] = {
 	    0,
 	};
-	unsigned long vector[kMaxVector] = {
+	int vector[kMaxVector] = {
 	    0,
 	};
 
@@ -995,10 +1003,8 @@ void execute_one()
 		filter_size = kMaxSchedule;
 
 	vector_size = (int)read_input(&input_pos);
-	for (int i = 0; i < vector_size; i++) {
-		int e = (int)read_input(&input_pos);
-		vector[i] = e;
-	}
+	for (int i = 0; i < vector_size; i++)
+		vector[i] = (int)read_input(&input_pos);
 	feed_flush_vector(vector, vector_size);
 
 	for (;;) {
@@ -1174,8 +1180,10 @@ void execute_one()
 				for (int j = 0; j < kMaxFallbackThreads; j++) {
 					thread_t* th = &set->set[j];
 					if (th->executing) {
-						if (flag_coverage)
+						if (flag_coverage) {
 							cover_collect(&th->cov);
+							cover_collect(&th->rfcov);
+						}
 						write_call_output(th, false);
 					}
 				}
@@ -1198,10 +1206,18 @@ void execute_one()
 	}
 }
 
-void feed_flush_vector(unsigned long* vector, int size)
+void feed_flush_vector(int* vector, int size)
 {
 #define SYS_FEEDINPUT 500
-	syscall(SYS_FEEDINPUT, vector, size);
+	debug("flush vector: %d [", size);
+	for (int i = 0; i < size; i++) {
+		if (i != 0)
+			debug_noprefix(", ");
+		debug_noprefix("%d", vector[i]);
+	}
+	debug_noprefix("]\n");
+	if (syscall(SYS_FEEDINPUT, vector, size))
+		fail("feedinput failed");
 }
 
 // Get a thread to run a call
@@ -1251,7 +1267,7 @@ thread_t* pending_call(int call_index, int call_num, uint64 copyout_index, uint6
 
 thread_t* schedule_call(int call_index, int call_num, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos, call_props_t call_props)
 {
-	debug("schedule a call to thread %llu@%llu\n", thread, epoch);
+	debug("schedule a call (%d) to thread %llu@%llu\n", call_index, thread, epoch);
 	if (!__run_in_epoch(epoch, global_epoch)) {
 		// It is too early to schedule this call. Let's
 		// pending the call
@@ -1579,7 +1595,7 @@ void write_extra_output()
 
 void thread_create(thread_t* th, int id, bool need_coverage)
 {
-	debug("creating a thread %d\n", id);
+	debug("creating a thread %d (need_coverage: %d)\n", id, need_coverage);
 	th->created = true;
 	th->id = id;
 	th->executing = false;
@@ -1588,7 +1604,8 @@ void thread_create(thread_t* th, int id, bool need_coverage)
 	if (need_coverage) {
 		if (!th->cov.fd)
 			exitf("out of opened kcov threads");
-		thread_mmap_cover(th);
+		thread_mmap_cover(&th->cov);
+		thread_mmap_cover(&th->rfcov);
 	}
 	event_init(&th->ready);
 	event_init(&th->done);
@@ -1598,14 +1615,12 @@ void thread_create(thread_t* th, int id, bool need_coverage)
 		thread_start(worker_thread, th);
 }
 
-void thread_mmap_cover(thread_t* th)
+void thread_mmap_cover(cover_t* cov)
 {
-	if (th->cov.data != NULL)
+	if (cov->data != NULL)
 		return;
-	cover_mmap(&th->cov);
-	cover_protect(&th->cov);
-	cover_mmap(&th->rfcov);
-	cover_protect(&th->rfcov);
+	cover_mmap(cov);
+	cover_protect(cov);
 }
 
 void* worker_thread(void* arg)
@@ -1626,11 +1641,7 @@ void* worker_thread(void* arg)
 		// the notification.
 		wait_epoch(th);
 		event_reset(&th->ready);
-		// Turn on the ssb switch
-		syscall(kSSBSwitch);
 		execute_call(th);
-		// Then turn off the ssb switch
-		syscall(kSSBSwitch);
 		event_set(&th->done);
 	}
 	return 0;
@@ -1657,17 +1668,19 @@ void execute_call(thread_t* th)
 		th->soft_fail_state = true;
 	}
 
-	if (flag_coverage)
-		cover_reset(&th->cov);
 	// For pseudo-syscalls and user-space functions NONFAILING can abort before assigning to th->res.
 	// Arrange for res = -1 and errno = EFAULT result for such case.
 	th->res = -1;
 	errno = EFAULT;
+	// Turn on the ssb switch
+	turn_on_kssb_switch();
 	setup_schedule(th->num_sched, th->sched);
 	coverage_pre_call(th);
 	NONFAILING(th->res = execute_syscall(call, th->args));
 	coverage_post_call(th);
 	th->retry = clear_schedule(th->num_sched, &th->num_filter, th->footprint);
+	// Then turn off the ssb switch
+	turn_off_kssb_switch();
 	th->reserrno = errno;
 	// Our pseudo-syscalls may misbehave.
 	if ((th->res == -1 && th->reserrno == 0) || call->attrs.ignore_return)

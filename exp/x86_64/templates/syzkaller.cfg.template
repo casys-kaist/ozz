@@ -13,6 +13,7 @@
 	"vm": {
 		"count": $NR_VMS,
 		"kernel": "$KERNEL_X86_64/arch/x86/boot/bzImage",
+		"cmdline": "selinux=0",
 		"cpu": 4,
 		"mem": 4096
 	},

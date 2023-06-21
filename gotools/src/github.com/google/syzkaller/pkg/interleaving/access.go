@@ -123,4 +123,5 @@ func (serial SerialAccess) FindForeachThread(inst uint32, max int) SerialAccess 
 const (
 	TypeStore = iota
 	TypeLoad
+	TypeFlush
 )
