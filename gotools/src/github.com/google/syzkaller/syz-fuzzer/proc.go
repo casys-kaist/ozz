@@ -96,9 +96,9 @@ func (proc *Proc) loop() {
 		generatePeriod = 2
 	}
 	for i := 0; ; i++ {
-		log.Logf(2, "executed=%v scheduled=%v", proc.executed, proc.scheduled)
 		proc.relieveMemoryPressure()
 		if i%100 == 0 {
+			log.Logf(3, "executed=%v scheduled=%v", proc.executed, proc.scheduled)
 			proc.powerSchedule()
 		}
 

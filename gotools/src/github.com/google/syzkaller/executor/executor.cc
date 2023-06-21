@@ -154,6 +154,14 @@ static void receive_handshake();
 static void reply_handshake();
 #endif
 
+#define turn_onoff_kssb_switch()                    \
+	do {                                        \
+		if (syscall(kSSBSwitch))            \
+			fail("kssb switch failed"); \
+	} while (0)
+#define turn_on_kssb_switch turn_onoff_kssb_switch
+#define turn_off_kssb_switch turn_onoff_kssb_switch
+
 #if SYZ_EXECUTOR_USES_SHMEM
 // The output region is the only thing in executor process for which consistency matters.
 // If it is corrupted ipc package will fail to parse its contents and panic.
@@ -1210,7 +1218,8 @@ void feed_flush_vector(unsigned long* vector, int size)
 		debug_noprefix("%lu", vector[i]);
 	}
 	debug_noprefix("]\n");
-	syscall(SYS_FEEDINPUT, vector, size);
+	if (syscall(SYS_FEEDINPUT, vector, size))
+		fail("feedinput failed");
 }
 
 // Get a thread to run a call
@@ -1260,7 +1269,7 @@ thread_t* pending_call(int call_index, int call_num, uint64 copyout_index, uint6
 
 thread_t* schedule_call(int call_index, int call_num, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos, call_props_t call_props)
 {
-	debug("schedule a call to thread %llu@%llu\n", thread, epoch);
+	debug("schedule a call (%d) to thread %llu@%llu\n", call_index, thread, epoch);
 	if (!__run_in_epoch(epoch, global_epoch)) {
 		// It is too early to schedule this call. Let's
 		// pending the call
@@ -1665,15 +1674,15 @@ void execute_call(thread_t* th)
 	// Arrange for res = -1 and errno = EFAULT result for such case.
 	th->res = -1;
 	errno = EFAULT;
-	setup_schedule(th->num_sched, th->sched);
 	// Turn on the ssb switch
-	syscall(kSSBSwitch);
+	turn_on_kssb_switch();
+	setup_schedule(th->num_sched, th->sched);
 	coverage_pre_call(th);
 	NONFAILING(th->res = execute_syscall(call, th->args));
 	coverage_post_call(th);
-	// Then turn off the ssb switch
-	syscall(kSSBSwitch);
 	th->retry = clear_schedule(th->num_sched, &th->num_filter, th->footprint);
+	// Then turn off the ssb switch
+	turn_off_kssb_switch();
 	th->reserrno = errno;
 	// Our pseudo-syscalls may misbehave.
 	if ((th->res == -1 && th->reserrno == 0) || call->attrs.ignore_return)
