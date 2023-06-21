@@ -478,7 +478,7 @@ static void setup_features(char** enable, int n);
 static void setup_affinity_mask(int mask);
 static bool __run_in_epoch(uint32 epoch, uint32 global);
 static bool run_in_epoch(thread_t* th);
-static void feed_flush_vector(unsigned long* vector, int size);
+static void feed_flush_vector(int* vector, int size);
 
 #include "syscalls.h"
 
@@ -988,7 +988,7 @@ void execute_one()
 	int filter[kMaxSchedule] = {
 	    0,
 	};
-	unsigned long vector[kMaxVector] = {
+	int vector[kMaxVector] = {
 	    0,
 	};
 
@@ -1003,10 +1003,8 @@ void execute_one()
 		filter_size = kMaxSchedule;
 
 	vector_size = (int)read_input(&input_pos);
-	for (int i = 0; i < vector_size; i++) {
-		int e = (int)read_input(&input_pos);
-		vector[i] = e;
-	}
+	for (int i = 0; i < vector_size; i++)
+		vector[i] = (int)read_input(&input_pos);
 	feed_flush_vector(vector, vector_size);
 
 	for (;;) {
@@ -1208,14 +1206,14 @@ void execute_one()
 	}
 }
 
-void feed_flush_vector(unsigned long* vector, int size)
+void feed_flush_vector(int* vector, int size)
 {
 #define SYS_FEEDINPUT 500
 	debug("flush vector: %d [", size);
 	for (int i = 0; i < size; i++) {
 		if (i != 0)
 			debug_noprefix(", ");
-		debug_noprefix("%lu", vector[i]);
+		debug_noprefix("%d", vector[i]);
 	}
 	debug_noprefix("]\n");
 	if (syscall(SYS_FEEDINPUT, vector, size))
