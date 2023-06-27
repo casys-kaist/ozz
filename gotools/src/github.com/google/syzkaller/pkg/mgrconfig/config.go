@@ -5,7 +5,8 @@ package mgrconfig
 
 import (
 	"encoding/json"
-	"github.com/google/syzkaller/pkg/cover"
+
+	"github.com/google/syzkaller/pkg/asset"
 )
 
 type Config struct {
@@ -36,20 +37,25 @@ type Config struct {
 	//	"workdir_template": "/mytemplatedir"
 	// Then use these files in VM config:
 	//	"qemu_args": "-fda {{TEMPLATE}}/fd"
-	WorkdirTemplate string `json:"workdir_template"`
+	WorkdirTemplate string `json:"workdir_template,omitempty"`
 	// Directory with kernel object files (e.g. `vmlinux` for linux)
-	// (used for report symbolization and coverage reports, optional).
+	// (used for report symbolization, coverage reports and in tree modules finding, optional).
 	KernelObj string `json:"kernel_obj"`
+	// Directories with out-of-free kernel module object files (optional).
+	// KernelObj is also scanned for in-tree kernel modules and does not need to be duplicated here.
+	// Note: KASLR needs to be disabled and modules need to be pre-loaded at fixed addressses by init process.
+	// Note: the modules need to be unstripped and contain debug info.
+	ModuleObj []string `json:"module_obj,omitempty"`
 	// Kernel source directory (if not set defaults to KernelObj).
 	KernelSrc string `json:"kernel_src,omitempty"`
 	// Location of the driectory where the kernel was built (if not set defaults to KernelSrc)
-	KernelBuildSrc string `json:"kernel_build_src"`
+	KernelBuildSrc string `json:"kernel_build_src,omitempty"`
 	// Kernel subsystem with paths to each subsystem
 	//	"kernel_subsystem": [
 	//		{ "name": "sound", "path": ["sound", "techpack/audio"]},
 	//		{ "name": "mydriver": "path": ["mydriver_path"]}
 	//	]
-	KernelSubsystem []cover.Subsystem `json:"kernel_subsystem,omitempty"`
+	KernelSubsystem []Subsystem `json:"kernel_subsystem,omitempty"`
 	// Arbitrary optional tag that is saved along with crash reports (e.g. branch/commit).
 	Tag string `json:"tag,omitempty"`
 	// Location of the disk image file.
@@ -108,13 +114,23 @@ type Config struct {
 	MaxCrashLogs int `json:"max_crash_logs"`
 
 	// Type of sandbox to use during fuzzing:
-	// "none": don't do anything special beyond resource sandboxing, default
-	// "setuid": impersonate into user nobody (65534). Supported only for some OSes.
-	// "namespace": create a new namespace for fuzzer using CLONE_NEWNS/CLONE_NEWNET/CLONE_NEWPID/etc,
-	//	requires building kernel with CONFIG_NAMESPACES, CONFIG_UTS_NS, CONFIG_USER_NS,
-	//	CONFIG_PID_NS and CONFIG_NET_NS. Supported only for some OSes.
-	// "android": (Android) Emulate permissions of an untrusted app.
+	// "none": test under root;
+	//      don't do anything special beyond resource sandboxing,
+	//      gives the most coverage, default
+	// "namespace": create a new user namespace for testing using CLONE_NEWUSER (supported only on Linux),
+	//      the test process has CAP_ADMIN inside of the user namespace, but not in the init namespace,
+	//      but the test process still has access to all /dev/ nodes owned by root,
+	//      this is a compromise between coverage and bug impact,
+	//	requires building kernel with CONFIG_USER_NS
+	// "setuid": impersonate into user nobody (65534) (supported on Linux, FreeBSD, NetBSD, OpenBSD)
+	//      this is the most restrictive sandbox
+	// "android": emulate permissions of an untrusted Android app (supported only on Linux)
 	Sandbox string `json:"sandbox"`
+
+	// This value is passed as an argument to executor and allows to adjust sandbox behavior
+	// via manager config. For example you can switch between system and user accounts based
+	// on this value.
+	SandboxArg int `json:"sandbox_arg"`
 
 	// Use KCOV coverage (default: true).
 	Cover bool `json:"cover"`
@@ -126,16 +142,34 @@ type Config struct {
 	// "pcs": specify raw PC table files name.
 	// Each line of the file should be: "64-bit-pc:32-bit-weight\n".
 	// eg. "0xffffffff81000000:0x10\n"
-	CovFilter covFilterCfg `json:"cover_filter"`
+	CovFilter covFilterCfg `json:"cover_filter,omitempty"`
+
+	// For each prog in the corpus, remember the raw array of PCs obtained from the kernel.
+	// It can be useful for debugging syzkaller descriptions and syzkaller itself.
+	// Disabled by default as it slows down fuzzing.
+	RawCover bool `json:"raw_cover"`
 
 	// Reproduce, localize and minimize crashers (default: true).
 	Reproduce bool `json:"reproduce"`
+
+	// The number of VMs that are reserved to only perform fuzzing and nothing else.
+	// Can be helpful e.g. to ensure that the pool of fuzzing VMs is never exhaused and
+	// the manager continues fuzzing no matter how many new bugs are encountered.
+	// By default the value is 0, i.e. all VMs can be used for all purposes.
+	FuzzingVMs int `json:"fuzzing_vms,omitempty"`
+
+	// Keep existing programs in the corpus even if they no longer pass syscall filters.
+	// By default it is true, as this is the desired behavior when executing syzkaller
+	// locally.
+	PreserveCorpus bool `json:"preserve_corpus"`
 
 	// List of syscalls to test (optional). For example:
 	//	"enable_syscalls": [ "mmap", "openat$ashmem", "ioctl$ASHMEM*" ]
 	EnabledSyscalls []string `json:"enable_syscalls,omitempty"`
 	// List of system calls that should be treated as disabled (optional).
 	DisabledSyscalls []string `json:"disable_syscalls,omitempty"`
+	// List of syscalls that should not be mutated by the fuzzer (optional).
+	NoMutateSyscalls []string `json:"no_mutate_syscalls,omitempty"`
 	// List of regexps for known bugs.
 	// Don't save reports matching these regexps, but reboot VM after them,
 	// matched against whole report output.
@@ -143,6 +177,15 @@ type Config struct {
 	// Completely ignore reports matching these regexps (don't save nor reboot),
 	// must match the first line of crash message.
 	Ignores []string `json:"ignores,omitempty"`
+	// List of regexps to select bugs of interest.
+	// If this list is not empty and none of the regexps match a bug, it's suppressed.
+	// Regexps are matched against bug title, guilty file and maintainer emails.
+	Interests []string `json:"interests,omitempty"`
+
+	// Path to the strace binary compiled for the target architecture.
+	// If set, for each reproducer syzkaller will run it once more under strace and save
+	// the output.
+	StraceBin string `json:"strace_bin"`
 
 	// Type of virtual machine to use, e.g. "qemu", "gce", "android", "isolated", etc.
 	Type string `json:"type"`
@@ -150,12 +193,27 @@ type Config struct {
 	// Parameters for concrete types are in Config type in vm/TYPE/TYPE.go, e.g. vm/qemu/qemu.go.
 	VM json.RawMessage `json:"vm"`
 
+	// Asset storage configuration. There can be specified the upload location and crash assets
+	// to upload.
+	// A sample config:
+	// {
+	//    "upload_to": "gs://bucket",
+	//    "public_access": true
+	// }
+	// More details can be found in pkg/asset/config.go.
+	AssetStorage *asset.Config `json:"asset_storage"`
+
 	// Implementation details beyond this point. Filled after parsing.
 	Derived `json:"-"`
 }
 
+type Subsystem struct {
+	Name  string   `json:"name"`
+	Paths []string `json:"path"`
+}
+
 type covFilterCfg struct {
-	Files     []string `json:"files"`
-	Functions []string `json:"functions"`
-	RawPCs    []string `json:"pcs"`
+	Files     []string `json:"files,omitempty"`
+	Functions []string `json:"functions,omitempty"`
+	RawPCs    []string `json:"pcs,omitempty"`
 }

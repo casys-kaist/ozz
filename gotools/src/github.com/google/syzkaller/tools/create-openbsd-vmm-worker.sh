@@ -45,24 +45,26 @@ cat >etc/sysctl.conf <<EOF
 ddb.max_line=0
 ddb.max_width=0
 hw.smt=1
+kern.allowdt=1
 EOF
 
 cat >etc/installurl <<EOF
 https://${MIRROR}/pub/OpenBSD
 EOF
 
-cat >etc/rc.local <<EOF
+cat >etc/rc.local <<'EOF'
 (
   nc metadata.google.internal 80 <<EOF2 | tail -n1 > /etc/myname.gce \
   && echo >> /etc/myname.gce \
   && mv /etc/myname{.gce,} \
-  && hostname \$(cat /etc/myname)
+  && hostname $(cat /etc/myname)
 GET /computeMetadata/v1/instance/hostname HTTP/1.0
 Host: metadata.google.internal
 Metadata-Flavor: Google
 
 EOF2
 )
+  cd /dev && for i in `jot - 0 7`; do sh MAKEDEV tap$i; done
 EOF
 
 chmod +x install.site
@@ -130,7 +132,7 @@ growisofs -M "${ISO_PATCHED}" -l -R -graft-points \
 
 # Initialize disk image.
 rm -f worker_disk.raw
-qemu-img create -f raw worker_disk.raw 1G
+qemu-img create -f raw worker_disk.raw 1500M
 
 # Run the installer to create the disk image.
 expect 2>&1 <<EOF | tee install_log

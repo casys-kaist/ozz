@@ -8,47 +8,51 @@ import (
 	"sort"
 
 	"github.com/google/syzkaller/pkg/cover/backend"
+	"github.com/google/syzkaller/pkg/host"
+	"github.com/google/syzkaller/pkg/mgrconfig"
 	"github.com/google/syzkaller/sys/targets"
 )
 
 type ReportGenerator struct {
-	target    *targets.Target
-	srcDir    string
-	objDir    string
-	buildDir  string
-	subsystem []Subsystem
+	target          *targets.Target
+	srcDir          string
+	buildDir        string
+	subsystem       []mgrconfig.Subsystem
+	rawCoverEnabled bool
 	*backend.Impl
 }
 
 type Prog struct {
+	Sig  string
 	Data string
 	PCs  []uint64
 }
 
 var RestorePC = backend.RestorePC
 
-func MakeReportGenerator(target *targets.Target, vm, objDir, srcDir, buildDir string,
-	subsystem []Subsystem) (*ReportGenerator, error) {
-	impl, err := backend.Make(target, vm, objDir, srcDir, buildDir)
+func MakeReportGenerator(target *targets.Target, vm, objDir, srcDir, buildDir string, subsystem []mgrconfig.Subsystem,
+	moduleObj []string, modules []host.KernelModule, rawCover bool) (*ReportGenerator, error) {
+	impl, err := backend.Make(target, vm, objDir, srcDir, buildDir, moduleObj, modules)
 	if err != nil {
 		return nil, err
 	}
-	subsystem = append(subsystem, Subsystem{
+	subsystem = append(subsystem, mgrconfig.Subsystem{
 		Name:  "all",
 		Paths: []string{""},
 	})
 	rg := &ReportGenerator{
-		target:    target,
-		srcDir:    srcDir,
-		objDir:    objDir,
-		buildDir:  buildDir,
-		subsystem: subsystem,
-		Impl:      impl,
+		target:          target,
+		srcDir:          srcDir,
+		buildDir:        buildDir,
+		subsystem:       subsystem,
+		rawCoverEnabled: rawCover,
+		Impl:            impl,
 	}
 	return rg, nil
 }
 
 type file struct {
+	module     string
 	filename   string
 	lines      map[int]line
 	functions  []*function
@@ -76,6 +80,7 @@ func (rg *ReportGenerator) prepareFileMap(progs []Prog) (map[string]*file, error
 	files := make(map[string]*file)
 	for _, unit := range rg.Units {
 		files[unit.Name] = &file{
+			module:   unit.Module.Name,
 			filename: unit.Path,
 			lines:    make(map[int]line),
 			totalPCs: len(unit.PCs),
@@ -92,7 +97,7 @@ func (rg *ReportGenerator) prepareFileMap(progs []Prog) (map[string]*file, error
 	}
 	matchedPC := false
 	for _, frame := range rg.Frames {
-		f := getFile(files, frame.Name, frame.Path)
+		f := getFile(files, frame.Name, frame.Path, frame.Module.Name)
 		ln := f.lines[frame.StartLine]
 		coveredBy := progPCs[frame.PC]
 		if len(coveredBy) == 0 {
@@ -152,7 +157,7 @@ func (rg *ReportGenerator) lazySymbolize(progs []Prog) error {
 	}
 	symbolize := make(map[*backend.Symbol]bool)
 	uniquePCs := make(map[uint64]bool)
-	var pcs []uint64
+	pcs := make(map[*backend.Module][]uint64)
 	for _, prog := range progs {
 		for _, pc := range prog.PCs {
 			if uniquePCs[pc] {
@@ -160,36 +165,41 @@ func (rg *ReportGenerator) lazySymbolize(progs []Prog) error {
 			}
 			uniquePCs[pc] = true
 			sym := rg.findSymbol(pc)
-			if sym == nil {
+			if sym == nil || (sym.Symbolized || symbolize[sym]) {
 				continue
 			}
-			if !sym.Symbolized && !symbolize[sym] {
-				symbolize[sym] = true
-				pcs = append(pcs, sym.PCs...)
-			}
+			symbolize[sym] = true
+			pcs[sym.Module] = append(pcs[sym.Module], sym.PCs...)
 		}
 	}
 	if len(uniquePCs) == 0 {
 		return fmt.Errorf("no coverage collected so far")
-	}
-	if len(pcs) == 0 {
-		return nil
 	}
 	frames, err := rg.Symbolize(pcs)
 	if err != nil {
 		return err
 	}
 	rg.Frames = append(rg.Frames, frames...)
+	uniqueFrames := make(map[uint64]bool)
+	var finalFrames []backend.Frame
+	for _, frame := range rg.Frames {
+		if !uniqueFrames[frame.PC] {
+			uniqueFrames[frame.PC] = true
+			finalFrames = append(finalFrames, frame)
+		}
+	}
+	rg.Frames = finalFrames
 	for sym := range symbolize {
 		sym.Symbolized = true
 	}
 	return nil
 }
 
-func getFile(files map[string]*file, name, path string) *file {
+func getFile(files map[string]*file, name, path, module string) *file {
 	f := files[name]
 	if f == nil {
 		f = &file{
+			module:   module,
 			filename: path,
 			lines:    make(map[int]line),
 			// Special mark for header files, if a file does not have coverage at all it is not shown.

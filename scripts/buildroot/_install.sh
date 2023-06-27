@@ -18,6 +18,7 @@ _build() {
 }
 
 _install() {
+	:
 }
 
 _target="buildroot-$BUILDROOT_VERSION"

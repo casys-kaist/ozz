@@ -11,8 +11,10 @@ package vm
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/syzkaller/pkg/mgrconfig"
@@ -24,21 +26,25 @@ import (
 	// Import all VM implementations, so that users only need to import vm.
 	_ "github.com/google/syzkaller/vm/adb"
 	_ "github.com/google/syzkaller/vm/bhyve"
+	_ "github.com/google/syzkaller/vm/cuttlefish"
 	_ "github.com/google/syzkaller/vm/gce"
 	_ "github.com/google/syzkaller/vm/gvisor"
 	_ "github.com/google/syzkaller/vm/isolated"
 	_ "github.com/google/syzkaller/vm/kvm"
 	_ "github.com/google/syzkaller/vm/odroid"
+	_ "github.com/google/syzkaller/vm/proxyapp"
 	_ "github.com/google/syzkaller/vm/qemu"
+	_ "github.com/google/syzkaller/vm/starnix"
 	_ "github.com/google/syzkaller/vm/vmm"
 	_ "github.com/google/syzkaller/vm/vmware"
 )
 
 type Pool struct {
-	impl     vmimpl.Pool
-	workdir  string
-	template string
-	timeouts targets.Timeouts
+	impl        vmimpl.Pool
+	workdir     string
+	template    string
+	timeouts    targets.Timeouts
+	activeCount int32
 }
 
 type Instance struct {
@@ -46,6 +52,7 @@ type Instance struct {
 	workdir  string
 	timeouts targets.Timeouts
 	index    int
+	onClose  func()
 }
 
 var (
@@ -77,16 +84,17 @@ func Create(cfg *mgrconfig.Config, debug bool) (*Pool, error) {
 		return nil, fmt.Errorf("unknown instance type '%v'", cfg.Type)
 	}
 	env := &vmimpl.Env{
-		Name:     cfg.Name,
-		OS:       cfg.TargetOS,
-		Arch:     cfg.TargetVMArch,
-		Workdir:  cfg.Workdir,
-		Image:    cfg.Image,
-		SSHKey:   cfg.SSHKey,
-		SSHUser:  cfg.SSHUser,
-		Timeouts: cfg.Timeouts,
-		Debug:    debug,
-		Config:   cfg.VM,
+		Name:      cfg.Name,
+		OS:        cfg.TargetOS,
+		Arch:      cfg.TargetVMArch,
+		Workdir:   cfg.Workdir,
+		Image:     cfg.Image,
+		SSHKey:    cfg.SSHKey,
+		SSHUser:   cfg.SSHUser,
+		Timeouts:  cfg.Timeouts,
+		Debug:     debug,
+		Config:    cfg.VM,
+		KernelSrc: cfg.KernelSrc,
 	}
 	impl, err := typ.Ctor(env)
 	if err != nil {
@@ -122,12 +130,27 @@ func (pool *Pool) Create(index int) (*Instance, error) {
 		os.RemoveAll(workdir)
 		return nil, err
 	}
+	atomic.AddInt32(&pool.activeCount, 1)
 	return &Instance{
 		impl:     impl,
 		workdir:  workdir,
 		timeouts: pool.timeouts,
 		index:    index,
+		onClose:  func() { atomic.AddInt32(&pool.activeCount, -1) },
 	}, nil
+}
+
+// TODO: Integration or end-to-end testing is needed.
+//
+//	https://github.com/google/syzkaller/pull/3269#discussion_r967650801
+func (pool *Pool) Close() error {
+	if pool.activeCount != 0 {
+		panic("all the instances should be closed before pool.Close()")
+	}
+	if closer, ok := pool.impl.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
 }
 
 func (inst *Instance) Copy(hostSrc string) (string, error) {
@@ -143,6 +166,13 @@ func (inst *Instance) Run(timeout time.Duration, stop <-chan bool, command strin
 	return inst.impl.Run(timeout, stop, command)
 }
 
+func (inst *Instance) Info() ([]byte, error) {
+	if ii, ok := inst.impl.(vmimpl.Infoer); ok {
+		return ii.Info()
+	}
+	return nil, nil
+}
+
 func (inst *Instance) diagnose(rep *report.Report) ([]byte, bool) {
 	if rep == nil {
 		panic("rep is nil")
@@ -153,6 +183,7 @@ func (inst *Instance) diagnose(rep *report.Report) ([]byte, bool) {
 func (inst *Instance) Close() {
 	inst.impl.Close()
 	os.RemoveAll(inst.workdir)
+	inst.onClose()
 }
 
 type ExitCondition int
@@ -172,20 +203,52 @@ const (
 // Exit says which exit modes should be considered as errors/OK.
 // Returns a non-symbolized crash report, or nil if no error happens.
 func (inst *Instance) MonitorExecution(outc <-chan []byte, errc <-chan error,
-	reporter report.Reporter, exit ExitCondition) (rep *report.Report) {
-	mon := &monitor{
-		inst:     inst,
-		outc:     outc,
-		errc:     errc,
-		reporter: reporter,
-		exit:     exit,
+	reporter *report.Reporter, exit ExitCondition) (rep *report.Report) {
+	return inst.MonitorExecutionRaw(outc, errc, reporter, exit, 0).Report
+}
+
+type ExecutionResult struct {
+	Report    *report.Report
+	RawOutput []byte
+}
+
+func (inst *Instance) MonitorExecutionRaw(outc <-chan []byte, errc <-chan error,
+	reporter *report.Reporter, exit ExitCondition, beforeContextSize int) (res *ExecutionResult) {
+	if beforeContextSize == 0 {
+		beforeContextSize = beforeContextDefault
 	}
-	lastExecuteTime := time.Now()
-	ticker := time.NewTicker(tickerPeriod * inst.timeouts.Scale)
+	mon := &monitor{
+		inst:          inst,
+		outc:          outc,
+		errc:          errc,
+		reporter:      reporter,
+		beforeContext: beforeContextSize,
+		exit:          exit,
+	}
+	return &ExecutionResult{
+		Report:    mon.monitorExecution(),
+		RawOutput: mon.output,
+	}
+}
+
+type monitor struct {
+	inst          *Instance
+	outc          <-chan []byte
+	errc          <-chan error
+	reporter      *report.Reporter
+	exit          ExitCondition
+	output        []byte
+	beforeContext int
+	matchPos      int
+}
+
+func (mon *monitor) monitorExecution() *report.Report {
+	ticker := time.NewTicker(tickerPeriod * mon.inst.timeouts.Scale)
 	defer ticker.Stop()
+	lastExecuteTime := time.Now()
 	for {
 		select {
-		case err := <-errc:
+		case err := <-mon.errc:
 			switch err {
 			case nil:
 				// The program has exited without errors,
@@ -209,9 +272,9 @@ func (inst *Instance) MonitorExecution(outc <-chan []byte, errc <-chan error,
 				}
 				return mon.extractError(crash)
 			}
-		case out, ok := <-outc:
+		case out, ok := <-mon.outc:
 			if !ok {
-				outc = nil
+				mon.outc = nil
 				continue
 			}
 			lastPos := len(mon.output)
@@ -220,12 +283,12 @@ func (inst *Instance) MonitorExecution(outc <-chan []byte, errc <-chan error,
 				bytes.Contains(mon.output[lastPos:], executingProgram2) {
 				lastExecuteTime = time.Now()
 			}
-			if reporter.ContainsCrash(mon.output[mon.matchPos:]) {
+			if mon.reporter.ContainsCrash(mon.output[mon.matchPos:]) {
 				return mon.extractError("unknown error")
 			}
-			if len(mon.output) > 2*beforeContext {
-				copy(mon.output, mon.output[len(mon.output)-beforeContext:])
-				mon.output = mon.output[:beforeContext]
+			if len(mon.output) > 2*mon.beforeContext {
+				copy(mon.output, mon.output[len(mon.output)-mon.beforeContext:])
+				mon.output = mon.output[:mon.beforeContext]
 			}
 			// Find the starting position for crash matching on the next iteration.
 			// We step back from the end of output by maxErrorLength to handle the case
@@ -246,23 +309,13 @@ func (inst *Instance) MonitorExecution(outc <-chan []byte, errc <-chan error,
 		case <-ticker.C:
 			// Detect both "no output whatsoever" and "kernel episodically prints
 			// something to console, but fuzzer is not actually executing programs".
-			if time.Since(lastExecuteTime) > inst.timeouts.NoOutput {
+			if time.Since(lastExecuteTime) > mon.inst.timeouts.NoOutput {
 				return mon.extractError(noOutputCrash)
 			}
 		case <-Shutdown:
 			return nil
 		}
 	}
-}
-
-type monitor struct {
-	inst     *Instance
-	outc     <-chan []byte
-	errc     <-chan error
-	reporter report.Reporter
-	exit     ExitCondition
-	output   []byte
-	matchPos int
 }
 
 func (mon *monitor) extractError(defaultError string) *report.Report {
@@ -297,7 +350,7 @@ func (mon *monitor) extractError(defaultError string) *report.Report {
 }
 
 func (mon *monitor) createReport(defaultError string) *report.Report {
-	rep := mon.reporter.Parse(mon.output[mon.matchPos:])
+	rep := mon.reporter.ParseFrom(mon.output, mon.matchPos)
 	if rep == nil {
 		if defaultError == "" {
 			return nil
@@ -308,17 +361,17 @@ func (mon *monitor) createReport(defaultError string) *report.Report {
 			Suppressed: report.IsSuppressed(mon.reporter, mon.output),
 		}
 	}
-	start := mon.matchPos + rep.StartPos - beforeContext
+	start := rep.StartPos - mon.beforeContext
 	if start < 0 {
 		start = 0
 	}
-	end := mon.matchPos + rep.EndPos + afterContext
-	if end > len(mon.output) {
-		end = len(mon.output)
+	end := rep.EndPos + afterContext
+	if end > len(rep.Output) {
+		end = len(rep.Output)
 	}
-	rep.Output = mon.output[start:end]
-	rep.StartPos += mon.matchPos - start
-	rep.EndPos += mon.matchPos - start
+	rep.Output = rep.Output[start:end]
+	rep.StartPos -= start
+	rep.EndPos -= start
 	return rep
 }
 
@@ -351,11 +404,11 @@ const (
 )
 
 var (
-	executingProgram1 = []byte("executing program")  // syz-fuzzer output
+	executingProgram1 = []byte("executing program")  // syz-fuzzer, syz-runner output
 	executingProgram2 = []byte("executed programs:") // syz-execprog output
 
-	beforeContext = 1024 << 10
-	afterContext  = 128 << 10
+	beforeContextDefault = 1024 << 10
+	afterContext         = 128 << 10
 
 	tickerPeriod         = 10 * time.Second
 	waitForOutputTimeout = 10 * time.Second

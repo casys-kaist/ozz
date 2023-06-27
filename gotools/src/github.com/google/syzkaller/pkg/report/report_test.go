@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/syzkaller/pkg/mgrconfig"
 	"github.com/google/syzkaller/pkg/osutil"
+	"github.com/google/syzkaller/pkg/testutil"
 	"github.com/google/syzkaller/sys/targets"
 )
 
@@ -42,7 +43,7 @@ type ParseTest struct {
 	Report     []byte
 }
 
-func testParseFile(t *testing.T, reporter Reporter, fn string) {
+func testParseFile(t *testing.T, reporter *Reporter, fn string) {
 	data, err := ioutil.ReadFile(fn)
 	if err != nil {
 		t.Fatal(err)
@@ -151,7 +152,7 @@ func parseHeaderLine(t *testing.T, test *ParseTest, ln string) {
 	}
 }
 
-func testParseImpl(t *testing.T, reporter Reporter, test *ParseTest) {
+func testParseImpl(t *testing.T, reporter *Reporter, test *ParseTest) {
 	rep := reporter.Parse(test.Log)
 	containsCrash := reporter.ContainsCrash(test.Log)
 	expectCrash := (test.Title != "")
@@ -203,7 +204,7 @@ func testParseImpl(t *testing.T, reporter Reporter, test *ParseTest) {
 	checkReport(t, reporter, rep, test)
 }
 
-func checkReport(t *testing.T, reporter Reporter, rep *Report, test *ParseTest) {
+func checkReport(t *testing.T, reporter *Reporter, rep *Report, test *ParseTest) {
 	if test.HasReport && !bytes.Equal(rep.Report, test.Report) {
 		t.Fatalf("extracted wrong report:\n%s\nwant:\n%s", rep.Report, test.Report)
 	}
@@ -233,12 +234,12 @@ func checkReport(t *testing.T, reporter Reporter, rep *Report, test *ParseTest) 
 	}
 	if rep.StartPos != 0 {
 		// If we parse from StartPos, we must find the same report.
-		rep1 := reporter.Parse(test.Log[rep.StartPos:])
-		if rep1 == nil || rep1.Title != rep.Title || rep1.StartPos != 0 {
+		rep1 := reporter.ParseFrom(test.Log, rep.StartPos)
+		if rep1 == nil || rep1.Title != rep.Title || rep1.StartPos != rep.StartPos {
 			t.Fatalf("did not find the same report from rep.StartPos=%v", rep.StartPos)
 		}
 		// If we parse from EndPos, we must not find the same report.
-		rep2 := reporter.Parse(test.Log[rep.EndPos:])
+		rep2 := reporter.ParseFrom(test.Log, rep.EndPos)
 		if rep2 != nil && rep2.Title == rep.Title {
 			t.Fatalf("found the same report after rep.EndPos=%v", rep.EndPos)
 		}
@@ -277,28 +278,9 @@ func TestGuiltyFile(t *testing.T) {
 	forEachFile(t, "guilty", testGuiltyFile)
 }
 
-func testGuiltyFile(t *testing.T, reporter Reporter, fn string) {
-	data, err := ioutil.ReadFile(fn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for bytes.HasPrefix(data, []byte{'#'}) {
-		nl := bytes.Index(data, []byte{'\n'})
-		if nl == -1 {
-			t.Fatalf("unterminated comment in file")
-		}
-		data = data[nl+1:]
-	}
-	const prefix = "FILE: "
-	if !bytes.HasPrefix(data, []byte(prefix)) {
-		t.Fatalf("no %v prefix in file", prefix)
-	}
-	nlnl := bytes.Index(data[len(prefix):], []byte{'\n', '\n'})
-	if nlnl == -1 {
-		t.Fatalf("no \\n\\n in file")
-	}
-	file := string(data[len(prefix) : len(prefix)+nlnl])
-	report := data[len(prefix)+nlnl:]
+func testGuiltyFile(t *testing.T, reporter *Reporter, fn string) {
+	vars, report := parseGuiltyTest(t, fn)
+	file := vars["FILE"]
 	rep := reporter.Parse(report)
 	if rep == nil {
 		t.Fatalf("did not find crash in the input")
@@ -317,12 +299,49 @@ func testGuiltyFile(t *testing.T, reporter Reporter, fn string) {
 	if err := reporter.Symbolize(rep); err != nil {
 		t.Fatalf("failed to symbolize report: %v", err)
 	}
-	if rep.guiltyFile != file {
-		t.Fatalf("got guilty %q, want %q", rep.guiltyFile, file)
+	if rep.GuiltyFile != file {
+		t.Fatalf("got guilty %q, want %q", rep.GuiltyFile, file)
 	}
 }
 
-func forEachFile(t *testing.T, dir string, fn func(t *testing.T, reporter Reporter, fn string)) {
+func TestRawGuiltyFile(t *testing.T) {
+	forEachFile(t, "guilty_raw", testRawGuiltyFile)
+}
+
+func testRawGuiltyFile(t *testing.T, reporter *Reporter, fn string) {
+	vars, report := parseGuiltyTest(t, fn)
+	outFile := reporter.ReportToGuiltyFile(vars["TITLE"], report)
+	if outFile != vars["FILE"] {
+		t.Fatalf("expected %#v, got %#v", vars["FILE"], outFile)
+	}
+}
+
+func parseGuiltyTest(t *testing.T, fn string) (map[string]string, []byte) {
+	data, err := ioutil.ReadFile(fn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nlnl := bytes.Index(data, []byte{'\n', '\n'})
+	if nlnl == -1 {
+		t.Fatalf("no \\n\\n in file")
+	}
+	vars := map[string]string{}
+	s := bufio.NewScanner(bytes.NewReader(data[:nlnl]))
+	for s.Scan() {
+		ln := strings.TrimSpace(s.Text())
+		if ln == "" || ln[0] == '#' {
+			continue
+		}
+		colon := strings.IndexByte(ln, ':')
+		if colon == -1 {
+			t.Fatalf("no : in %s", ln)
+		}
+		vars[strings.TrimSpace(ln[:colon])] = strings.TrimSpace(ln[colon+1:])
+	}
+	return vars, data[nlnl+2:]
+}
+
+func forEachFile(t *testing.T, dir string, fn func(t *testing.T, reporter *Reporter, fn string)) {
 	for os := range ctors {
 		if os == targets.Windows {
 			continue // not implemented
@@ -331,16 +350,21 @@ func forEachFile(t *testing.T, dir string, fn func(t *testing.T, reporter Report
 			Derived: mgrconfig.Derived{
 				TargetOS:   os,
 				TargetArch: targets.AMD64,
+				SysTarget:  targets.Get(os, targets.AMD64),
 			},
 		}
 		reporter, err := NewReporter(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, file := range readDir(t, filepath.Join("testdata", os, dir)) {
-			t.Run(fmt.Sprintf("%v/%v", os, filepath.Base(file)), func(t *testing.T) {
-				fn(t, reporter, file)
-			})
+		// There is little point in re-parsing all test files in race mode.
+		// Just make sure there are no obvious races by running few reports from "all" dir.
+		if !testutil.RaceEnabled {
+			for _, file := range readDir(t, filepath.Join("testdata", os, dir)) {
+				t.Run(fmt.Sprintf("%v/%v", os, filepath.Base(file)), func(t *testing.T) {
+					fn(t, reporter, file)
+				})
+			}
 		}
 		for _, file := range readDir(t, filepath.Join("testdata", "all", dir)) {
 			t.Run(fmt.Sprintf("%v/all/%v", os, filepath.Base(file)), func(t *testing.T) {

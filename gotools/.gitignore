@@ -1,3 +1,9 @@
 *
 !/.gitignore
-!/src/github.com/google/syzkaller
+# TODO: Are all those recursive stuffs required?
+!/src/
+!/src/github.com/
+!/src/github.com/google/
+!/src/github.com/google/**/*
+TAGS
+.dir-locals.el

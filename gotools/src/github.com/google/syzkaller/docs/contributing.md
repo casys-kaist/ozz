@@ -2,6 +2,9 @@
 
 If you want to contribute to the project, feel free to send a pull request following the [guidelines](contributing.md#guidelines) below.
 
+In case this is your first pull request to syzkaller, you will need to [sign Google CLA](https://cla.developers.google.com/)
+and add yourself to [AUTHORS](/AUTHORS)/[CONTRIBUTORS](/CONTRIBUTORS) files in the first commit.
+
 ## What to work on
 
 Extending/improving [system call descriptions](syscall_descriptions.md) is always a good idea.
@@ -10,15 +13,23 @@ Unassigned issues from the [bug tracker](https://github.com/google/syzkaller/iss
 
 To contribute code or syscall descriptions, at the very least you need to be able to build and run syzkaller, see the instructions [here](/docs/setup.md).
 
-If you want to work on something non-trivial, please briefly describe it on the [syzkaller@googlegroups.com](https://groups.google.com/forum/#!forum/syzkaller) mailing list first,
-so that there is agreement on high level approach and no duplication of work between contributors.
-
 ## Guidelines
 
-In case this is your first pull request to syzkaller, you need to:
+If you want to work on something non-trivial, please briefly describe it on the
+[syzkaller@googlegroups.com](https://groups.google.com/forum/#!forum/syzkaller) mailing list first,
+so that there is an agreement on the high level approach/design and no duplication of work between contributors.
 
-- Sign [Google CLA](https://cla.developers.google.com/) (if you don't a bot will ask you to do that).
-- Add yourself to [AUTHORS](/AUTHORS)/[CONTRIBUTORS](/CONTRIBUTORS) files in the first commit.
+Split large changes into smaller, logically cohesive commits. Small commits are much easier and faster to review and iterate on.
+
+Everything that can be reasonably tested should be tested.
+
+Provide enough documentation for other users to use the new feature.
+
+Keep the style of the code, tests, comments, docs, log/error messages consistent with the existing style.
+
+Continuous Integration (CI) system runs a number of tests and some [opinionated] style checks. They need to pass.
+You can test locally with `make presubmit`, if you don't have some prerequisites installed,
+you may use `syz-env` (see below).
 
 ### Commits
 
@@ -53,7 +64,7 @@ Commit message line length is limited to 120 characters.
 
 Also:
 
-- If you commit fixes an issue, please include `Fixes #NNN` line into commit message
+- If your commit fixes an issue, please include `Fixes #NNN` line into commit message
 (where `NNN` is the issue number). This will auto-close the issue. If you need to mention
 an issue without closing it, add `Update #NNN`.
 - For syscall descriptions `*.const` files are checked-in with the `*.txt` changes
@@ -74,14 +85,13 @@ in the same commit.
 [github.com/google/syzkaller](https://github.com/google/syzkaller) and press `Fork` button in the top-right corner of
 the page. This will create `https://github.com/YOUR_GITHUB_USERNAME/syzkaller` repository.
 
-- Checkout main syzkaller repository if you have not already. To work with `go` command the checkout must be under
-`$GOPATH`. The simplest way to do it is to run `go get -u -d github.com/google/syzkaller/prog`, this will checkout
-the repository in `$GOPATH/src/github.com/google/syzkaller`.
+- Checkout main syzkaller repository if you have not already. The simplest way to do it is to run `git clone https://github.com/google/syzkaller`, this will checkout
+the repository in the current working directory.
 - Remember to `export PATH=$GOPATH/bin:$PATH` if you have not already.
 - Then add your repository as an additional origin:
 
     ```shell
-    cd $GOPATH/src/github.com/google/syzkaller
+    cd syzkaller
     git remote add my-origin https://github.com/YOUR_GITHUB_USERNAME/syzkaller.git
     git fetch my-origin
     git checkout -b my-branch my-origin/master
@@ -114,7 +124,7 @@ Then it can be used to wrap almost any make invocation as:
 ```
 syz-env make format
 syz-env make presubmit
-syz-env make extract SOURCEDIR=~/linux
+syz-env make extract SOURCEDIR=$(readlink -f ~/linux)
 ```
 Or other commands/scripts, e.g.:
 ```

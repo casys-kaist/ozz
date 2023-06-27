@@ -747,6 +747,8 @@ mutate5(filename ptr[in, filename], flags flags[open_flags]) fd
 mutate6(fd fd, data ptr[in, array[int8]], size bytesize[data])
 mutate7(a0 ptr[in, string], a1 len[a0])
 mutate8(a0 proc[100, 4, opt])
+mutate9(filename ptr[in, filename])
+mutate10(filename ptr[out, filename])
 
 # Test for arguments mutation
 mutate_integer(b1 bool8, b2 bool8, b3 bool8, b4 bool8, b5 bool8, b6 bool8, b7 bool8, b8 bool8, i9 int64)
@@ -774,6 +776,8 @@ minimize$0(a0 proc[10, 2], a1 proc[10, 2, opt])
 
 serialize0(a ptr[in, serialize0_struct])
 serialize1(a ptr[out, array[int8]], b len[a])
+serialize2(a ptr[in, array[int8]])
+serialize3(a ptr[in, compressed_image]) (no_generate, no_minimize)
 
 serialize0_struct {
 	a	string[serialize_strings, 10]
@@ -853,10 +857,10 @@ syz_r102_in_recur1 {
 	f0	r102	(in)
 }
 
-syz_r103_r104_u [
+syz_r103_r104_u {
 	opt0	r103	(out)
 	opt1	r104	(in)
-]
+}
 
 syz_r103_r104_s {
 	opt0	r103	(out)

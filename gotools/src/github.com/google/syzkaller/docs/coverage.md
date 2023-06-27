@@ -1,10 +1,28 @@
 # Coverage
 
+`syzkaller` uses [sanitizer coverage (tracing mode)](https://clang.llvm.org/docs/SanitizerCoverage.html#tracing-pcs)
+and [KCOV](https://www.kernel.org/doc/html/latest/dev-tools/kcov.html) for coverage collection.
+Sanitizer coverage is also supported by `gcc` and `KCOV` is supported by some other OSes.
+Note: `gVisor` coverage is completely different.
+
+Coverage is based on tracing `coverage points` inserted into the object code by the compiler.
+A coverage point generally refers to a [basic block](https://en.wikipedia.org/wiki/Basic_block) of code
+or a [CFG edge](https://en.wikipedia.org/wiki/Control-flow_graph)
+(this depends on the compiler and instrumentation mode used during build,
+e.g. for `Linux` and `clang` the default mode is CFG edges, while for `gcc` the default mode is basic blocks).
+Note that coverage points are inserted by the compiler in the middle-end after a significant number
+of transformation and optimization passes. As the result coverage may poorly relate to the source code.
+For example, you may see a covered line after a non-covered line, or you may not see a coverage point
+where you would expect to see it, or vice versa (this may happen if the compiler splits basic blocks,
+or turns control flow constructs into conditional moves without control flow, etc).
+Assessing coverage is still generally very useful and allows to understand overall fuzzing progress,
+but treat it with a grain of salt.
+
 See [this](linux/coverage.md) for Linux kernel specific coverage information.
 
 ## Web Interface
 
-When clicking on `cover` link you get view showing each directory located in your kernel build directory. It's showing either percentage number `X% of N` or `---`. `X% of N` means that `X%` of `N` coverage points is covered so far, a coverage point generally refers to a basic block or a CFG edge (depends on compiler and instrumentation mode used during build, basic block in gcc and CFG edge in clang). `---` indicates there is no coverage in that directory.
+When clicking on `cover` link you get view showing each directory located in your kernel build directory. It's showing either percentage number `X% of N` or `---`. `X% of N` means that `X%` of `N` coverage points are covered so far, . `---` indicates there is no coverage in that directory.
 
 Directory can be clicked and you get view on files and possible subdirectories. On each source code file there is again either `---` or coverage percentage.
 
@@ -18,7 +36,7 @@ All PC values associated to that line are covered. There is number on the left s
 
 ![Code line is fully covered](coverage_covered.png?raw=true)
 
-### Both: orange (#ff6400)
+### Both: orange (#c86400)
 
 There are several PC values associated to the line and not all of these are executed. Again there is number left to the source code line that can clicked to open last program triggering associated PC values. Example below shows single line which has both excuted and non-executed PC values associated to it.
 

@@ -1,0 +1,31 @@
+From 1fbcfd35f5f0731be4cdce2db7fc9531ae5ac501 Mon Sep 17 00:00:00 2001
+From: "Dae R. Jeong" <threeearcat@gmail.com>
+Date: Sat, 22 Dec 2018 16:53:24 +0900
+Subject: [PATCH 2/3] arch/x86/kvm/hcall_constant.h: Updated
+
+---
+ arch/x86/kvm/hcall_constant.h | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/arch/x86/kvm/hcall_constant.h b/arch/x86/kvm/hcall_constant.h
+index de624c7907f3..73bf9a9df997 100644
+--- a/arch/x86/kvm/hcall_constant.h
++++ b/arch/x86/kvm/hcall_constant.h
+@@ -1,8 +1,13 @@
+ #ifndef __HCALL_CONSTANT_H
+ #define __HCALL_CONSTANT_H
+ 
+-// RAX value of hcall request
++// RAX input value of hcall request
+ #define HCALL_RAX_ID 0x1d08aa3e
++// RAX return value indicating a hcall handled successfully
++#define HCALL_SUCCESS 0x2be98adc
++// RAX return value indicating a bad request
++#define HCALL_INVAL 0xb614e7a
++
+ // kvm_run->exit_reason
+ #define HCALL_EXIT_REASON 0x33f355d
+ #define KVM_EXIT_HCALL HCALL_EXIT_REASON
+-- 
+2.25.1
+

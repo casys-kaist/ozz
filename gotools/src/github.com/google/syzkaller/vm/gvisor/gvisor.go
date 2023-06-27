@@ -210,7 +210,7 @@ func (inst *instance) waitBoot() error {
 	}
 }
 
-func (inst *instance) runscCmd(add ...string) *exec.Cmd {
+func (inst *instance) args() []string {
 	args := []string{
 		"-root", inst.rootDir,
 		"-watchdog-action=panic",
@@ -223,8 +223,16 @@ func (inst *instance) runscCmd(add ...string) *exec.Cmd {
 	if inst.cfg.RunscArgs != "" {
 		args = append(args, strings.Split(inst.cfg.RunscArgs, " ")...)
 	}
-	args = append(args, add...)
-	cmd := osutil.Command(inst.image, args...)
+	return args
+}
+
+func (inst *instance) Info() ([]byte, error) {
+	info := fmt.Sprintf("%v %v\n", inst.image, strings.Join(inst.args(), " "))
+	return []byte(info), nil
+}
+
+func (inst *instance) runscCmd(add ...string) *exec.Cmd {
+	cmd := osutil.Command(inst.image, append(inst.args(), add...)...)
 	cmd.Env = []string{
 		"GOTRACEBACK=all",
 		"GORACE=halt_on_error=1",
@@ -316,8 +324,20 @@ func (inst *instance) Run(timeout time.Duration, stop <-chan bool, command strin
 			signal(err)
 			return
 		}
-		cmd.Process.Kill()
-		cmd.Wait()
+		log.Logf(1, "stopping %s", inst.name)
+		w := make(chan bool)
+		go func() {
+			select {
+			case <-w:
+				return
+			case <-time.After(time.Minute):
+				cmd.Process.Kill()
+			}
+		}()
+		osutil.Run(time.Minute, inst.runscCmd("kill", inst.name, "9"))
+		err := cmd.Wait()
+		close(w)
+		log.Logf(1, "%s exited with %s", inst.name, err)
 	}()
 	return inst.merger.Output, errc, nil
 }

@@ -51,7 +51,7 @@ For `namespace` sandbox:
 CONFIG_USER_NS=y
 ```
 
-For running in VMs `make kvmconfig` is generally required.
+For running in VMs `make kvm_guest.config` is generally required.
 
 Debian images produced by [tools/create-image.sh](/tools/create-image.sh) also require:
 ```
@@ -63,6 +63,13 @@ It is recommended to disable the following config (and required if your kernel d
  and [kcov: make kcov work properly with KASLR enabled](https://github.com/torvalds/linux/commit/4983f0ab7ffaad1e534b21975367429736475205)):
 ```
 # CONFIG_RANDOMIZE_BASE is not set
+```
+
+It is also recommended to disable the Predictable Network Interface Names mechanism. This can be done
+either via syzkaller configuration (see details [here](troubleshooting.md)) or by adjusting the following configs:
+```
+CONFIG_CMDLINE_BOOL=y
+CONFIG_CMDLINE="net.ifnames=0"
 ```
 
 ## Bug detection configs

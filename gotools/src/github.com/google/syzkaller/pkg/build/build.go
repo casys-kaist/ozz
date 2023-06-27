@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/syzkaller/pkg/debugtracer"
 	"github.com/google/syzkaller/pkg/osutil"
 	"github.com/google/syzkaller/pkg/report"
 	"github.com/google/syzkaller/pkg/vcs"
@@ -27,11 +28,19 @@ type Params struct {
 	KernelDir    string
 	OutputDir    string
 	Compiler     string
+	Linker       string
 	Ccache       string
 	UserspaceDir string
 	CmdlineFile  string
 	SysctlFile   string
 	Config       []byte
+	Tracer       debugtracer.DebugTracer
+}
+
+// Information that is returned from the Image function.
+type ImageDetails struct {
+	Signature  string
+	CompilerID string
 }
 
 // Image creates a disk image for the specified OS/ARCH/VM.
@@ -39,49 +48,60 @@ type Params struct {
 // If CmdlineFile is not empty, contents of the file are appended to the kernel command line.
 // If SysctlFile is not empty, contents of the file are appended to the image /etc/sysctl.conf.
 // Output is stored in OutputDir and includes (everything except for image is optional):
-//  - image: the image
-//  - key: ssh key for the image
-//  - kernel: kernel for injected boot
-//  - initrd: initrd for injected boot
-//  - kernel.config: actual kernel config used during build
-//  - obj/: directory with kernel object files (this should match KernelObject
-//    specified in sys/targets, e.g. vmlinux for linux)
-// The returned string is a kernel ID that will be the same for kernels with the
-// same runtime behavior, and different for kernels with different runtime
+//   - image: the image
+//   - key: ssh key for the image
+//   - kernel: kernel for injected boot
+//   - initrd: initrd for injected boot
+//   - kernel.config: actual kernel config used during build
+//   - obj/: directory with kernel object files (this should match KernelObject
+//     specified in sys/targets, e.g. vmlinux for linux)
+//
+// The returned structure contains a kernel ID that will be the same for kernels
+// with the same runtime behavior, and different for kernels with different runtime
 // behavior. Binary equal builds, or builds that differ only in e.g. debug info,
 // have the same ID. The ID may be empty if OS implementation does not have
 // a way to calculate such IDs.
-func Image(params *Params) (string, error) {
-	builder, err := getBuilder(params.TargetOS, params.TargetArch, params.VMType)
-	if err != nil {
-		return "", err
+// Also that structure provides a compiler ID field that contains the name and
+// the version of the compiler/toolchain that was used to build the kernel.
+// The CompilerID field is not guaranteed to be non-empty.
+func Image(params Params) (details ImageDetails, err error) {
+	if params.Tracer == nil {
+		params.Tracer = &debugtracer.NullTracer{}
 	}
-	if err := osutil.MkdirAll(filepath.Join(params.OutputDir, "obj")); err != nil {
-		return "", err
+	var builder builder
+	builder, err = getBuilder(params.TargetOS, params.TargetArch, params.VMType)
+	if err != nil {
+		return
+	}
+	if err = osutil.MkdirAll(filepath.Join(params.OutputDir, "obj")); err != nil {
+		return
 	}
 	if len(params.Config) != 0 {
 		// Write kernel config early, so that it's captured on build failures.
-		if err := osutil.WriteFile(filepath.Join(params.OutputDir, "kernel.config"), params.Config); err != nil {
-			return "", fmt.Errorf("failed to write config file: %v", err)
+		if err = osutil.WriteFile(filepath.Join(params.OutputDir, "kernel.config"), params.Config); err != nil {
+			err = fmt.Errorf("failed to write config file: %v", err)
+			return
 		}
 	}
-	err = builder.build(params)
+	details, err = builder.build(params)
+	if details.CompilerID == "" {
+		// Fill in the compiler info even if the build failed.
+		var idErr error
+		details.CompilerID, idErr = compilerIdentity(params.Compiler)
+		if err == nil {
+			err = idErr
+		} // Try to preserve the build error otherwise.
+	}
 	if err != nil {
-		return "", extractRootCause(err, params.TargetOS, params.KernelDir)
+		err = extractRootCause(err, params.TargetOS, params.KernelDir)
+		return
 	}
 	if key := filepath.Join(params.OutputDir, "key"); osutil.IsExist(key) {
 		if err := os.Chmod(key, 0600); err != nil {
-			return "", fmt.Errorf("failed to chmod 0600 %v: %v", key, err)
+			return details, fmt.Errorf("failed to chmod 0600 %v: %v", key, err)
 		}
 	}
-	sign := ""
-	if signer, ok := builder.(signer); ok {
-		sign, err = signer.sign(params)
-		if err != nil {
-			return "", err
-		}
-	}
-	return sign, nil
+	return
 }
 
 func Clean(targetOS, targetArch, vmType, kernelDir string) error {
@@ -104,60 +124,47 @@ func (err *KernelError) Error() string {
 }
 
 type builder interface {
-	build(params *Params) error
+	build(params Params) (ImageDetails, error)
 	clean(kernelDir, targetArch string) error
 }
 
-type signer interface {
-	sign(params *Params) (string, error)
-}
-
 func getBuilder(targetOS, targetArch, vmType string) (builder, error) {
-	var supported = []struct {
-		OS    string
-		archs []string
-		vms   []string
-		b     builder
-	}{
-		{targets.Linux, []string{targets.AMD64}, []string{"gvisor"}, gvisor{}},
-		{targets.Linux, []string{targets.AMD64}, []string{"gce", "qemu"}, linux{}},
-		{targets.Linux, []string{targets.ARM, targets.ARM64, targets.I386, targets.MIPS64LE,
-			targets.PPC64LE, targets.S390x, targets.RiscV64}, []string{"qemu"}, linux{}},
-		{targets.Fuchsia, []string{targets.AMD64, targets.ARM64}, []string{"qemu"}, fuchsia{}},
-		{targets.Akaros, []string{targets.AMD64}, []string{"qemu"}, akaros{}},
-		{targets.OpenBSD, []string{targets.AMD64}, []string{"gce", "vmm"}, openbsd{}},
-		{targets.NetBSD, []string{targets.AMD64}, []string{"gce", "qemu"}, netbsd{}},
-		{targets.FreeBSD, []string{targets.AMD64}, []string{"gce", "qemu"}, freebsd{}},
-		{targets.TestOS, []string{targets.TestArch64}, []string{"qemu"}, test{}},
-	}
-	for _, s := range supported {
-		if targetOS == s.OS {
-			for _, arch := range s.archs {
-				if targetArch == arch {
-					for _, vm := range s.vms {
-						if vmType == vm {
-							return s.b, nil
-						}
-					}
-				}
-			}
+	if targetOS == targets.Linux {
+		if vmType == "gvisor" {
+			return gvisor{}, nil
+		} else if vmType == "cuttlefish" {
+			return android{}, nil
 		}
+	}
+	builders := map[string]builder{
+		targets.Linux:   linux{},
+		targets.Fuchsia: fuchsia{},
+		targets.Akaros:  akaros{},
+		targets.OpenBSD: openbsd{},
+		targets.NetBSD:  netbsd{},
+		targets.FreeBSD: freebsd{},
+		targets.Darwin:  darwin{},
+		targets.TestOS:  test{},
+	}
+	if builder, ok := builders[targetOS]; ok {
+		return builder, nil
 	}
 	return nil, fmt.Errorf("unsupported image type %v/%v/%v", targetOS, targetArch, vmType)
 }
 
-func CompilerIdentity(compiler string) (string, error) {
+func compilerIdentity(compiler string) (string, error) {
 	if compiler == "" {
 		return "", nil
 	}
 
 	bazel := strings.HasSuffix(compiler, "bazel")
 
-	arg := "--version"
+	arg, timeout := "--version", time.Minute
 	if bazel {
-		arg = ""
+		// Bazel episodically fails with 1 min timeout.
+		arg, timeout = "", 10*time.Minute
 	}
-	output, err := osutil.RunCmd(time.Minute, "", compiler, arg)
+	output, err := osutil.RunCmd(timeout, "", compiler, arg)
 	if err != nil {
 		return "", err
 	}
@@ -288,16 +295,19 @@ type buildFailureCause struct {
 
 var buildFailureCauses = [...]buildFailureCause{
 	{pattern: regexp.MustCompile(`: error: `)},
+	{pattern: regexp.MustCompile(`Error: `)},
 	{pattern: regexp.MustCompile(`ERROR: `)},
 	{pattern: regexp.MustCompile(`: fatal error: `)},
 	{pattern: regexp.MustCompile(`: undefined reference to`)},
 	{pattern: regexp.MustCompile(`: multiple definition of`)},
 	{pattern: regexp.MustCompile(`: Permission denied`)},
-	{pattern: regexp.MustCompile(`: not found`)},
 	{pattern: regexp.MustCompile(`^([a-zA-Z0-9_\-/.]+):[0-9]+:([0-9]+:)?.*(error|invalid|fatal|wrong)`)},
+	{pattern: regexp.MustCompile(`FAILED unresolved symbol`)},
+	{pattern: regexp.MustCompile(`No rule to make target`)},
+	{weak: true, pattern: regexp.MustCompile(`: not found`)},
 	{weak: true, pattern: regexp.MustCompile(`: final link failed: `)},
 	{weak: true, pattern: regexp.MustCompile(`collect2: error: `)},
-	{weak: true, pattern: regexp.MustCompile(`FAILED: Build did NOT complete`)},
+	{weak: true, pattern: regexp.MustCompile(`(ERROR|FAILED): Build did NOT complete`)},
 }
 
 var fileRes = []*regexp.Regexp{

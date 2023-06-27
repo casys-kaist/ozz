@@ -6,12 +6,14 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/MDBuilder.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/ProfileData/InstrProf.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 
 #include "pass/SSBPass.h"
@@ -22,20 +24,27 @@ using namespace llvm;
 
 #define DEBUG_TYPE "ssb"
 
+static cl::opt<bool> ClDumpIRs(
+    "dump-ir",
+    cl::desc(
+        "Dump IRs before and after instrumenting callbacks (for debugging)"),
+    cl::init(false));
+
 static cl::opt<bool> ClInstrumentOutofScopeCalls(
     "instrument-out-of-scope",
     cl::desc(
         "Instrument the flush callback before calling out-of-scope functions"),
     cl::init(true));
 
-static cl::opt<bool> ClFlushOnly(
-    "ssb-flush-only",
-    cl::desc("Only instrument the flush callback at the function entry"),
-    cl::init(false));
+static cl::opt<bool>
+    ClFlushEntryOnly("ssb-flush-only",
+                     cl::desc("Only instrument the flush callback at entry "
+                              "functions of IRQs and syscalls"),
+                     cl::init(false));
 
-static cl::opt<bool> ClBuileKernel("ssb-kernel",
-                                   cl::desc("Build a Linux kernel"),
-                                   cl::init(false));
+static cl::opt<bool> ClInstrumentFlush("instrument-flush",
+                                       cl::desc("instrument flush callbacks"),
+                                       cl::init(true));
 
 static cl::opt<std::string>
     ClMemoryModel("memorymodel", cl::desc("Memory model being emulated"),
@@ -64,9 +73,13 @@ static cl::opt<bool> ClSecondPass(
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
 STATISTIC(NumInstrumentedWrites, "Number of instrumented writes");
 STATISTIC(NumInstrumentedFlushes, "Number of instrumented flushed");
+STATISTIC(NumInstrumentedRetCheck, "Number of instrumented return check");
+STATISTIC(NumInstrumentedFuncEntry, "Number of instrumented function entry");
 STATISTIC(NumAccessesWithBadSize, "Number of accesses with bad size");
 
 namespace {
+
+static BasicBlock::iterator getFirstNonPHIOrDbgOrAlloca(BasicBlock *bb);
 
 static std::string getIFLFileName() {
   // TODO: Clarify lifetimes of string variations (i.e., StringRef,
@@ -129,20 +142,34 @@ bool InstrumentedFunctionListPass::runOnModule(Module &M) {
   ssize_t size;
 
   while ((size = getline(&line, &len, fp)) != -1) {
-    char *buf = new char[len + 1];
-    strncpy(buf, line, len);
+    assert(size > 0);
+    // Cut the delimiter first
+    line[size - 1] = 0;
+    char *buf = new char[size];
+    strncpy(buf, line, size);
     StringRef s(buf);
+    // LLVM_DEBUG(dbgs() << s << "\n");
     ifl.insert(s);
   }
   free(line);
+  fclose(fp);
 
   return false;
 }
 
-void InstrumentedFunctionListPass::getAnalysisUsage(AnalysisUsage &AU) const {}
+void InstrumentedFunctionListPass::getAnalysisUsage(AnalysisUsage &AU) const {
+  AU.setPreservesAll();
+}
 
 static RegisterPass<InstrumentedFunctionListPass>
     XX("tfl", "Summarize to-be-instrumented functions", true, true);
+
+static llvm::RegisterStandardPasses
+    YY(llvm::PassManagerBuilder::EP_EarlyAsPossible,
+       [](const llvm::PassManagerBuilder &Builder,
+          llvm::legacy::PassManagerBase &PM) {
+         PM.add(new InstrumentedFunctionListPass());
+       });
 
 /*
  *Pass Implementation
@@ -153,8 +180,13 @@ struct SoftStoreBuffer {
 
 private:
   void initialize(Module &M);
+  bool instrumentFlushOnly(Function &F, bool DoInstrument);
+  bool instrumentAll(Function &F, const TargetLibraryInfo &TLI,
+                     const InstrumentedFunctionList &IFL);
   bool instrumentLoadOrStore(Instruction *I, const DataLayout &DL);
   bool instrumentFlush(Instruction *I);
+  bool instrumentRetCheck(Instruction *I);
+  bool instrumentFuncEntry(Instruction *I);
   FunctionCallee findCallbackFunction();
   bool addrPointsToConstantData(Value *Addr);
   void chooseInstructionsToInstrument(SmallVectorImpl<Instruction *> &Local,
@@ -163,17 +195,25 @@ private:
   int getMemoryAccessFuncIndex(Value *Addr, const DataLayout &DL);
   bool isInterestingLoadStore(Instruction *I);
   bool isMemBarrierOfTargetArch(Instruction *I);
+  bool isBUG(Instruction *I);
   bool isOutofScopeCall(Instruction *I, const InstrumentedFunctionList &IFL);
   bool isHardIRQEntryOfTargetArch(Function &F);
   bool isSoftIRQEntryOfTargetArch(Function &F);
   bool isIRQEntryOfTargetArch(Function &F);
   bool isSyscallEntryOfTargetArch(Function &F);
+  BasicBlock *SSBDoEmulateHelper(Instruction *I);
+  void instrumentHelper(Instruction *I, FunctionCallee callback);
+  void SetNoSanitizeMetadata(Instruction *I) {
+    I->setMetadata(I->getModule()->getMDKindID("nosanitize"),
+                   MDNode::get(I->getContext(), None));
+  }
   /* Collected instructions */
   SmallVector<Instruction *, 8> AllLoadsAndStores;
   SmallVector<Instruction *, 8> LocalLoadsAndStores;
   SmallVector<Instruction *, 8> AtomicAccesses;
   SmallVector<Instruction *, 8> MemIntrinCalls;
   SmallVector<Instruction *, 8> MemBarrier;
+  SmallVector<Instruction *, 8> AllReturns;
   SmallVector<Instruction *, 8> OutofScopeCalls;
   /* Callbacks */
   // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
@@ -183,6 +223,9 @@ private:
   FunctionCallee SSBLoad[kNumberOfAccessSizes];
   FunctionCallee SSBStore[kNumberOfAccessSizes];
   FunctionCallee SSBFlush;
+  FunctionCallee SSBRetCheck;
+  FunctionCallee SSBFuncEntry;
+  Constant *SSBDoEmulate;
   enum Architecture { X86_64, Aarch64, kNumberOfArchitectures };
   Architecture TargetArchitecture;
   void appendFunctionName(Function &F);
@@ -219,6 +262,22 @@ static bool shouldInstrumentReadWriteFromAddress(const Module *M, Value *Addr) {
   }
 
   return true;
+}
+
+BasicBlock *SoftStoreBuffer::SSBDoEmulateHelper(Instruction *I) {
+  IRBuilder<> IRB(I);
+  auto *DoEmulate = IRB.CreateLoad(SSBDoEmulate);
+  SetNoSanitizeMetadata(DoEmulate);
+  // If __do_emulate == 1
+  Value *CmpInst = IRB.CreateICmpEQ(DoEmulate, IRB.getInt8(1));
+  MDBuilder MDB(I->getContext());
+  MDNode *BranchWeights =
+      MDB.createBranchWeights(1 /*ThenBlock*/, 10 /*ElseBlock*/);
+  Instruction *CheckTerm =
+      SplitBlockAndInsertIfThen(CmpInst, I, false, BranchWeights);
+  BasicBlock *ThenBlock = CheckTerm->getParent();
+  // ThenBlock -- slowpath (store buffer emulation)
+  return ThenBlock;
 }
 
 bool SoftStoreBuffer::addrPointsToConstantData(Value *Addr) {
@@ -258,7 +317,7 @@ void SoftStoreBuffer::chooseInstructionsToInstrument(
     }
     Value *Addr = isa<StoreInst>(*I) ? cast<StoreInst>(I)->getPointerOperand()
                                      : cast<LoadInst>(I)->getPointerOperand();
-    if (isa<AllocaInst>(GetUnderlyingObject(Addr, DL)) &&
+    if (isa<AllocaInst>(getUnderlyingObject(Addr)) &&
         !PointerMayBeCaptured(Addr, true, true)) {
       // The variable is addressable but not captured, so it cannot be
       // referenced from a different thread and participate in a data race
@@ -370,38 +429,60 @@ bool SoftStoreBuffer::isSyscallEntryOfTargetArch(Function &F) {
 
 bool SoftStoreBuffer::isInterestingLoadStore(Instruction *I) {
   if (auto *LI = dyn_cast<LoadInst>(I))
-    return LI->isSimple() && LI->getSyncScopeID() != SyncScope::SingleThread;
+    return !LI->isAtomic() && LI->getSyncScopeID() != SyncScope::SingleThread;
   else if (auto *SI = dyn_cast<StoreInst>(I))
-    return SI->isSimple() && SI->getSyncScopeID() != SyncScope::SingleThread;
+    return !SI->isAtomic() && SI->getSyncScopeID() != SyncScope::SingleThread;
   else
     return false;
 }
 
-bool SoftStoreBuffer::instrumentFunction(Function &F,
-                                         const TargetLibraryInfo &TLI,
-                                         const InstrumentedFunctionList &IFL) {
-  initialize(*F.getParent());
+bool SoftStoreBuffer::instrumentFlushOnly(Function &F, bool DoInstrument) {
+  LLVM_DEBUG(dbgs() << "=== Instrumenting a function (flush-only)"
+                    << F.getName() << " ===\n");
+  if (!DoInstrument)
+    return false;
 
-  bool Res = false;
-  bool IRQEntry = isIRQEntryOfTargetArch(F);
-  bool SyscallEntry = isSyscallEntryOfTargetArch(F);
+  instrumentFlush(F.getEntryBlock().getTerminator());
+  SmallVector<Instruction *, 8> NeedInstrument;
+  NeedInstrument.push_back(F.getEntryBlock().getTerminator());
+  for (auto &BB : F) {
+    for (auto &I : BB)
+      if (isa<ReturnInst>(I))
+        NeedInstrument.push_back(BB.getFirstNonPHI());
+  }
+  for (auto Inst : NeedInstrument)
+    instrumentFlush(Inst);
+  // We do not instrument other instructions in entry functions.
+  return true;
+}
 
+static bool isBUG_X86_64(Instruction *I) {
+  if (CallInst *CI = dyn_cast<CallInst>(I)) {
+    if (CI->isInlineAsm()) {
+      auto *Asm = cast<InlineAsm>(CI->getCalledOperand());
+      auto Str = Asm->getAsmString();
+#define UD2 ".byte 0x0f, 0x0"
+      return Str.find(UD2) != std::string::npos;
+    }
+  }
+  return false;
+}
+
+bool SoftStoreBuffer::isBUG(Instruction *I) {
+  if (TargetArchitecture == X86_64) {
+    return isBUG_X86_64(I);
+  } else {
+    // TODO: aarch64
+    return false;
+  }
+}
+
+bool SoftStoreBuffer::instrumentAll(Function &F, const TargetLibraryInfo &TLI,
+                                    const InstrumentedFunctionList &IFL) {
   LLVM_DEBUG(dbgs() << "=== Instrumenting a function " << F.getName()
                     << " ===\n");
 
-  if (IRQEntry || SyscallEntry || ClFlushOnly) {
-    instrumentFlush(F.getEntryBlock().getTerminator());
-    if (!(IRQEntry || SyscallEntry))
-      return true;
-    for (auto &BB : F) {
-      for (auto &I : BB)
-        if (isa<ReturnInst>(I))
-          instrumentFlush(BB.getFirstNonPHI());
-    }
-    // We do not instrument other instructions in entry functions.
-    return true;
-  }
-
+  // Early checks
   if (F.hasFnAttribute(Attribute::NoSoftStoreBuffer))
     return false;
 
@@ -413,6 +494,8 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
     return false;
   }
 
+  // Now we are instrumenting callbacks
+  bool Res = false;
   bool HasCalls = false;
   const DataLayout &DL = F.getParent()->getDataLayout();
 
@@ -423,6 +506,8 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
         AtomicAccesses.push_back(&Inst);
       else if (isInterestingLoadStore(&Inst))
         LocalLoadsAndStores.push_back(&Inst);
+      else if (isa<ReturnInst>(&Inst))
+        AllReturns.push_back(&Inst);
       else if (isa<CallInst>(Inst) || isa<InvokeInst>(Inst)) {
         if (CallInst *CI = dyn_cast<CallInst>(&Inst))
           maybeMarkSanitizerLibraryCallNoBuiltin(CI, &TLI);
@@ -435,6 +520,8 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
         HasCalls = true;
         chooseInstructionsToInstrument(LocalLoadsAndStores, AllLoadsAndStores,
                                        DL);
+        if (isBUG(&Inst))
+          break;
       }
     }
     chooseInstructionsToInstrument(LocalLoadsAndStores, AllLoadsAndStores, DL);
@@ -444,17 +531,57 @@ bool SoftStoreBuffer::instrumentFunction(Function &F,
   for (auto Inst : AllLoadsAndStores)
     Res |= instrumentLoadOrStore(Inst, DL);
 
-  for (auto Inst : MemBarrier)
+  for (auto Inst : MemBarrier) {
+    LLVM_DEBUG(dbgs() << "Instrumenting flush callbacks for membarriers"
+                      << "\n");
     Res |= instrumentFlush(Inst);
+  }
 
-  for (auto Inst : AtomicAccesses)
+  for (auto Inst : AtomicAccesses) {
+    LLVM_DEBUG(dbgs() << "Instrumenting flush callbacks for atomic ops"
+                      << "\n");
     Res |= instrumentFlush(Inst);
+  }
 
-  if (ClInstrumentOutofScopeCalls)
+  if (ClInstrumentOutofScopeCalls) {
+    LLVM_DEBUG(
+        dbgs()
+        << "Instrumenting flush callbacks for out-of-scope function calls"
+        << "\n");
     for (auto Inst : OutofScopeCalls)
       Res |= instrumentFlush(Inst);
+  }
+
+  // Function entry callbacks
+  auto &entryBB = F.getEntryBlock();
+  auto *firstInst = &*getFirstNonPHIOrDbgOrAlloca(&entryBB);
+  instrumentFuncEntry(firstInst);
+
+  if (F.getName() != "pso_test_breakpoint")
+    // TODO: As our return check callback is incomplete, it flushes
+    // the store buffer when returning from pso_test_breakpoint()
+    // preventing the integration test. This function is only for the
+    // integration testing so it is totally fine not to instrument the
+    // callback. Remove this if statement after completing the return
+    // check mechanism.
+    for (auto Inst : AllReturns)
+      instrumentRetCheck(Inst);
 
   return Res | HasCalls;
+}
+
+bool SoftStoreBuffer::instrumentFunction(Function &F,
+                                         const TargetLibraryInfo &TLI,
+                                         const InstrumentedFunctionList &IFL) {
+  initialize(*F.getParent());
+
+  bool IRQEntry = isIRQEntryOfTargetArch(F);
+  bool SyscallEntry = isSyscallEntryOfTargetArch(F);
+
+  if (IRQEntry || SyscallEntry || ClFlushEntryOnly)
+    return instrumentFlushOnly(F, IRQEntry || SyscallEntry);
+  else
+    return instrumentAll(F, TLI, IFL);
 }
 
 bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
@@ -464,6 +591,7 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
   Value *Addr = IsWrite ? cast<StoreInst>(I)->getPointerOperand()
                         : cast<LoadInst>(I)->getPointerOperand();
   FunctionCallee OnAccessFunc = nullptr;
+  Type *Ty = I->getType();
 
   // swifterror memory addresses are mem2reg promoted by instruction
   // selection. As such they cannot have regular uses like an instrumentation
@@ -474,47 +602,138 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
   int Idx = getMemoryAccessFuncIndex(Addr, DL);
   if (Idx < 0)
     return false;
+  OnAccessFunc = IsWrite ? SSBStore[Idx] : SSBLoad[Idx];
 
   LLVM_DEBUG(dbgs() << "Instrumenting a " << (IsWrite ? "store" : "load")
                     << " callback at " << *I << "\n");
 
-  // TODO: Alignment / Volatile
-  // Ref:toolchains/llvm/llvm/lib/Transforms/Instrumentation/ThreadSanitizer.cpp#597
-  OnAccessFunc = IsWrite ? SSBStore[Idx] : SSBLoad[Idx];
-  auto Args = SmallVector<Value *, 8>();
-  Args.push_back(IRB.CreatePointerCast(Addr, IRB.getInt8PtrTy()));
-  if (IsWrite) {
-    // Store requires one more argument
-    Args.push_back(
-        IRB.CreatePointerCast(I->getOperand(0) /* == SI->getValueOperand() */,
-                              IRB.getIntNTy((1U << Idx) * 8)));
-  }
-  auto *CI = IRB.CreateCall(OnAccessFunc, Args);
-  // A call to a callback function is instrumented
-  if (!IsWrite)
-    // Now we may need to replace Uses of LoadInst with CI.
-    I->replaceAllUsesWith(IRB.CreateIntToPtr(CI, I->getType()));
-  // We replaced all I's Uses so we can remove it.
-  I->eraseFromParent();
   if (IsWrite)
     NumInstrumentedWrites++;
   else
     NumInstrumentedReads++;
+
+  // Check we can use the fastpath
+  auto *DoEmulate = IRB.CreateLoad(SSBDoEmulate);
+  SetNoSanitizeMetadata(DoEmulate);
+
+  // If __do_emulate != 1
+  Value *CmpInst = IRB.CreateICmpNE(DoEmulate, IRB.getInt8(1));
+  Instruction *ThenTerm, *ElseTerm;
+  MDBuilder MDB(I->getContext());
+  MDNode *BranchWeights =
+      MDB.createBranchWeights(10 /*ThenBlock*/, 1 /*ElseBlock*/);
+  SplitBlockAndInsertIfThenElse(CmpInst, I, &ThenTerm, &ElseTerm,
+                                BranchWeights);
+
+  // ThenBlock -- fastpath
+  BasicBlock *NewTail = I->getParent();
+  I->removeFromParent();
+  IRBuilder<> IRBThen(ThenTerm);
+  IRBThen.Insert(I);
+
+  // ElseBlock -- slowpath (store buffer emulation)
+  IRBuilder<> IRBElse(ElseTerm);
+  auto Args = SmallVector<Value *, 8>();
+  Args.push_back(IRBElse.CreatePointerCast(Addr, IRBElse.getInt8PtrTy()));
+  if (IsWrite) {
+    // Store requires one more argument
+    Args.push_back(IRBElse.CreatePointerCast(
+        I->getOperand(0) /* == SI->getValueOperand() */,
+        IRBElse.getIntNTy((1U << Idx) * 8)));
+  }
+  auto *CI = IRBElse.CreateCall(OnAccessFunc, Args);
+  auto *Res = IRBElse.CreateIntToPtr(CI, Ty);
+
+  // PHI instruction to select the result
+  if (!IsWrite) {
+    IRBuilder<> IRBTail(NewTail->getFirstNonPHI());
+    auto *phi = IRBTail.CreatePHI(Ty, 2);
+    phi->addIncoming(I, ThenTerm->getParent());
+    phi->addIncoming(Res, ElseTerm->getParent());
+    I->replaceUsesWithIf(phi, [phi](Use &U) {
+      auto *I = U.getUser();
+      // Don't replace if it's an instruction in the BB basic block.
+      return I != phi;
+    });
+  }
+
   return true;
 }
 
 bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
-  IRBuilder<> IRB(I);
+  if (!ClInstrumentFlush)
+    return false;
+
   LLVM_DEBUG(dbgs() << "Instrumenting a membarrier callback at " << *I << "\n");
-  IRB.CreateCall(SSBFlush, ConstantPointerNull::get(IRB.getInt8PtrTy()));
   NumInstrumentedFlushes++;
+
+  BasicBlock *ThenBlock = SSBDoEmulateHelper(I);
+  // ThenBlock -- slowpath (store buffer emulation)
+  IRBuilder<> IRBThen(ThenBlock->getFirstNonPHI());
+  IRBThen.CreateCall(SSBFlush);
   return true;
+}
+
+void SoftStoreBuffer::instrumentHelper(Instruction *I,
+                                       FunctionCallee callback) {
+  BasicBlock *ThenBlock = SSBDoEmulateHelper(I);
+  IRBuilder<> IRBThen(ThenBlock->getFirstNonPHI());
+
+  Value *ReturnAddress = IRBThen.CreateCall(
+      Intrinsic::getDeclaration(I->getModule(), Intrinsic::returnaddress),
+      IRBThen.getInt32(0));
+
+  auto Args = SmallVector<Value *, 8>();
+  Args.push_back(ReturnAddress);
+  IRBThen.CreateCall(callback, Args);
+}
+
+bool SoftStoreBuffer::instrumentRetCheck(Instruction *I) {
+  if (!ClInstrumentFlush)
+    // Retchk is also a kind of flush callback
+    return false;
+  LLVM_DEBUG(dbgs() << "Instrumenting a retchk callback at " << *I << "\n");
+  NumInstrumentedRetCheck++;
+  instrumentHelper(I, SSBRetCheck);
+  return true;
+}
+
+bool SoftStoreBuffer::instrumentFuncEntry(Instruction *I) {
+  if (!ClInstrumentFlush)
+    // Entry callbacks are for helping retchk callbacks. So if we do
+    // not retchk, then entry callbacks are pointless
+    return false;
+  LLVM_DEBUG(dbgs() << "Instrumenting an function-entry callback at " << *I
+                    << "\n");
+  NumInstrumentedFuncEntry++;
+  instrumentHelper(I, SSBFuncEntry);
+  return true;
+}
+
+static void dumpIR(Function &F, std::string prefix) {
+  const char *tmpdirp;
+  std::string tmpdir;
+  if ((tmpdirp = std::getenv("TMP_DIR")))
+    tmpdir.append(tmpdirp);
+
+  std::string fn = tmpdir + "/" + F.getName().str() + "." + prefix + ".ll";
+  std::error_code EC;
+
+  raw_fd_ostream out(fn, EC, sys::fs::OF_Text);
+
+  F.print(out, NULL /*default*/, false /*default*/, true /*IsForDebug*/);
 }
 
 static bool visitor(Function &F, const TargetLibraryInfo &TLI,
                     const InstrumentedFunctionList &IFL) {
   SoftStoreBuffer SSB;
-  return SSB.instrumentFunction(F, TLI, IFL);
+  bool ret;
+  if (ClDumpIRs)
+    dumpIR(F, std::string("before"));
+  ret = SSB.instrumentFunction(F, TLI, IFL);
+  if (ClDumpIRs)
+    dumpIR(F, std::string("after"));
+  return ret;
 }
 
 void SoftStoreBuffer::initialize(Module &M) {
@@ -540,8 +759,15 @@ void SoftStoreBuffer::initialize(Module &M) {
     SSBLoad[i] =
         M.getOrInsertFunction(LoadName, Attr, IntNTy, IRB.getInt8PtrTy());
     SmallString<32> FlushName("__ssb_" + TargetMemoryModelStr + "_flush");
-    SSBFlush = M.getOrInsertFunction(FlushName, Attr, IRB.getVoidTy(),
-                                     IRB.getInt8PtrTy());
+    SSBFlush = M.getOrInsertFunction(FlushName, Attr, IRB.getVoidTy());
+    SmallString<32> RetCheckName("__ssb_" + TargetMemoryModelStr + "_retchk");
+    SSBRetCheck = M.getOrInsertFunction(RetCheckName, Attr, IRB.getVoidTy(),
+                                        IRB.getInt8PtrTy());
+    SmallString<32> FuncEntryName("__ssb_" + TargetMemoryModelStr +
+                                  "_funcentry");
+    SSBFuncEntry = M.getOrInsertFunction(FuncEntryName, Attr, IRB.getVoidTy(),
+                                         IRB.getInt8PtrTy());
+    SSBDoEmulate = M.getOrInsertGlobal("__ssb_do_emulate", IRB.getInt8Ty());
   }
 }
 
@@ -551,8 +777,7 @@ int SoftStoreBuffer::getMemoryAccessFuncIndex(Value *Addr,
   Type *OrigTy = cast<PointerType>(OrigPtrTy)->getElementType();
   assert(OrigTy->isSized());
   uint32_t TypeSize = DL.getTypeStoreSizeInBits(OrigTy);
-  if (TypeSize != 8 && TypeSize != 16 && TypeSize != 32 && TypeSize != 64 &&
-      TypeSize != 128) {
+  if (TypeSize != 8 && TypeSize != 16 && TypeSize != 32 && TypeSize != 64) {
     NumAccessesWithBadSize++;
     // Ignore all unusual sizes.
     return -1;
@@ -564,6 +789,11 @@ int SoftStoreBuffer::getMemoryAccessFuncIndex(Value *Addr,
 
 void SoftStoreBuffer::appendFunctionName(Function &F) {
   StringRef fn = F.getName();
+  // NOTE: We treat weak symbols as not-instrumented since its
+  // corresponding strong symbol may not be instrumented.
+  // TODO: Determine if the strong symbol is really not instrumented.
+  if (F.hasWeakLinkage())
+    return;
   std::error_code EC;
   LLVM_DEBUG(dbgs() << "Writing " << fn << "\n");
   raw_fd_ostream out(getIFLFileName(), EC, sys::fs::OF_Append);
@@ -572,6 +802,37 @@ void SoftStoreBuffer::appendFunctionName(Function &F) {
   else
     LLVM_DEBUG(dbgs() << "error opening file for writing");
   out.close();
+}
+
+static bool isEntryBlock(BasicBlock *bb) {
+  const Function *F = bb->getParent();
+  assert(F && "Block must have a parent function to use this API");
+  return bb == &F->getEntryBlock();
+}
+
+// NOTE: Copied from a recent version of LLVM
+static BasicBlock::iterator getFirstNonPHIOrDbgOrAlloca(BasicBlock *bb) {
+  Instruction *FirstNonPHI = bb->getFirstNonPHI();
+  if (!FirstNonPHI)
+    return bb->end();
+
+  BasicBlock::iterator InsertPt = FirstNonPHI->getIterator();
+  if (InsertPt->isEHPad())
+    ++InsertPt;
+
+  if (isEntryBlock(bb)) {
+    BasicBlock::const_iterator End = bb->end();
+    while (InsertPt != End &&
+           (isa<AllocaInst>(*InsertPt) || isa<DbgInfoIntrinsic>(*InsertPt) ||
+            isa<PseudoProbeInst>(*InsertPt))) {
+      if (const AllocaInst *AI = dyn_cast<AllocaInst>(&*InsertPt)) {
+        if (!AI->isStaticAlloca())
+          break;
+      }
+      ++InsertPt;
+    }
+  }
+  return InsertPt;
 }
 
 static bool isIndirectCall(CallBase *CB) { return CB->isIndirectCall(); }
@@ -611,6 +872,53 @@ static bool isAssumeLikeIntrinsic(IntrinsicInst *II) {
   return false;
 }
 
+static bool calleeFunctionStartsWith(CallBase *CB, StringRef name) {
+  auto *F = CB->getCalledFunction();
+  if (!F)
+    return false;
+  StringRef calleeName = F->getName();
+  return calleeName.startswith(name);
+}
+
+static bool isKasanCheckReadWrite(CallBase *CB) {
+#define KASAN_CHECK_READ "__kasan_check_read"
+#define KASAN_CHECK_WRITE "__kasan_check_write"
+  return calleeFunctionStartsWith(CB, KASAN_CHECK_READ) ||
+         calleeFunctionStartsWith(CB, KASAN_CHECK_WRITE);
+}
+
+static bool isKmemcovTraceCallback(CallBase *CB) {
+#define KMEMCOV_TRACE_LOAD "sanitize_memcov_trace_load"
+#define KMEMCOV_TRACE_STORE "sanitize_memcov_trace_store"
+  return calleeFunctionStartsWith(CB, KMEMCOV_TRACE_LOAD) ||
+         calleeFunctionStartsWith(CB, KMEMCOV_TRACE_STORE);
+}
+
+static bool isAnnotatedInlineAsm(CallBase *CB) {
+#define NO_BARRIER_SEMANTIC "no kssb"
+  if (CB->isInlineAsm()) {
+    auto *Asm = cast<InlineAsm>(CB->getCalledOperand());
+    const std::string &AsmString = Asm->getAsmString();
+    bool annotated = AsmString.find(NO_BARRIER_SEMANTIC) != std::string::npos ||
+                     AsmString.length() == 0;
+    LLVM_DEBUG(dbgs() << "inline asm: " << AsmString << "\n");
+    LLVM_DEBUG(dbgs() << "annotated: " << annotated << "\n");
+    return annotated;
+  }
+  return false;
+}
+
+static bool isIntrinsicImplyingBarrier(IntrinsicInst *II) {
+  auto *F = II->getCalledFunction();
+  if (!F)
+    return false;
+  StringRef name = F->getName();
+  // TODO: My assumption is that almost all intrinsic functions do not
+  // imply a memory barrier, and llvm.gc* intrinsics may imply a
+  // barrier. I'm not sure this is correct.
+  return name.startswith("llvm.gc");
+}
+
 bool SoftStoreBuffer::isOutofScopeCall(Instruction *I,
                                        const InstrumentedFunctionList &IFL) {
   assert(isa<CallBase>(I));
@@ -623,11 +931,40 @@ bool SoftStoreBuffer::isOutofScopeCall(Instruction *I,
     return false;
   }
 
-  if (auto *II = dyn_cast<IntrinsicInst>(I))
+  if (auto *II = dyn_cast<IntrinsicInst>(I)) {
     // Intrinsic function calls are sometimes used to annotate
     // semantics, and do not generate any real code. We don't need to
     // instrument the flush callback in this case.
-    return !isAssumeLikeIntrinsic(II);
+    if (isAssumeLikeIntrinsic(II))
+      return false;
+
+    // There are LLVM intrinsic functions that do not imply memory
+    // barriers. One example is llvm.ctpop.* which counts the bits set
+    // in a value and is used is in is_power_of_2(). Do not instrument
+    // a flush callback in front of them.
+    return isIntrinsicImplyingBarrier(II);
+  }
+
+  if (isKasanCheckReadWrite(CB)) {
+    // __SANITIZE_ADDRESS__ is defined when building Linux with clang,
+    // and accordingly, __kasan_check_{read, write} is called during
+    // the runtime. As we don't want to flush the store buffer when
+    // KASAN callbacks are called, do not treat the callbacks as
+    // out-of-scope-calls.
+    return false;
+  }
+
+  if (isKmemcovTraceCallback(CB)) {
+    // Do not call flush callbacks in front of kmemcov callbacks.
+    return false;
+  }
+
+  if (isAnnotatedInlineAsm(CB)) {
+    // We annotate inline assemblies that does not surely have memory
+    // barrier semantics. We don't need to instrument the flush
+    // callback before those inline assemblies.
+    return false;
+  }
 
   bool ret = isIndirectCall(CB) || isNotInstrumentedCall(CB, IFL);
   if (ret)
@@ -669,7 +1006,7 @@ static RegisterPass<SoftStoreBufferLegacy>
     );
 
 static llvm::RegisterStandardPasses
-    Y(llvm::PassManagerBuilder::EP_EarlyAsPossible,
+    Y(llvm::PassManagerBuilder::EP_OptimizerLast,
       [](const llvm::PassManagerBuilder &Builder,
          llvm::legacy::PassManagerBase &PM) {
         PM.add(new SoftStoreBufferLegacy());

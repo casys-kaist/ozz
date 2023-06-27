@@ -6,17 +6,15 @@ package repro
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/google/syzkaller/pkg/csource"
 	"github.com/google/syzkaller/pkg/host"
-	instancePkg "github.com/google/syzkaller/pkg/instance"
+	"github.com/google/syzkaller/pkg/instance"
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/pkg/mgrconfig"
-	"github.com/google/syzkaller/pkg/osutil"
 	"github.com/google/syzkaller/pkg/report"
 	"github.com/google/syzkaller/prog"
 	"github.com/google/syzkaller/sys/targets"
@@ -42,12 +40,17 @@ type Stats struct {
 	SimplifyCTime    time.Duration
 }
 
+type reproInstance struct {
+	index    int
+	execProg *instance.ExecProgInstance
+}
+
 type context struct {
 	target       *targets.Target
-	reporter     report.Reporter
+	reporter     *report.Reporter
 	crashTitle   string
 	crashType    report.Type
-	instances    chan *instance
+	instances    chan *reproInstance
 	bootRequests chan int
 	testTimeouts []time.Duration
 	startOpts    csource.Options
@@ -56,14 +59,7 @@ type context struct {
 	timeouts     targets.Timeouts
 }
 
-type instance struct {
-	*vm.Instance
-	index       int
-	execprogBin string
-	executorBin string
-}
-
-func Run(crashLog []byte, cfg *mgrconfig.Config, features *host.Features, reporter report.Reporter,
+func Run(crashLog []byte, cfg *mgrconfig.Config, features *host.Features, reporter *report.Reporter,
 	vmPool *vm.Pool, vmIndexes []int) (*Result, *Stats, error) {
 	if len(vmIndexes) == 0 {
 		return nil, nil, fmt.Errorf("no VMs provided")
@@ -103,7 +99,7 @@ func Run(crashLog []byte, cfg *mgrconfig.Config, features *host.Features, report
 		reporter:     reporter,
 		crashTitle:   crashTitle,
 		crashType:    crashType,
-		instances:    make(chan *instance, len(vmIndexes)),
+		instances:    make(chan *reproInstance, len(vmIndexes)),
 		bootRequests: make(chan int, len(vmIndexes)),
 		testTimeouts: testTimeouts,
 		startOpts:    createStartOptions(cfg, features, crashType),
@@ -118,7 +114,7 @@ func Run(crashLog []byte, cfg *mgrconfig.Config, features *host.Features, report
 		go func() {
 			defer wg.Done()
 			for vmIndex := range ctx.bootRequests {
-				var inst *instance
+				var inst *instance.ExecProgInstance
 				maxTry := 3
 				for try := 0; try < maxTry; try++ {
 					select {
@@ -128,7 +124,8 @@ func Run(crashLog []byte, cfg *mgrconfig.Config, features *host.Features, report
 					default:
 					}
 					var err error
-					inst, err = ctx.initInstance(cfg, vmPool, vmIndex)
+					inst, err = instance.CreateExecProgInstance(vmPool, vmIndex, cfg,
+						reporter, &instance.OptionalConfig{Logf: ctx.reproLogf})
 					if err != nil {
 						ctx.reproLogf(0, "failed to init instance: %v", err)
 						time.Sleep(10 * time.Second)
@@ -139,7 +136,7 @@ func Run(crashLog []byte, cfg *mgrconfig.Config, features *host.Features, report
 				if inst == nil {
 					break
 				}
-				ctx.instances <- inst
+				ctx.instances <- &reproInstance{execProg: inst, index: vmIndex}
 			}
 		}()
 	}
@@ -150,7 +147,7 @@ func Run(crashLog []byte, cfg *mgrconfig.Config, features *host.Features, report
 	defer func() {
 		close(ctx.bootRequests)
 		for inst := range ctx.instances {
-			inst.Close()
+			inst.execProg.VMInstance.Close()
 		}
 	}()
 
@@ -195,6 +192,9 @@ func createStartOptions(cfg *mgrconfig.Config, features *host.Features, crashTyp
 		if !features[host.FeatureDevlinkPCI].Enabled {
 			opts.DevlinkPCI = false
 		}
+		if !features[host.FeatureNicVF].Enabled {
+			opts.NicVF = false
+		}
 		if !features[host.FeatureUSBEmulation].Enabled {
 			opts.USB = false
 		}
@@ -209,32 +209,6 @@ func createStartOptions(cfg *mgrconfig.Config, features *host.Features, crashTyp
 		}
 	}
 	return opts
-}
-
-func (ctx *context) initInstance(cfg *mgrconfig.Config, vmPool *vm.Pool, vmIndex int) (*instance, error) {
-	vmInst, err := vmPool.Create(vmIndex)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create VM: %v", err)
-	}
-	execprogBin, err := vmInst.Copy(cfg.ExecprogBin)
-	if err != nil {
-		vmInst.Close()
-		return nil, fmt.Errorf("failed to copy to VM: %v", err)
-	}
-	executorBin := ctx.target.ExecutorBin
-	if executorBin == "" {
-		executorBin, err = vmInst.Copy(cfg.ExecutorBin)
-		if err != nil {
-			vmInst.Close()
-			return nil, fmt.Errorf("failed to copy to VM: %v", err)
-		}
-	}
-	return &instance{
-		Instance:    vmInst,
-		index:       vmIndex,
-		execprogBin: execprogBin,
-		executorBin: executorBin,
-	}, nil
 }
 
 func (ctx *context) repro(entries []*prog.LogEntry, crashStart int) (*Result, error) {
@@ -351,12 +325,6 @@ func (ctx *context) extractProgSingle(entries []*prog.LogEntry, duration time.Du
 
 	opts := ctx.startOpts
 	for _, ent := range entries {
-		opts.Fault = ent.Fault
-		opts.FaultCall = ent.FaultCall
-		opts.FaultNth = ent.FaultNth
-		if opts.FaultCall < 0 || opts.FaultCall >= len(ent.P.Calls) {
-			opts.FaultCall = len(ent.P.Calls) - 1
-		}
 		crashed, err := ctx.testProg(ent.P, duration, opts)
 		if err != nil {
 			return nil, err
@@ -409,8 +377,6 @@ func (ctx *context) extractProgBisect(entries []*prog.LogEntry, baseDuration tim
 		prog.Calls = append(prog.Calls, entry.P.Calls...)
 	}
 	dur := duration(len(entries)) * 3 / 2
-
-	// Execute the program without fault injection.
 	crashed, err := ctx.testProg(prog, dur, opts)
 	if err != nil {
 		return nil, err
@@ -425,32 +391,6 @@ func (ctx *context) extractProgBisect(entries []*prog.LogEntry, baseDuration tim
 		return res, nil
 	}
 
-	// Try with fault injection.
-	calls := 0
-	for _, entry := range entries {
-		if entry.Fault {
-			opts.FaultCall = calls + entry.FaultCall
-			opts.FaultNth = entry.FaultNth
-			if entry.FaultCall < 0 || entry.FaultCall >= len(entry.P.Calls) {
-				opts.FaultCall = calls + len(entry.P.Calls) - 1
-			}
-			crashed, err := ctx.testProg(prog, dur, opts)
-			if err != nil {
-				return nil, err
-			}
-			if crashed {
-				res := &Result{
-					Prog:     prog,
-					Duration: dur,
-					Opts:     opts,
-				}
-				ctx.reproLogf(3, "bisect: concatenation succeeded with fault injection")
-				return res, nil
-			}
-		}
-		calls += len(entry.P.Calls)
-	}
-
 	ctx.reproLogf(3, "bisect: concatenation failed")
 	return nil, nil
 }
@@ -463,11 +403,7 @@ func (ctx *context) minimizeProg(res *Result) (*Result, error) {
 		ctx.stats.MinimizeProgTime = time.Since(start)
 	}()
 
-	call := -1
-	if res.Opts.Fault {
-		call = res.Opts.FaultCall
-	}
-	res.Prog, res.Opts.FaultCall = prog.Minimize(res.Prog, call, true,
+	res.Prog, _ = prog.Minimize(res.Prog, -1, true,
 		func(p1 *prog.Prog, callIndex int) bool {
 			crashed, err := ctx.testProg(p1, res.Duration, res.Opts)
 			if err != nil {
@@ -480,14 +416,15 @@ func (ctx *context) minimizeProg(res *Result) (*Result, error) {
 	return res, nil
 }
 
-// Simplify repro options (threaded, collide, sandbox, etc).
+// Simplify repro options (threaded, sandbox, etc).
 func (ctx *context) simplifyProg(res *Result) (*Result, error) {
-	ctx.reproLogf(2, "simplifying guilty program")
+	ctx.reproLogf(2, "simplifying guilty program options")
 	start := time.Now()
 	defer func() {
 		ctx.stats.SimplifyProgTime = time.Since(start)
 	}()
 
+	// Do further simplifications.
 	for _, simplify := range progSimplifies {
 		opts := res.Opts
 		if !simplify(&opts) || !checkOpts(&opts, ctx.timeouts, res.Duration) {
@@ -580,100 +517,22 @@ func checkOpts(opts *csource.Options, timeouts targets.Timeouts, timeout time.Du
 
 func (ctx *context) testProg(p *prog.Prog, duration time.Duration, opts csource.Options) (crashed bool, err error) {
 	entry := prog.LogEntry{P: p}
-	if opts.Fault {
-		entry.Fault = true
-		entry.FaultCall = opts.FaultCall
-		entry.FaultNth = opts.FaultNth
-	}
 	return ctx.testProgs([]*prog.LogEntry{&entry}, duration, opts)
 }
 
-func (ctx *context) testProgs(entries []*prog.LogEntry, duration time.Duration, opts csource.Options) (
-	crashed bool, err error) {
+func (ctx *context) testWithInstance(callback func(inst *instance.ExecProgInstance) (rep *instance.RunResult,
+	err error)) (bool, error) {
 	inst := <-ctx.instances
 	if inst == nil {
 		return false, fmt.Errorf("all VMs failed to boot")
 	}
 	defer ctx.returnInstance(inst)
-	if len(entries) == 0 {
-		return false, fmt.Errorf("no programs to execute")
-	}
-
-	pstr := encodeEntries(entries)
-	progFile, err := osutil.WriteTempFile(pstr)
+	result, err := callback(inst.execProg)
 	if err != nil {
 		return false, err
 	}
-	defer os.Remove(progFile)
-	vmProgFile, err := inst.Copy(progFile)
-	if err != nil {
-		return false, fmt.Errorf("failed to copy to VM: %v", err)
-	}
-
-	if !opts.Fault {
-		opts.FaultCall = -1
-	}
-	program := entries[0].P.String()
-	if len(entries) > 1 {
-		program = "["
-		for i, entry := range entries {
-			program += fmt.Sprintf("%v", len(entry.P.Calls))
-			if i != len(entries)-1 {
-				program += ", "
-			}
-		}
-		program += "]"
-	}
-
-	command := instancePkg.ExecprogCmd(inst.execprogBin, inst.executorBin,
-		ctx.target.OS, ctx.target.Arch, opts.Sandbox, opts.Repeat,
-		opts.Threaded, opts.Collide, opts.Procs, -1, -1, true, ctx.timeouts.Slowdown, vmProgFile)
-	ctx.reproLogf(2, "testing program (duration=%v, %+v): %s", duration, opts, program)
-	ctx.reproLogf(3, "detailed listing:\n%s", pstr)
-	return ctx.testImpl(inst.Instance, command, duration)
-}
-
-func (ctx *context) testCProg(p *prog.Prog, duration time.Duration, opts csource.Options) (crashed bool, err error) {
-	src, err := csource.Write(p, opts)
-	if err != nil {
-		return false, err
-	}
-	bin, err := csource.BuildNoWarn(p.Target, src)
-	if err != nil {
-		return false, err
-	}
-	defer os.Remove(bin)
-	ctx.reproLogf(2, "testing compiled C program (duration=%v, %+v): %s", duration, opts, p)
-	crashed, err = ctx.testBin(bin, duration)
-	if err != nil {
-		return false, err
-	}
-	return crashed, nil
-}
-
-func (ctx *context) testBin(bin string, duration time.Duration) (crashed bool, err error) {
-	inst := <-ctx.instances
-	if inst == nil {
-		return false, fmt.Errorf("all VMs failed to boot")
-	}
-	defer ctx.returnInstance(inst)
-
-	bin, err = inst.Copy(bin)
-	if err != nil {
-		return false, fmt.Errorf("failed to copy to VM: %v", err)
-	}
-	return ctx.testImpl(inst.Instance, bin, duration)
-}
-
-func (ctx *context) testImpl(inst *vm.Instance, command string, duration time.Duration) (crashed bool, err error) {
-	outc, errc, err := inst.Run(duration, nil, command)
-	if err != nil {
-		return false, fmt.Errorf("failed to run command in VM: %v", err)
-	}
-	rep := inst.MonitorExecution(outc, errc, ctx.reporter,
-		vm.ExitTimeout|vm.ExitNormal|vm.ExitError)
+	rep := result.Report
 	if rep == nil {
-		ctx.reproLogf(2, "program did not crash")
 		return false, nil
 	}
 	if rep.Suppressed {
@@ -685,13 +544,50 @@ func (ctx *context) testImpl(inst *vm.Instance, command string, duration time.Du
 		return false, nil
 	}
 	ctx.report = rep
-	ctx.reproLogf(2, "program crashed: %v", rep.Title)
 	return true, nil
 }
 
-func (ctx *context) returnInstance(inst *instance) {
+func encodeEntries(entries []*prog.LogEntry) []byte {
+	buf := new(bytes.Buffer)
+	for _, ent := range entries {
+		fmt.Fprintf(buf, "executing program %v:\n%v", ent.Proc, string(ent.P.Serialize()))
+	}
+	return buf.Bytes()
+}
+
+func (ctx *context) testProgs(entries []*prog.LogEntry, duration time.Duration, opts csource.Options) (
+	crashed bool, err error) {
+	if len(entries) == 0 {
+		return false, fmt.Errorf("no programs to execute")
+	}
+	pstr := encodeEntries(entries)
+	program := entries[0].P.String()
+	if len(entries) > 1 {
+		program = "["
+		for i, entry := range entries {
+			program += fmt.Sprintf("%v", len(entry.P.Calls))
+			if i != len(entries)-1 {
+				program += ", "
+			}
+		}
+		program += "]"
+	}
+	ctx.reproLogf(2, "testing program (duration=%v, %+v): %s", duration, opts, program)
+	ctx.reproLogf(3, "detailed listing:\n%s", pstr)
+	return ctx.testWithInstance(func(inst *instance.ExecProgInstance) (*instance.RunResult, error) {
+		return inst.RunSyzProg(pstr, duration, opts)
+	})
+}
+
+func (ctx *context) testCProg(p *prog.Prog, duration time.Duration, opts csource.Options) (crashed bool, err error) {
+	return ctx.testWithInstance(func(inst *instance.ExecProgInstance) (*instance.RunResult, error) {
+		return inst.RunCProg(p, duration, opts)
+	})
+}
+
+func (ctx *context) returnInstance(inst *reproInstance) {
 	ctx.bootRequests <- inst.index
-	inst.Close()
+	inst.execProg.VMInstance.Close()
 }
 
 func (ctx *context) reproLogf(level int, format string, args ...interface{}) {
@@ -817,37 +713,9 @@ func chunksToStr(chunks [][]*prog.LogEntry) string {
 	return log
 }
 
-func encodeEntries(entries []*prog.LogEntry) []byte {
-	buf := new(bytes.Buffer)
-	for _, ent := range entries {
-		opts := ""
-		if ent.Fault {
-			opts = fmt.Sprintf(" (fault-call:%v fault-nth:%v)", ent.FaultCall, ent.FaultNth)
-		}
-		fmt.Fprintf(buf, "executing program %v%v:\n%v", ent.Proc, opts, string(ent.P.Serialize()))
-	}
-	return buf.Bytes()
-}
-
 type Simplify func(opts *csource.Options) bool
 
 var progSimplifies = []Simplify{
-	func(opts *csource.Options) bool {
-		if !opts.Fault {
-			return false
-		}
-		opts.Fault = false
-		opts.FaultCall = 0
-		opts.FaultNth = 0
-		return true
-	},
-	func(opts *csource.Options) bool {
-		if !opts.Collide {
-			return false
-		}
-		opts.Collide = false
-		return true
-	},
 	func(opts *csource.Options) bool {
 		if opts.Collide || !opts.Threaded {
 			return false
@@ -894,6 +762,7 @@ var cSimplifies = append(progSimplifies, []Simplify{
 		opts.BinfmtMisc = false
 		opts.CloseFDs = false
 		opts.DevlinkPCI = false
+		opts.NicVF = false
 		opts.USB = false
 		opts.VhciInjection = false
 		opts.Wifi = false
@@ -948,6 +817,13 @@ var cSimplifies = append(progSimplifies, []Simplify{
 			return false
 		}
 		opts.DevlinkPCI = false
+		return true
+	},
+	func(opts *csource.Options) bool {
+		if !opts.NicVF {
+			return false
+		}
+		opts.NicVF = false
 		return true
 	},
 	func(opts *csource.Options) bool {

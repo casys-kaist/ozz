@@ -4,7 +4,9 @@
 package prog
 
 import (
+	"bytes"
 	"fmt"
+	"reflect"
 )
 
 // Minimize minimizes program p into an equivalent program using the equivalence
@@ -28,8 +30,14 @@ func Minimize(p0 *Prog, callIndex0 int, crash bool, pred0 func(*Prog, int) bool)
 	// Try to remove all calls except the last one one-by-one.
 	p0, callIndex0 = removeCalls(p0, callIndex0, crash, pred)
 
-	// Try to minimize individual args.
+	// Try to reset all call props to their default values.
+	p0 = resetCallProps(p0, callIndex0, pred)
+
+	// Try to minimize individual calls.
 	for i := 0; i < len(p0.Calls); i++ {
+		if p0.Calls[i].Meta.Attrs.NoMinimize {
+			continue
+		}
 		ctx := &minimizeArgsCtx{
 			target:     p0.Target,
 			p0:         &p0,
@@ -46,6 +54,7 @@ func Minimize(p0 *Prog, callIndex0 int, crash bool, pred0 func(*Prog, int) bool)
 				goto again
 			}
 		}
+		p0 = minimizeCallProps(p0, i, callIndex0, pred)
 	}
 
 	if callIndex0 != -1 {
@@ -67,7 +76,7 @@ func removeCalls(p0 *Prog, callIndex0 int, crash bool, pred func(*Prog, int) boo
 			callIndex--
 		}
 		p := p0.Clone()
-		p.removeCall(i)
+		p.RemoveCall(i)
 		if !pred(p, callIndex) {
 			continue
 		}
@@ -75,6 +84,56 @@ func removeCalls(p0 *Prog, callIndex0 int, crash bool, pred func(*Prog, int) boo
 		callIndex0 = callIndex
 	}
 	return p0, callIndex0
+}
+
+func resetCallProps(p0 *Prog, callIndex0 int, pred func(*Prog, int) bool) *Prog {
+	// Try to reset all call props to their default values.
+	// This should be reasonable for many progs.
+	p := p0.Clone()
+	anyDifferent := false
+	for idx := range p.Calls {
+		if !reflect.DeepEqual(p.Calls[idx].Props, CallProps{}) {
+			p.Calls[idx].Props = CallProps{}
+			anyDifferent = true
+		}
+	}
+	if anyDifferent && pred(p, callIndex0) {
+		return p
+	}
+	return p0
+}
+
+func minimizeCallProps(p0 *Prog, callIndex, callIndex0 int, pred func(*Prog, int) bool) *Prog {
+	props := p0.Calls[callIndex].Props
+
+	// Try to drop fault injection.
+	if props.FailNth > 0 {
+		p := p0.Clone()
+		p.Calls[callIndex].Props.FailNth = 0
+		if pred(p, callIndex0) {
+			p0 = p
+		}
+	}
+
+	// Try to drop async.
+	if props.Async {
+		p := p0.Clone()
+		p.Calls[callIndex].Props.Async = false
+		if pred(p, callIndex0) {
+			p0 = p
+		}
+	}
+
+	// Try to drop rerun.
+	if props.Rerun > 0 {
+		p := p0.Clone()
+		p.Calls[callIndex].Props.Rerun = 0
+		if pred(p, callIndex0) {
+			p0 = p
+		}
+	}
+
+	return p0
 }
 
 type minimizeArgsCtx struct {
@@ -239,30 +298,56 @@ func (typ *ResourceType) minimize(ctx *minimizeArgsCtx, arg Arg, path string) bo
 }
 
 func (typ *BufferType) minimize(ctx *minimizeArgsCtx, arg Arg, path string) bool {
-	// TODO: try to set individual bytes to 0
-	if typ.Kind != BufferBlobRand && typ.Kind != BufferBlobRange || arg.Dir() == DirOut {
+	if arg.Dir() == DirOut {
 		return false
 	}
-	a := arg.(*DataArg)
-	len0 := len(a.Data())
-	minLen := int(typ.RangeBegin)
-	for step := len(a.Data()) - minLen; len(a.Data()) > minLen && step > 0; {
-		if len(a.Data())-step >= minLen {
-			a.data = a.Data()[:len(a.Data())-step]
-			ctx.target.assignSizesCall(ctx.call)
-			if ctx.pred(ctx.p, ctx.callIndex0) {
-				continue
-			}
-			a.data = a.Data()[:len(a.Data())+step]
-			ctx.target.assignSizesCall(ctx.call)
-		}
-		step /= 2
-		if ctx.crash {
-			break
-		}
+	if typ.IsCompressed() {
+		panic(fmt.Sprintf("minimizing `no_minimize` call %v", ctx.call.Meta.Name))
 	}
-	if len(a.Data()) != len0 {
-		*ctx.p0 = ctx.p
+	a := arg.(*DataArg)
+	switch typ.Kind {
+	case BufferBlobRand, BufferBlobRange:
+		// TODO: try to set individual bytes to 0
+		len0 := len(a.Data())
+		minLen := int(typ.RangeBegin)
+		for step := len(a.Data()) - minLen; len(a.Data()) > minLen && step > 0; {
+			if len(a.Data())-step >= minLen {
+				a.data = a.Data()[:len(a.Data())-step]
+				ctx.target.assignSizesCall(ctx.call)
+				if ctx.pred(ctx.p, ctx.callIndex0) {
+					continue
+				}
+				a.data = a.Data()[:len(a.Data())+step]
+				ctx.target.assignSizesCall(ctx.call)
+			}
+			step /= 2
+			if ctx.crash {
+				break
+			}
+		}
+		if len(a.Data()) != len0 {
+			*ctx.p0 = ctx.p
+			ctx.triedPaths[path] = true
+			return true
+		}
+	case BufferFilename:
+		// Try to undo target.SpecialFileLenghts mutation
+		// and reduce file name length.
+		if !typ.Varlen() {
+			return false
+		}
+		data0 := append([]byte{}, a.Data()...)
+		a.data = bytes.TrimRight(a.Data(), specialFileLenPad+"\x00")
+		if !typ.NoZ {
+			a.data = append(a.data, 0)
+		}
+		if bytes.Equal(a.data, data0) {
+			return false
+		}
+		ctx.target.assignSizesCall(ctx.call)
+		if ctx.pred(ctx.p, ctx.callIndex0) {
+			*ctx.p0 = ctx.p
+		}
 		ctx.triedPaths[path] = true
 		return true
 	}

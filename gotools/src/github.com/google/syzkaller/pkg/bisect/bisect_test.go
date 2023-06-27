@@ -5,11 +5,10 @@ package bisect
 
 import (
 	"fmt"
-	"io/ioutil"
-	"os"
 	"strconv"
 	"testing"
 
+	"github.com/google/syzkaller/pkg/build"
 	"github.com/google/syzkaller/pkg/debugtracer"
 	"github.com/google/syzkaller/pkg/hash"
 	"github.com/google/syzkaller/pkg/instance"
@@ -29,44 +28,43 @@ type testEnv struct {
 	test   BisectionTest
 }
 
-func (env *testEnv) BuildSyzkaller(repo, commit string) error {
-	return nil
+func (env *testEnv) BuildSyzkaller(repo, commit string) (string, error) {
+	return "", nil
 }
 
-func (env *testEnv) BuildKernel(compilerBin, cCache, userspaceDir, cmdlineFile, sysctlFile string,
-	kernelConfig []byte) (string, string, error) {
+func (env *testEnv) BuildKernel(buildCfg *instance.BuildKernelConfig) (string, build.ImageDetails, error) {
 	commit := env.headCommit()
-	configHash := hash.String(kernelConfig)
-	kernelSign := fmt.Sprintf("%v-%v", commit, configHash)
+	configHash := hash.String(buildCfg.KernelConfig)
+	details := build.ImageDetails{}
+	details.Signature = fmt.Sprintf("%v-%v", commit, configHash)
 	if commit >= env.test.sameBinaryStart && commit <= env.test.sameBinaryEnd {
-		kernelSign = "same-sign-" + configHash
+		details.Signature = "same-sign-" + configHash
 	}
-	env.config = string(kernelConfig)
+	env.config = string(buildCfg.KernelConfig)
 	if env.config == "baseline-fails" {
-		return "", kernelSign, fmt.Errorf("failure")
+		return "", details, fmt.Errorf("failure")
 	}
-	return "", kernelSign, nil
+	return "", details, nil
 }
 
-func (env *testEnv) Test(numVMs int, reproSyz, reproOpts, reproC []byte) ([]error, error) {
+func (env *testEnv) Test(numVMs int, reproSyz, reproOpts, reproC []byte) ([]instance.EnvTestResult, error) {
 	commit := env.headCommit()
 	if commit >= env.test.brokenStart && commit <= env.test.brokenEnd ||
 		env.config == "baseline-skip" {
 		return nil, fmt.Errorf("broken build")
 	}
+	var ret []instance.EnvTestResult
 	if (env.config == "baseline-repro" || env.config == "new-minimized-config" || env.config == "original config") &&
 		(!env.test.fix && commit >= env.test.culprit || env.test.fix &&
 			commit < env.test.culprit) {
-		var errors []error
 		if env.test.flaky {
-			errors = crashErrors(1, numVMs-1, "crash occurs")
+			ret = crashErrors(1, numVMs-1, "crash occurs")
 		} else {
-			errors = crashErrors(numVMs, 0, "crash occurs")
+			ret = crashErrors(numVMs, 0, "crash occurs")
 		}
-		return errors, nil
+		return ret, nil
 	}
-
-	return make([]error, numVMs), nil
+	return make([]instance.EnvTestResult, numVMs), nil
 }
 
 func (env *testEnv) headCommit() int {
@@ -82,10 +80,7 @@ func (env *testEnv) headCommit() int {
 }
 
 func createTestRepo(t *testing.T) string {
-	baseDir, err := ioutil.TempDir("", "syz-bisect-test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	baseDir := t.TempDir()
 	repo := vcs.CreateTestRepo(t, baseDir, "")
 	if !repo.SupportsBisection() {
 		t.Skip("bisection is unsupported by git (probably too old version)")
@@ -112,7 +107,7 @@ func createTestRepo(t *testing.T) string {
 	return baseDir
 }
 
-func runBisection(t *testing.T, baseDir string, test BisectionTest) (*Result, error) {
+func testBisection(t *testing.T, baseDir string, test BisectionTest) {
 	r, err := vcs.NewRepo(targets.TestOS, targets.TestArch64, baseDir, vcs.OptPrecious)
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +130,9 @@ func runBisection(t *testing.T, baseDir string, test BisectionTest) (*Result, er
 		},
 		Kernel: KernelConfig{
 			Repo:           baseDir,
+			Branch:         "master",
 			Commit:         sc.Hash,
+			CommitTitle:    sc.Title,
 			Config:         []byte("original config"),
 			BaselineConfig: []byte(test.baselineConfig),
 		},
@@ -145,8 +142,54 @@ func runBisection(t *testing.T, baseDir string, test BisectionTest) (*Result, er
 		r:    r,
 		test: test,
 	}
+
+	checkBisectionError := func(test BisectionTest, res *Result, err error) {
+		if test.expectErr != (err != nil) {
+			t.Fatalf("expected error %v, got %v", test.expectErr, err)
+		}
+		if err != nil {
+			if res != nil {
+				t.Fatalf("got both result and error: '%v' %+v", err, *res)
+			}
+		} else {
+			checkBisectionResult(t, test, res)
+		}
+	}
+
 	res, err := runImpl(cfg, r, inst)
-	return res, err
+	checkBisectionError(test, res, err)
+	// Should be mitigated via GetCommitByTitle during bisection.
+	cfg.Kernel.Commit = fmt.Sprintf("fake-hash-for-%v-%v", cfg.Kernel.Commit, cfg.Kernel.CommitTitle)
+	res, err = runImpl(cfg, r, inst)
+	checkBisectionError(test, res, err)
+}
+
+func checkBisectionResult(t *testing.T, test BisectionTest, res *Result) {
+	if len(res.Commits) != test.commitLen {
+		t.Fatalf("expected %d commits got %d commits", test.commitLen, len(res.Commits))
+	}
+	expectedTitle := fmt.Sprint(test.culprit)
+	if len(res.Commits) == 1 && expectedTitle != res.Commits[0].Title {
+		t.Fatalf("expected commit '%v' got '%v'", expectedTitle, res.Commits[0].Title)
+	}
+	if test.expectRep != (res.Report != nil) {
+		t.Fatalf("got rep: %v, want: %v", res.Report, test.expectRep)
+	}
+	if res.NoopChange != test.noopChange {
+		t.Fatalf("got noop change: %v, want: %v", res.NoopChange, test.noopChange)
+	}
+	if res.IsRelease != test.isRelease {
+		t.Fatalf("got release change: %v, want: %v", res.IsRelease, test.isRelease)
+	}
+	if test.oldestLatest != 0 && fmt.Sprint(test.oldestLatest) != res.Commit.Title ||
+		test.oldestLatest == 0 && res.Commit != nil {
+		t.Fatalf("expected latest/oldest: %v got '%v'",
+			test.oldestLatest, res.Commit.Title)
+	}
+	if test.resultingConfig != "" && test.resultingConfig != string(res.Config) {
+		t.Fatalf("expected resulting config: %q got %q",
+			test.resultingConfig, res.Config)
+	}
 }
 
 type BisectionTest struct {
@@ -430,67 +473,25 @@ func TestBisectionResults(t *testing.T) {
 	// Creating new repos takes majority of the test time,
 	// so we reuse them across tests.
 	repoCache := make(chan string, len(bisectionTests))
-	t.Run("group", func(t *testing.T) {
+	t.Run("group", func(tt *testing.T) {
 		for _, test := range bisectionTests {
 			test := test
-			t.Run(test.name, func(t *testing.T) {
+			tt.Run(test.name, func(t *testing.T) {
 				t.Parallel()
 				checkTest(t, test)
 				repoDir := ""
 				select {
 				case repoDir = <-repoCache:
 				default:
-					repoDir = createTestRepo(t)
+					repoDir = createTestRepo(tt)
 				}
 				defer func() {
 					repoCache <- repoDir
 				}()
-				res, err := runBisection(t, repoDir, test)
-				if test.expectErr != (err != nil) {
-					t.Fatalf("returned error: %v", err)
-				}
-				if err != nil {
-					if res != nil {
-						t.Fatalf("got both result and error: '%v' %+v", err, *res)
-					}
-					return
-				}
-				if len(res.Commits) != test.commitLen {
-					t.Fatalf("expected %d commits got %d commits", test.commitLen, len(res.Commits))
-				}
-				expectedTitle := fmt.Sprint(test.culprit)
-				if len(res.Commits) == 1 && expectedTitle != res.Commits[0].Title {
-					t.Fatalf("expected commit '%v' got '%v'", expectedTitle, res.Commits[0].Title)
-				}
-				if test.expectRep != (res.Report != nil) {
-					t.Fatalf("got rep: %v, want: %v", res.Report, test.expectRep)
-				}
-				if res.NoopChange != test.noopChange {
-					t.Fatalf("got noop change: %v, want: %v", res.NoopChange, test.noopChange)
-				}
-				if res.IsRelease != test.isRelease {
-					t.Fatalf("got release change: %v, want: %v", res.IsRelease, test.isRelease)
-				}
-				if test.oldestLatest != 0 && fmt.Sprint(test.oldestLatest) != res.Commit.Title ||
-					test.oldestLatest == 0 && res.Commit != nil {
-					t.Fatalf("expected latest/oldest: %v got '%v'",
-						test.oldestLatest, res.Commit.Title)
-				}
-				if test.resultingConfig != "" && test.resultingConfig != string(res.Config) {
-					t.Fatalf("expected resulting config: %q got %q",
-						test.resultingConfig, res.Config)
-				}
+				testBisection(t, repoDir, test)
 			})
 		}
 	})
-	for {
-		select {
-		case dir := <-repoCache:
-			os.RemoveAll(dir)
-		default:
-			return
-		}
-	}
 }
 
 func checkTest(t *testing.T, test BisectionTest) {
@@ -515,17 +516,19 @@ func checkTest(t *testing.T, test BisectionTest) {
 	}
 }
 
-func crashErrors(crashing, nonCrashing int, title string) []error {
-	var errors []error
+func crashErrors(crashing, nonCrashing int, title string) []instance.EnvTestResult {
+	var ret []instance.EnvTestResult
 	for i := 0; i < crashing; i++ {
-		errors = append(errors, &instance.CrashError{
-			Report: &report.Report{
-				Title: fmt.Sprintf("crashes at %v", title),
+		ret = append(ret, instance.EnvTestResult{
+			Error: &instance.CrashError{
+				Report: &report.Report{
+					Title: fmt.Sprintf("crashes at %v", title),
+				},
 			},
 		})
 	}
 	for i := 0; i < nonCrashing; i++ {
-		errors = append(errors, nil)
+		ret = append(ret, instance.EnvTestResult{})
 	}
-	return errors
+	return ret
 }

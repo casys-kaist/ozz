@@ -4,14 +4,12 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
 	"io/ioutil"
-	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -23,41 +21,50 @@ import (
 	"time"
 
 	"github.com/google/syzkaller/pkg/cover"
-	"github.com/google/syzkaller/pkg/html"
+	"github.com/google/syzkaller/pkg/html/pages"
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/pkg/osutil"
 	"github.com/google/syzkaller/pkg/signal"
 	"github.com/google/syzkaller/pkg/vcs"
 	"github.com/google/syzkaller/prog"
+	"github.com/gorilla/handlers"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func (mgr *Manager) initHTTP() {
-	http.HandleFunc("/", mgr.httpSummary)
-	http.HandleFunc("/config", mgr.httpConfig)
-	http.HandleFunc("/syscalls", mgr.httpSyscalls)
-	http.HandleFunc("/corpus", mgr.httpCorpus)
-	http.HandleFunc("/crash", mgr.httpCrash)
-	http.HandleFunc("/cover", mgr.httpCover)
-	http.HandleFunc("/subsystemcover", mgr.httpSubsystemCover)
-	http.HandleFunc("/prio", mgr.httpPrio)
-	http.HandleFunc("/file", mgr.httpFile)
-	http.HandleFunc("/report", mgr.httpReport)
-	http.HandleFunc("/rawcover", mgr.httpRawCover)
-	http.HandleFunc("/filterpcs", mgr.httpFilterPCs)
-	http.HandleFunc("/funccover", mgr.httpFuncCover)
-	http.HandleFunc("/filecover", mgr.httpFileCover)
-	http.HandleFunc("/input", mgr.httpInput)
-	// Browsers like to request this, without special handler this goes to / handler.
-	http.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {})
-
-	ln, err := net.Listen("tcp4", mgr.cfg.HTTP)
-	if err != nil {
-		log.Fatalf("failed to listen on %v: %v", mgr.cfg.HTTP, err)
+	handle := func(pattern string, handler func(http.ResponseWriter, *http.Request)) {
+		http.Handle(pattern, handlers.CompressHandler(http.HandlerFunc(handler)))
 	}
-	log.Logf(0, "serving http on http://%v", ln.Addr())
+	handle("/", mgr.httpSummary)
+	handle("/config", mgr.httpConfig)
+	handle("/metrics", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}).ServeHTTP)
+	handle("/syscalls", mgr.httpSyscalls)
+	handle("/corpus", mgr.httpCorpus)
+	handle("/corpus.db", mgr.httpDownloadCorpus)
+	handle("/crash", mgr.httpCrash)
+	handle("/cover", mgr.httpCover)
+	handle("/subsystemcover", mgr.httpSubsystemCover)
+	handle("/modulecover", mgr.httpModuleCover)
+	handle("/prio", mgr.httpPrio)
+	handle("/file", mgr.httpFile)
+	handle("/report", mgr.httpReport)
+	handle("/rawcover", mgr.httpRawCover)
+	handle("/rawcoverfiles", mgr.httpRawCoverFiles)
+	handle("/filterpcs", mgr.httpFilterPCs)
+	handle("/funccover", mgr.httpFuncCover)
+	handle("/filecover", mgr.httpFileCover)
+	handle("/input", mgr.httpInput)
+	handle("/debuginput", mgr.httpDebugInput)
+	// Browsers like to request this, without special handler this goes to / handler.
+	handle("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {})
+
+	log.Logf(0, "serving http on http://%v", mgr.cfg.HTTP)
 	go func() {
-		err := http.Serve(ln, nil)
-		log.Fatalf("failed to serve http: %v", err)
+		err := http.ListenAndServe(mgr.cfg.HTTP, nil)
+		if err != nil {
+			log.Fatalf("failed to listen on %v: %v", mgr.cfg.HTTP, err)
+		}
 	}()
 }
 
@@ -91,8 +98,13 @@ func (mgr *Manager) httpSyscalls(w http.ResponseWriter, r *http.Request) {
 		Name: mgr.cfg.Name,
 	}
 	for c, cc := range mgr.collectSyscallInfo() {
+		var syscallID *int
+		if syscall, ok := mgr.target.SyscallMap[c]; ok {
+			syscallID = &syscall.ID
+		}
 		data.Calls = append(data.Calls, UICallType{
 			Name:   c,
+			ID:     syscallID,
 			Inputs: cc.count,
 			Cover:  len(cc.cov),
 		})
@@ -107,11 +119,15 @@ func (mgr *Manager) collectStats() []UIStat {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
+	configName := mgr.cfg.Name
+	if configName == "" {
+		configName = "config"
+	}
 	rawStats := mgr.stats.all()
 	head := prog.GitRevisionBase
 	stats := []UIStat{
 		{Name: "revision", Value: fmt.Sprint(head[:8]), Link: vcs.LogLink(vcs.SyzkallerRepo, head)},
-		{Name: "config", Value: mgr.cfg.Name, Link: "/config"},
+		{Name: "config", Value: configName, Link: "/config"},
 		{Name: "uptime", Value: fmt.Sprint(time.Since(mgr.startTime) / 1e9 * 1e9)},
 		{Name: "fuzzing", Value: fmt.Sprint(mgr.fuzzingTime / 60e9 * 60e9)},
 		{Name: "corpus", Value: fmt.Sprint(len(mgr.corpus)), Link: "/corpus"},
@@ -183,7 +199,8 @@ func (mgr *Manager) httpCorpus(w http.ResponseWriter, r *http.Request) {
 	defer mgr.mu.Unlock()
 
 	data := UICorpus{
-		Call: r.FormValue("call"),
+		Call:     r.FormValue("call"),
+		RawCover: mgr.cfg.RawCover,
 	}
 	for sig, inp := range mgr.corpus {
 		if data.Call != "" && data.Call != inp.Call {
@@ -210,11 +227,31 @@ func (mgr *Manager) httpCorpus(w http.ResponseWriter, r *http.Request) {
 	executeTemplate(w, corpusTemplate, data)
 }
 
+func (mgr *Manager) httpDownloadCorpus(w http.ResponseWriter, r *http.Request) {
+	corpus := filepath.Join(mgr.cfg.Workdir, "corpus.db")
+	file, err := os.Open(corpus)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to open corpus : %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+	buf, err := ioutil.ReadAll(file)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to read corpus : %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Write(buf)
+}
+
 const (
 	DoHTML int = iota
 	DoHTMLTable
+	DoModuleCover
 	DoCSV
 	DoCSVFiles
+	DoRawCoverFiles
+	DoRawCover
+	DoFilterPCs
 )
 
 func (mgr *Manager) httpCover(w http.ResponseWriter, r *http.Request) {
@@ -225,11 +262,13 @@ func (mgr *Manager) httpSubsystemCover(w http.ResponseWriter, r *http.Request) {
 	mgr.httpCoverCover(w, r, DoHTMLTable, true)
 }
 
+func (mgr *Manager) httpModuleCover(w http.ResponseWriter, r *http.Request) {
+	mgr.httpCoverCover(w, r, DoModuleCover, true)
+}
+
 func (mgr *Manager) httpCoverCover(w http.ResponseWriter, r *http.Request, funcFlag int, isHTMLCover bool) {
 	if !mgr.cfg.Cover {
 		if isHTMLCover {
-			mgr.mu.Lock()
-			defer mgr.mu.Unlock()
 			mgr.httpCoverFallback(w, r)
 		} else {
 			http.Error(w, "coverage is not enabled", http.StatusInternalServerError)
@@ -237,54 +276,90 @@ func (mgr *Manager) httpCoverCover(w http.ResponseWriter, r *http.Request, funcF
 		return
 	}
 
-	rg, err := getReportGenerator(mgr.cfg)
+	// Don't hold the mutex while creating report generator and generating the report,
+	// these operations take lots of time.
+	mgr.mu.Lock()
+	initialized := mgr.modulesInitialized
+	mgr.mu.Unlock()
+	if !initialized {
+		http.Error(w, "coverage is not ready, please try again later after fuzzer started", http.StatusInternalServerError)
+		return
+	}
+
+	rg, err := getReportGenerator(mgr.cfg, mgr.modules)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to generate coverage profile: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
-
-	convert := coverToPCs
-	if r.FormValue("filter") != "" && mgr.coverFilter != nil {
-		convert = func(rg *cover.ReportGenerator, cover []uint32) (ret []uint64) {
-			for _, pc := range coverToPCs(rg, cover) {
-				if mgr.coverFilter[uint32(pc)] != 0 {
-					ret = append(ret, pc)
-				}
-			}
-			return ret
-		}
-	}
 	var progs []cover.Prog
 	if sig := r.FormValue("input"); sig != "" {
 		inp := mgr.corpus[sig]
-		progs = append(progs, cover.Prog{
-			Data: string(inp.Prog),
-			PCs:  convert(rg, inp.Cover),
-		})
+		if r.FormValue("update_id") != "" {
+			updateID, err := strconv.Atoi(r.FormValue("update_id"))
+			if err != nil || updateID < 0 || updateID >= len(inp.Updates) {
+				http.Error(w, "bad call_id", http.StatusBadRequest)
+			}
+			progs = append(progs, cover.Prog{
+				Sig:  sig,
+				Data: string(inp.Prog),
+				PCs:  coverToPCs(rg, inp.Updates[updateID].RawCover),
+			})
+		} else {
+			progs = append(progs, cover.Prog{
+				Sig:  sig,
+				Data: string(inp.Prog),
+				PCs:  coverToPCs(rg, inp.Cover),
+			})
+		}
 	} else {
 		call := r.FormValue("call")
-		for _, inp := range mgr.corpus {
+		for sig, inp := range mgr.corpus {
 			if call != "" && call != inp.Call {
 				continue
 			}
 			progs = append(progs, cover.Prog{
+				Sig:  sig,
 				Data: string(inp.Prog),
-				PCs:  convert(rg, inp.Cover),
+				PCs:  coverToPCs(rg, inp.Cover),
 			})
 		}
 	}
+	mgr.mu.Unlock()
+
+	var coverFilter map[uint32]uint32
+	if r.FormValue("filter") != "" {
+		coverFilter = mgr.coverFilter
+	}
+
+	if funcFlag == DoRawCoverFiles {
+		if err := rg.DoRawCoverFiles(w, progs, coverFilter); err != nil {
+			http.Error(w, fmt.Sprintf("failed to generate coverage profile: %v", err), http.StatusInternalServerError)
+			return
+		}
+		runtime.GC()
+		return
+	} else if funcFlag == DoRawCover {
+		rg.DoRawCover(w, progs, coverFilter)
+		return
+	} else if funcFlag == DoFilterPCs {
+		rg.DoFilterPCs(w, progs, coverFilter)
+		return
+	}
+
 	do := rg.DoHTML
 	if funcFlag == DoHTMLTable {
 		do = rg.DoHTMLTable
+	} else if funcFlag == DoModuleCover {
+		do = rg.DoModuleCover
 	} else if funcFlag == DoCSV {
 		do = rg.DoCSV
 	} else if funcFlag == DoCSVFiles {
 		do = rg.DoCSVFiles
 	}
-	if err := do(w, progs); err != nil {
+
+	if err := do(w, progs, coverFilter); err != nil {
 		http.Error(w, fmt.Sprintf("failed to generate coverage profile: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -292,6 +367,8 @@ func (mgr *Manager) httpCoverCover(w http.ResponseWriter, r *http.Request, funcF
 }
 
 func (mgr *Manager) httpCoverFallback(w http.ResponseWriter, r *http.Request) {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
 	var maxSignal signal.Signal
 	for _, inp := range mgr.corpus {
 		maxSignal.Merge(inp.Signal.Deserialize())
@@ -391,6 +468,46 @@ func (mgr *Manager) httpInput(w http.ResponseWriter, r *http.Request) {
 	w.Write(inp.Prog)
 }
 
+func (mgr *Manager) httpDebugInput(w http.ResponseWriter, r *http.Request) {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	inp, ok := mgr.corpus[r.FormValue("sig")]
+	if !ok {
+		http.Error(w, "can't find the input", http.StatusInternalServerError)
+		return
+	}
+	getIDs := func(callID int) []int {
+		ret := []int{}
+		for id, update := range inp.Updates {
+			if update.CallID == callID {
+				ret = append(ret, id)
+			}
+		}
+		return ret
+	}
+	data := []UIRawCallCover{}
+	for pos, line := range strings.Split(string(inp.Prog), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		data = append(data, UIRawCallCover{
+			Sig:       r.FormValue("sig"),
+			Call:      line,
+			UpdateIDs: getIDs(pos),
+		})
+	}
+	extraIDs := getIDs(-1)
+	if len(extraIDs) > 0 {
+		data = append(data, UIRawCallCover{
+			Sig:       r.FormValue("sig"),
+			Call:      ".extra",
+			UpdateIDs: extraIDs,
+		})
+	}
+	executeTemplate(w, rawCoverTemplate, data)
+}
+
 func (mgr *Manager) httpReport(w http.ResponseWriter, r *http.Request) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
@@ -425,31 +542,11 @@ func (mgr *Manager) httpReport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (mgr *Manager) httpRawCover(w http.ResponseWriter, r *http.Request) {
-	// Note: initCover is executed without mgr.mu because it takes very long time
-	// (but it only reads config and it protected by initCoverOnce).
-	rg, err := getReportGenerator(mgr.cfg)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
+	mgr.httpCoverCover(w, r, DoRawCover, false)
+}
 
-	var cov cover.Cover
-	for _, inp := range mgr.corpus {
-		cov.Merge(inp.Cover)
-	}
-	pcs := coverToPCs(rg, cov.Serialize())
-	sort.Slice(pcs, func(i, j int) bool {
-		return pcs[i] < pcs[j]
-	})
-
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	buf := bufio.NewWriter(w)
-	for _, pc := range pcs {
-		fmt.Fprintf(buf, "0x%x\n", pc)
-	}
-	buf.Flush()
+func (mgr *Manager) httpRawCoverFiles(w http.ResponseWriter, r *http.Request) {
+	mgr.httpCoverCover(w, r, DoRawCoverFiles, false)
 }
 
 func (mgr *Manager) httpFilterPCs(w http.ResponseWriter, r *http.Request) {
@@ -457,36 +554,7 @@ func (mgr *Manager) httpFilterPCs(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "cover is not filtered in config.\n")
 		return
 	}
-	// Note: initCover is executed without mgr.mu because it takes very long time
-	// (but it only reads config and it protected by initCoverOnce).
-	rg, err := getReportGenerator(mgr.cfg)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to generate coverage profile: %v", err), http.StatusInternalServerError)
-		return
-	}
-	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
-
-	var cov cover.Cover
-	for _, inp := range mgr.corpus {
-		cov.Merge(inp.Cover)
-	}
-	pcs := make([]uint64, 0, len(cov))
-	for _, pc := range coverToPCs(rg, cov.Serialize()) {
-		if mgr.coverFilter[uint32(pc)] != 0 {
-			pcs = append(pcs, pc)
-		}
-	}
-	sort.Slice(pcs, func(i, j int) bool {
-		return pcs[i] < pcs[j]
-	})
-
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	buf := bufio.NewWriter(w)
-	for _, pc := range pcs {
-		fmt.Fprintf(buf, "0x%x\n", pc)
-	}
-	buf.Flush()
+	mgr.httpCoverCover(w, r, DoFilterPCs, false)
 }
 
 func (mgr *Manager) collectCrashes(workdir string) ([]*UICrashType, error) {
@@ -542,6 +610,7 @@ func readCrash(workdir, dir string, repros map[string]bool, start time.Time, ful
 	var crashes []*UICrash
 	reproAttempts := 0
 	hasRepro, hasCRepro := false, false
+	strace := ""
 	reports := make(map[string]bool)
 	for _, f := range files {
 		if strings.HasPrefix(f, "log") {
@@ -560,6 +629,8 @@ func readCrash(workdir, dir string, repros map[string]bool, start time.Time, ful
 		} else if f == "repro.report" {
 		} else if f == "repro0" || f == "repro1" || f == "repro2" {
 			reproAttempts++
+		} else if f == "strace.log" {
+			strace = filepath.Join("crashes", dir, f)
 		}
 	}
 
@@ -591,6 +662,7 @@ func readCrash(workdir, dir string, repros map[string]bool, start time.Time, ful
 		ID:          dir,
 		Count:       len(crashes),
 		Triaged:     triaged,
+		Strace:      strace,
 		Crashes:     crashes,
 	}
 }
@@ -646,6 +718,7 @@ type UICrashType struct {
 	ID          string
 	Count       int
 	Triaged     string
+	Strace      string
 	Crashes     []*UICrash
 }
 
@@ -666,13 +739,15 @@ type UIStat struct {
 
 type UICallType struct {
 	Name   string
+	ID     *int
 	Inputs int
 	Cover  int
 }
 
 type UICorpus struct {
-	Call   string
-	Inputs []*UIInput
+	Call     string
+	RawCover bool
+	Inputs   []*UIInput
 }
 
 type UIInput struct {
@@ -681,7 +756,7 @@ type UIInput struct {
 	Cover int
 }
 
-var summaryTemplate = html.CreatePage(`
+var summaryTemplate = pages.Create(`
 <!doctype html>
 <html>
 <head>
@@ -725,6 +800,9 @@ var summaryTemplate = html.CreatePage(`
 			{{if $c.Triaged}}
 				<a href="/report?id={{$c.ID}}">{{$c.Triaged}}</a>
 			{{end}}
+			{{if $c.Strace}}
+				<a href="/file?name={{$c.Strace}}">Strace</a>
+			{{end}}
 		</td>
 	</tr>
 	{{end}}
@@ -742,7 +820,7 @@ var summaryTemplate = html.CreatePage(`
 </body></html>
 `)
 
-var syscallsTemplate = html.CreatePage(`
+var syscallsTemplate = pages.Create(`
 <!doctype html>
 <html>
 <head>
@@ -761,7 +839,7 @@ var syscallsTemplate = html.CreatePage(`
 	</tr>
 	{{range $c := $.Calls}}
 	<tr>
-		<td>{{$c.Name}}</td>
+		<td>{{$c.Name}}{{if $c.ID }} [{{$c.ID}}]{{end}}</td>
 		<td><a href='/corpus?call={{$c.Name}}'>{{$c.Inputs}}</a></td>
 		<td><a href='/cover?call={{$c.Name}}'>{{$c.Cover}}</a></td>
 		<td><a href='/prio?call={{$c.Name}}'>prio</a></td>
@@ -771,7 +849,7 @@ var syscallsTemplate = html.CreatePage(`
 </body></html>
 `)
 
-var crashTemplate = html.CreatePage(`
+var crashTemplate = pages.Create(`
 <!doctype html>
 <html>
 <head>
@@ -803,14 +881,14 @@ Report: <a href="/report?id={{.ID}}">{{.Triaged}}</a>
 			{{end}}
 		</td>
 		<td class="time {{if not $c.Active}}inactive{{end}}">{{formatTime $c.Time}}</td>
-		<td class="tag {{if not $c.Active}}inactive{{end}}" title="{{$c.Tag}}">{{formatShortHash $c.Tag}}</td>
+		<td class="tag {{if not $c.Active}}inactive{{end}}" title="{{$c.Tag}}">{{formatTagHash $c.Tag}}</td>
 	</tr>
 	{{end}}
 </table>
 </body></html>
 `)
 
-var corpusTemplate = html.CreatePage(`
+var corpusTemplate = pages.Create(`
 <!doctype html>
 <html>
 <head>
@@ -827,7 +905,12 @@ var corpusTemplate = html.CreatePage(`
 	</tr>
 	{{range $inp := $.Inputs}}
 	<tr>
-		<td><a href='/cover?input={{$inp.Sig}}'>{{$inp.Cover}}</a></td>
+		<td>
+			<a href='/cover?input={{$inp.Sig}}'>{{$inp.Cover}}</a>
+	{{if $.RawCover}}
+		/ <a href="/debuginput?sig={{$inp.Sig}}">[raw]</a>
+	{{end}}
+		</td>
 		<td><a href="/input?sig={{$inp.Sig}}">{{$inp.Short}}</a></td>
 	</tr>
 	{{end}}
@@ -845,7 +928,7 @@ type UIPrio struct {
 	Prio int32
 }
 
-var prioTemplate = html.CreatePage(`
+var prioTemplate = pages.Create(`
 <!doctype html>
 <html>
 <head>
@@ -879,7 +962,7 @@ type UIFallbackCall struct {
 	Errnos     []int
 }
 
-var fallbackCoverTemplate = html.CreatePage(`
+var fallbackCoverTemplate = pages.Create(`
 <!doctype html>
 <html>
 <head>
@@ -898,6 +981,41 @@ var fallbackCoverTemplate = html.CreatePage(`
 		<td>{{$c.Name}}</td>
 		<td>{{if $c.Successful}}{{$c.Successful}}{{end}}</td>
 		<td>{{range $e := $c.Errnos}}{{$e}}&nbsp;{{end}}</td>
+	</tr>
+	{{end}}
+</table>
+</body></html>
+`)
+
+type UIRawCallCover struct {
+	Sig       string
+	Call      string
+	UpdateIDs []int
+}
+
+var rawCoverTemplate = pages.Create(`
+<!doctype html>
+<html>
+<head>
+	<title>syzkaller raw cover</title>
+	{{HEAD}}
+</head>
+<body>
+
+<table class="list_table">
+	<caption>Raw cover</caption>
+	<tr>
+		<th>Line</th>
+		<th>Links</th>
+	</tr>
+	{{range $line := .}}
+	<tr>
+		<td>{{$line.Call}}</td>
+		<td>
+		{{range $id := $line.UpdateIDs}}
+		<a href="/rawcover?input={{$line.Sig}}&update_id={{$id}}">[{{$id}}]</a>
+		{{end}}
+</td>
 	</tr>
 	{{end}}
 </table>

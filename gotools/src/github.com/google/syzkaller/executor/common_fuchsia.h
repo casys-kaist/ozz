@@ -23,7 +23,7 @@
 #include <zircon/syscalls.h>
 
 #if SYZ_EXECUTOR || __NR_get_root_resource
-#include <ddk/driver.h>
+#include <lib/ddk/driver.h>
 #endif
 
 #if SYZ_EXECUTOR || SYZ_HANDLE_SEGV
@@ -259,7 +259,7 @@ static long syz_future_time(volatile long when)
 		break;
 	}
 	zx_time_t now = 0;
-	zx_clock_get(ZX_CLOCK_MONOTONIC, &now);
+	zx_clock_read(ZX_CLOCK_MONOTONIC, &now);
 	return now + delta_ms * 1000 * 1000;
 }
 #endif

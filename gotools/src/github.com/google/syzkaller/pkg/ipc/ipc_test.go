@@ -13,9 +13,11 @@ import (
 	"time"
 
 	"github.com/google/syzkaller/pkg/csource"
+	"github.com/google/syzkaller/pkg/image"
 	. "github.com/google/syzkaller/pkg/ipc"
 	"github.com/google/syzkaller/pkg/ipc/ipcconfig"
 	"github.com/google/syzkaller/pkg/osutil"
+	"github.com/google/syzkaller/pkg/testutil"
 	"github.com/google/syzkaller/prog"
 	_ "github.com/google/syzkaller/sys"
 	"github.com/google/syzkaller/sys/targets"
@@ -36,12 +38,6 @@ func initTest(t *testing.T) (*prog.Target, rand.Source, int, bool, bool, targets
 	if testing.Short() {
 		iters = 10
 	}
-	seed := time.Now().UnixNano()
-	if os.Getenv("CI") != "" {
-		seed = 0 // required for deterministic coverage reports
-	}
-	rs := rand.NewSource(seed)
-	t.Logf("seed=%v", seed)
 	target, err := prog.GetTarget(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		t.Fatal(err)
@@ -50,6 +46,7 @@ func initTest(t *testing.T) (*prog.Target, rand.Source, int, bool, bool, targets
 	if err != nil {
 		t.Fatal(err)
 	}
+	rs := testutil.RandSource(t)
 	return target, rs, iters, cfg.UseShmem, cfg.UseForkServer, cfg.Timeouts
 }
 
@@ -81,13 +78,21 @@ func TestExecutor(t *testing.T) {
 	}
 }
 
+func prepareTestProgram(target *prog.Target) *prog.Prog {
+	p := target.DataMmapProg()
+	if len(p.Calls) > 1 {
+		p.Calls[1].Props.Async = true
+	}
+	return p
+}
+
 func TestExecute(t *testing.T) {
 	target, _, _, useShmem, useForkServer, timeouts := initTest(t)
 
 	bin := buildExecutor(t, target)
 	defer os.Remove(bin)
 
-	flags := []ExecFlags{0, FlagThreaded, FlagThreaded | FlagCollide}
+	flags := []ExecFlags{0, FlagThreaded}
 	for _, flag := range flags {
 		t.Logf("testing flags 0x%x\n", flag)
 		cfg := &Config{
@@ -95,6 +100,7 @@ func TestExecute(t *testing.T) {
 			UseShmem:      useShmem,
 			UseForkServer: useForkServer,
 			Timeouts:      timeouts,
+			SandboxArg:    0,
 		}
 		env, err := MakeEnv(cfg, 0)
 		if err != nil {
@@ -103,7 +109,7 @@ func TestExecute(t *testing.T) {
 		defer env.Close()
 
 		for i := 0; i < 10; i++ {
-			p := target.DataMmapProg()
+			p := prepareTestProgram(target)
 			opts := &ExecOpts{
 				Flags: flag,
 			}
@@ -114,8 +120,8 @@ func TestExecute(t *testing.T) {
 			if hanged {
 				t.Fatalf("program hanged:\n%s", output)
 			}
-			if len(info.Calls) == 0 {
-				t.Fatalf("no calls executed:\n%s", output)
+			if len(info.Calls) != len(p.Calls) {
+				t.Fatalf("executed less calls (%v) than prog len(%v):\n%s", len(info.Calls), len(p.Calls), output)
 			}
 			if info.Calls[0].Errno != 0 {
 				t.Fatalf("simple call failed: %v\n%s", info.Calls[0].Errno, output)
@@ -136,6 +142,7 @@ func TestParallel(t *testing.T) {
 		UseShmem:      useShmem,
 		UseForkServer: useForkServer,
 		Timeouts:      timeouts,
+		SandboxArg:    0,
 	}
 	const P = 10
 	errs := make(chan error, P)
@@ -179,6 +186,44 @@ func TestParallel(t *testing.T) {
 	for p := 0; p < P; p++ {
 		if err := <-errs; err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+func TestZlib(t *testing.T) {
+	t.Parallel()
+	target, err := prog.GetTarget(targets.TestOS, targets.TestArch64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, opts, err := ipcconfig.Default(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Flags |= FlagDebug
+	cfg.Executor = buildExecutor(t, target)
+	defer os.Remove(cfg.Executor)
+	env, err := MakeEnv(cfg, 0)
+	if err != nil {
+		t.Fatalf("failed to create env: %v", err)
+	}
+	defer env.Close()
+	r := rand.New(testutil.RandSource(t))
+	for i := 0; i < 10; i++ {
+		data := testutil.RandMountImage(r)
+		compressed := image.Compress(data)
+		text := fmt.Sprintf(`syz_compare_zlib(&(0x7f0000000000)="$%s", AUTO, &(0x7f0000800000)="$%s", AUTO)`,
+			image.EncodeB64(data), image.EncodeB64(compressed))
+		p, err := target.Deserialize([]byte(text), prog.Strict)
+		if err != nil {
+			t.Fatalf("failed to deserialize empty program: %v", err)
+		}
+		output, info, _, err := env.Exec(opts, p)
+		if err != nil {
+			t.Fatalf("failed to run executor: %v", err)
+		}
+		if info.Calls[0].Errno != 0 {
+			t.Fatalf("data comparison failed: %v\n%s", info.Calls[0].Errno, output)
 		}
 	}
 }

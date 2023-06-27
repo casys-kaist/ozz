@@ -7,7 +7,12 @@ To find out the list of maintainers responsible for a particular kernel subsyste
 Make sure to mention the exact kernel branch and revision where the bug occurred.
 Many kernel mailing lists reject HTML formatted messages, so use the plain text mode when sending the report.
 
-Bugs without reproducers are way less likely to be triaged and fixed.
+Think of what you report. Today, Linux maintainers are overwhelmed with bug reports, so increasing the incoming flow won't help to fix all the bugs.
+The more actionable your report is, the higher the chance that it will be addressed.
+Note that people are more likely to care about kernel crashes (e.g. use-after-frees or panics) than of INFO: messages and such, unless it is clearly visible from the report what exactly is wrong.
+If there are stalls or hangs, only report them if they are frequent enough or have a reliable reproducer.
+
+Overall, bugs without reproducers are way less likely to be triaged and fixed.
 If the bug is reproducible, include the reproducer (C source if possible, otherwise a syzkaller program) and the `.config` you used for your kernel.
 If the reprocucer is available only in the form of a syzkaller program, please link [the instructions on how to execute them](/docs/executing_syzkaller_programs.md) in your report.
 Check that the reproducer works if you run it manually.
@@ -72,6 +77,7 @@ To report major security bugs (such as LPE, remote DOS, remote info leak or RCE)
 A few notes:
 
 * There should ideally be no delay between reports to `security@kernel.org` and `linux-distros@vs.openwall.org`.
+* When working on the patch together with the `security@kernel.org` members and upstream maintainers, keep the linux-distros aware of the progress.
 * There should ideally be no delay between CVE description publication, distros' updates, upstream commit and notification to `oss-security@lists.openwall.com`. All of these should be on the same day, at worst.
 * The moment the issue is made public (e.g. patch is submitted upstream, CVE description published, etc.) it must be reported to `oss-security@lists.openwall.com` right away.
 

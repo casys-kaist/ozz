@@ -19,7 +19,7 @@ type gvisor struct{}
 
 var bazelTargetPath = regexp.MustCompile(`(?sm:.*^)\s*Outputs: \[(.*)\](?sm:$.*)`)
 
-func (gvisor gvisor) build(params *Params) error {
+func (gvisor gvisor) build(params Params) (ImageDetails, error) {
 	if params.Compiler == "" {
 		params.Compiler = "bazel"
 	}
@@ -27,22 +27,24 @@ func (gvisor gvisor) build(params *Params) error {
 	// Bring down bazel daemon right away. We don't need it running and consuming memory.
 	defer osutil.RunCmd(10*time.Minute, params.KernelDir, params.Compiler, "shutdown")
 
-	config := strings.Fields(string(params.Config))
+	config, err := parseGVisorConfig(params.Config)
+	if err != nil {
+		return ImageDetails{}, fmt.Errorf("cannot parse gVisor configuration: %w", err)
+	}
 	args := []string{}
 
 	target := "//runsc:runsc"
-	race := raceEnabled(config)
-	if race {
+	if config.Race {
 		args = append(args, "--@io_bazel_rules_go//go/config:race")
 		target = "//runsc:runsc-race"
 	}
-	if coverageEnabled(config) {
+	if config.Coverage {
 		coverageFiles := "//pkg/..."
 		exclusions := []string{
 			"//pkg/sentry/platform", "//pkg/ring0", // Breaks kvm.
 			"//pkg/coverage:coverage", // Too slow.
 		}
-		if race {
+		if config.Race {
 			// These targets use go:norace, which is not
 			// respected by coverage instrumentation. Race builds
 			// will be instrumented with atomic coverage (using
@@ -67,29 +69,29 @@ func (gvisor gvisor) build(params *Params) error {
 	// on the first build after bazel/deps update. Also other gvisor instances running
 	// on the same machine contribute to longer build times.
 	if _, err := osutil.RunCmd(60*time.Minute, params.KernelDir, params.Compiler, buildArgs...); err != nil {
-		return err
+		return ImageDetails{}, err
 	}
 
 	// Find out a path to the runsc binary.
 	aqueryArgs := append([]string{"aquery"}, args...)
 	aqueryArgs = append(aqueryArgs, fmt.Sprintf("mnemonic(\"GoLink\", %s)", target))
 	log.Logf(0, "bazel: %v", aqueryArgs)
-	out, err := osutil.RunCmd(time.Minute, params.KernelDir, params.Compiler, aqueryArgs...)
+	out, err := osutil.RunCmd(10*time.Minute, params.KernelDir, params.Compiler, aqueryArgs...)
 	if err != nil {
-		return err
+		return ImageDetails{}, err
 	}
 
 	match := bazelTargetPath.FindSubmatch(out)
 	if match == nil {
-		return fmt.Errorf("failed to find the runsc binary")
+		return ImageDetails{}, fmt.Errorf("failed to find the runsc binary")
 	}
 	outBinary := filepath.Join(params.KernelDir, filepath.FromSlash(string(match[1])))
 
 	if err := osutil.CopyFile(outBinary, filepath.Join(params.OutputDir, "image")); err != nil {
-		return err
+		return ImageDetails{}, err
 	}
 	sysTarget := targets.Get(params.TargetOS, params.TargetArch)
-	return osutil.CopyFile(outBinary, filepath.Join(params.OutputDir, "obj", sysTarget.KernelObject))
+	return ImageDetails{}, osutil.CopyFile(outBinary, filepath.Join(params.OutputDir, "obj", sysTarget.KernelObject))
 }
 
 func (gvisor) clean(kernelDir, targetArch string) error {
@@ -97,20 +99,33 @@ func (gvisor) clean(kernelDir, targetArch string) error {
 	return nil
 }
 
-func coverageEnabled(config []string) bool {
-	for _, flag := range config {
-		if flag == "-cover" {
-			return true
-		}
-	}
-	return false
+// Known gVisor configuration flags.
+const (
+	gvisorFlagCover = "-cover"
+	gvisorFlagRace  = "-race"
+)
+
+// gvisorConfig is a gVisor configuration.
+type gvisorConfig struct {
+	// Coverage represents whether code coverage is enabled.
+	Coverage bool
+
+	// Race represents whether race condition detection is enabled.
+	Race bool
 }
 
-func raceEnabled(config []string) bool {
-	for _, flag := range config {
-		if flag == "-race" {
-			return true
+// parseGVisorConfig parses a set of flags into a `gvisorConfig`.
+func parseGVisorConfig(config []byte) (gvisorConfig, error) {
+	var cfg gvisorConfig
+	for _, flag := range strings.Fields(string(config)) {
+		switch flag {
+		case gvisorFlagCover:
+			cfg.Coverage = true
+		case gvisorFlagRace:
+			cfg.Race = true
+		default:
+			return cfg, fmt.Errorf("unknown gVisor configuration flag: %q", flag)
 		}
 	}
-	return false
+	return cfg, nil
 }

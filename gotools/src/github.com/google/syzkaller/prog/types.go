@@ -29,7 +29,7 @@ type Syscall struct {
 // pkg/compiler uses this structure to parse descriptions.
 // syz-sysgen uses this structure to generate code for executor.
 //
-// Only bool's and uint64's are currently supported.
+// Only `bool`s and `uint64`s are currently supported.
 //
 // See docs/syscall_descriptions_syntax.md for description of individual attributes.
 type SyscallAttrs struct {
@@ -38,6 +38,8 @@ type SyscallAttrs struct {
 	ProgTimeout   uint64
 	IgnoreReturn  bool
 	BreaksReturns bool
+	NoGenerate    bool
+	NoMinimize    bool
 }
 
 // MaxArgs is maximum number of syscall arguments.
@@ -481,6 +483,8 @@ const (
 	BufferString
 	BufferFilename
 	BufferText
+	BufferGlob
+	BufferCompressed
 )
 
 type TextKind int
@@ -502,7 +506,7 @@ type BufferType struct {
 	RangeEnd   uint64   // for BufferBlobRange kind
 	Text       TextKind // for BufferText
 	SubKind    string
-	Values     []string // possible values for BufferString kind
+	Values     []string // possible values for BufferString and BufferGlob kind
 	NoZ        bool     // non-zero terminated BufferString/BufferFilename
 }
 
@@ -518,8 +522,11 @@ func (t *BufferType) DefaultArg(dir Dir) Arg {
 		}
 		return MakeOutDataArg(t, dir, sz)
 	}
+
 	var data []byte
-	if !t.Varlen() {
+	if len(t.Values) == 1 {
+		data = []byte(t.Values[0])
+	} else if !t.Varlen() {
 		data = make([]byte, t.Size())
 	}
 	return MakeDataArg(t, dir, data)
@@ -527,14 +534,18 @@ func (t *BufferType) DefaultArg(dir Dir) Arg {
 
 func (t *BufferType) isDefaultArg(arg Arg) bool {
 	a := arg.(*DataArg)
-	if a.Size() == 0 {
-		return true
+	sz := uint64(0)
+	if !t.Varlen() {
+		sz = t.Size()
 	}
-	if a.Type().Varlen() {
+	if a.Size() != sz {
 		return false
 	}
 	if a.Dir() == DirOut {
 		return true
+	}
+	if len(t.Values) == 1 {
+		return string(a.Data()) == t.Values[0]
 	}
 	for _, v := range a.Data() {
 		if v != 0 {
@@ -542,6 +553,10 @@ func (t *BufferType) isDefaultArg(arg Arg) bool {
 		}
 	}
 	return true
+}
+
+func (t *BufferType) IsCompressed() bool {
+	return t.Kind == BufferCompressed
 }
 
 type ArrayKind int
@@ -613,8 +628,9 @@ func (t *PtrType) isDefaultArg(arg Arg) bool {
 
 type StructType struct {
 	TypeCommon
-	Fields    []Field
-	AlignAttr uint64
+	Fields       []Field
+	AlignAttr    uint64
+	OverlayField int // index of the field marked with out_overlay attribute (0 if no attribute)
 }
 
 func (t *StructType) String() string {
@@ -667,33 +683,38 @@ type TypeCtx struct {
 	Meta *Syscall
 	Dir  Dir
 	Ptr  *Type
+	Stop bool // If set by the callback, subtypes of this type are not visited.
 }
 
-func ForeachType(syscalls []*Syscall, f func(t Type, ctx TypeCtx)) {
+func ForeachType(syscalls []*Syscall, f func(t Type, ctx *TypeCtx)) {
 	for _, meta := range syscalls {
 		foreachTypeImpl(meta, true, f)
 	}
 }
 
-func ForeachTypePost(syscalls []*Syscall, f func(t Type, ctx TypeCtx)) {
+func ForeachTypePost(syscalls []*Syscall, f func(t Type, ctx *TypeCtx)) {
 	for _, meta := range syscalls {
 		foreachTypeImpl(meta, false, f)
 	}
 }
 
-func ForeachCallType(meta *Syscall, f func(t Type, ctx TypeCtx)) {
+func ForeachCallType(meta *Syscall, f func(t Type, ctx *TypeCtx)) {
 	foreachTypeImpl(meta, true, f)
 }
 
-func foreachTypeImpl(meta *Syscall, preorder bool, f func(t Type, ctx TypeCtx)) {
+func foreachTypeImpl(meta *Syscall, preorder bool, f func(t Type, ctx *TypeCtx)) {
 	// Note: we specifically don't create seen in ForeachType.
 	// It would prune recursion more (across syscalls), but lots of users need to
 	// visit each struct per-syscall (e.g. prio, used resources).
 	seen := make(map[Type]bool)
 	var rec func(*Type, Dir)
 	rec = func(ptr *Type, dir Dir) {
+		ctx := &TypeCtx{Meta: meta, Dir: dir, Ptr: ptr}
 		if preorder {
-			f(*ptr, TypeCtx{Meta: meta, Dir: dir, Ptr: ptr})
+			f(*ptr, ctx)
+			if ctx.Stop {
+				return
+			}
 		}
 		switch a := (*ptr).(type) {
 		case *PtrType:
@@ -724,7 +745,10 @@ func foreachTypeImpl(meta *Syscall, preorder bool, f func(t Type, ctx TypeCtx)) 
 			panic("unknown type")
 		}
 		if !preorder {
-			f(*ptr, TypeCtx{Meta: meta, Dir: dir, Ptr: ptr})
+			f(*ptr, ctx)
+			if ctx.Stop {
+				panic("Stop is set in post-order iteration")
+			}
 		}
 	}
 	for i := range meta.Args {

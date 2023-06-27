@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/syzkaller/pkg/cover"
 	"github.com/google/syzkaller/pkg/csource"
+	"github.com/google/syzkaller/pkg/db"
 	"github.com/google/syzkaller/pkg/host"
 	"github.com/google/syzkaller/pkg/ipc"
 	"github.com/google/syzkaller/pkg/ipc/ipcconfig"
@@ -32,18 +33,29 @@ var (
 	flagArch      = flag.String("arch", runtime.GOARCH, "target arch")
 	flagCoverFile = flag.String("coverfile", "", "write coverage to the file")
 	flagRepeat    = flag.Int("repeat", 1, "repeat execution that many times (0 for infinite loop)")
-	flagProcs     = flag.Int("procs", 1, "number of parallel processes to execute programs")
+	flagProcs     = flag.Int("procs", 2*runtime.NumCPU(), "number of parallel processes to execute programs")
 	flagOutput    = flag.Bool("output", false, "write programs and results to stdout")
 	flagHints     = flag.Bool("hints", false, "do a hints-generation run")
-	flagFaultCall = flag.Int("fault_call", -1, "inject fault into this call (0-based)")
-	flagFaultNth  = flag.Int("fault_nth", 0, "inject fault on n-th operation (0-based)")
 	flagEnable    = flag.String("enable", "none", "enable only listed additional features")
 	flagDisable   = flag.String("disable", "none", "enable all additional features except listed")
+	// The following flag is only kept to let syzkaller remain compatible with older execprog versions.
+	// In order to test incoming patches or perform bug bisection, syz-ci must use the exact syzkaller
+	// version that detected the bug (as descriptions and syntax could've already been changed), and
+	// therefore it must be able to invoke older versions of syz-execprog.
+	// Unfortunately there's no clean way to drop that flag from newer versions of syz-execprog. If it
+	// were false by default, it would be easy - we could modify `instance.ExecprogCmd` only to pass it
+	// when it's true - which would never be the case in the newer versions (this is how we got rid of
+	// fault injection args). But the collide flag was true by default, so it must be passed by value
+	// (-collide=%v). The least kludgy solution is to silently accept this flag also in the newer versions
+	// of syzkaller, but do not process it, as there's no such functionality anymore.
+	// Note, however, that we do not have to do the same for `syz-prog2c`, as `collide` was there false
+	// by default.
+	flagCollide = flag.Bool("collide", false, "(DEPRECATED) collide syscalls to provoke data races")
 )
 
 func main() {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: execprog [flags] file-with-programs+\n")
+		fmt.Fprintf(os.Stderr, "usage: execprog [flags] file-with-programs-or-corpus.db+\n")
 		flag.PrintDefaults()
 		csource.PrintAvailableFeaturesFlags()
 	}
@@ -61,8 +73,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
-	entries := loadPrograms(target, flag.Args())
-	if len(entries) == 0 {
+	progs := loadPrograms(target, flag.Args())
+	if len(progs) == 0 {
 		return
 	}
 	features, err := host.Check(target)
@@ -73,6 +85,9 @@ func main() {
 		for _, feat := range features.Supported() {
 			log.Logf(0, "%-24v: %v", feat.Name, feat.Reason)
 		}
+	}
+	if *flagCollide {
+		log.Logf(0, "note: setting -collide to true is deprecated now and has no effect")
 	}
 	config, execOpts := createConfig(target, features, featuresFlags)
 	if err = host.Setup(target, features, featuresFlags, config.Executor); err != nil {
@@ -89,7 +104,7 @@ func main() {
 		}
 	}
 	ctx := &Context{
-		entries:  entries,
+		progs:    progs,
 		config:   config,
 		execOpts: execOpts,
 		gate:     ipc.NewGate(2**flagProcs, gateCallback),
@@ -110,7 +125,7 @@ func main() {
 }
 
 type Context struct {
-	entries   []*prog.LogEntry
+	progs     []*prog.Prog
 	config    *ipc.Config
 	execOpts  *ipc.ExecOpts
 	gate      *ipc.Gate
@@ -135,33 +150,26 @@ func (ctx *Context) run(pid int) {
 		default:
 		}
 		idx := ctx.getProgramIndex()
-		if ctx.repeat > 0 && idx >= len(ctx.entries)*ctx.repeat {
+		if ctx.repeat > 0 && idx >= len(ctx.progs)*ctx.repeat {
 			return
 		}
-		entry := ctx.entries[idx%len(ctx.entries)]
+		entry := ctx.progs[idx%len(ctx.progs)]
 		ctx.execute(pid, env, entry)
 	}
 }
 
-func (ctx *Context) execute(pid int, env *ipc.Env, entry *prog.LogEntry) {
+func (ctx *Context) execute(pid int, env *ipc.Env, p *prog.Prog) {
 	// Limit concurrency window.
 	ticket := ctx.gate.Enter()
 	defer ctx.gate.Leave(ticket)
 
 	callOpts := ctx.execOpts
-	if *flagFaultCall == -1 && entry.Fault {
-		newOpts := *ctx.execOpts
-		newOpts.Flags |= ipc.FlagInjectFault
-		newOpts.FaultCall = entry.FaultCall
-		newOpts.FaultNth = entry.FaultNth
-		callOpts = &newOpts
-	}
 	if *flagOutput {
-		ctx.logProgram(pid, entry.P, callOpts)
+		ctx.logProgram(pid, p, callOpts)
 	}
 	// This mimics the syz-fuzzer logic. This is important for reproduction.
 	for try := 0; ; try++ {
-		output, info, hanged, err := env.Exec(callOpts, entry.P)
+		output, info, hanged, err := env.Exec(callOpts, p)
 		if err != nil && err != prog.ErrExecBufferTooSmall {
 			if try > 10 {
 				log.Fatalf("executor failed %v times: %v\n%s", try, err, output)
@@ -177,7 +185,7 @@ func (ctx *Context) execute(pid int, env *ipc.Env, entry *prog.LogEntry) {
 		if info != nil {
 			ctx.printCallResults(info)
 			if *flagHints {
-				ctx.printHints(entry.P, info)
+				ctx.printHints(p, info)
 			}
 			if *flagCoverFile != "" {
 				ctx.dumpCoverage(*flagCoverFile, info)
@@ -190,14 +198,9 @@ func (ctx *Context) execute(pid int, env *ipc.Env, entry *prog.LogEntry) {
 }
 
 func (ctx *Context) logProgram(pid int, p *prog.Prog, callOpts *ipc.ExecOpts) {
-	strOpts := ""
-	if callOpts.Flags&ipc.FlagInjectFault != 0 {
-		strOpts = fmt.Sprintf(" (fault-call:%v fault-nth:%v)",
-			callOpts.FaultCall, callOpts.FaultNth)
-	}
 	data := p.Serialize()
 	ctx.logMu.Lock()
-	log.Logf(0, "executing program %v%v:\n%s", pid, strOpts, data)
+	log.Logf(0, "executing program %v:\n%s", pid, data)
 	ctx.logMu.Unlock()
 }
 
@@ -275,7 +278,7 @@ func (ctx *Context) getProgramIndex() int {
 	ctx.posMu.Lock()
 	idx := ctx.pos
 	ctx.pos++
-	if idx%len(ctx.entries) == 0 && time.Since(ctx.lastPrint) > 5*time.Second {
+	if idx%len(ctx.progs) == 0 && time.Since(ctx.lastPrint) > 5*time.Second {
 		log.Logf(0, "executed programs: %v", idx)
 		ctx.lastPrint = time.Now()
 	}
@@ -283,17 +286,29 @@ func (ctx *Context) getProgramIndex() int {
 	return idx
 }
 
-func loadPrograms(target *prog.Target, files []string) []*prog.LogEntry {
-	var entries []*prog.LogEntry
+func loadPrograms(target *prog.Target, files []string) []*prog.Prog {
+	var progs []*prog.Prog
 	for _, fn := range files {
+		if corpus, err := db.Open(fn, false); err == nil {
+			for _, rec := range corpus.Records {
+				p, err := target.Deserialize(rec.Val, prog.NonStrict)
+				if err != nil {
+					continue
+				}
+				progs = append(progs, p)
+			}
+			continue
+		}
 		data, err := ioutil.ReadFile(fn)
 		if err != nil {
 			log.Fatalf("failed to read log file: %v", err)
 		}
-		entries = append(entries, target.ParseLog(data)...)
+		for _, entry := range target.ParseLog(data) {
+			progs = append(progs, entry.P)
+		}
 	}
-	log.Logf(0, "parsed %v programs", len(entries))
-	return entries
+	log.Logf(0, "parsed %v programs", len(progs))
+	return progs
 }
 
 func createConfig(target *prog.Target, features *host.Features, featuresFlags csource.Features) (
@@ -319,10 +334,8 @@ func createConfig(target *prog.Target, features *host.Features, featuresFlags cs
 	if features[host.FeatureExtraCoverage].Enabled {
 		config.Flags |= ipc.FlagExtraCover
 	}
-	if *flagFaultCall >= 0 {
-		execOpts.Flags |= ipc.FlagInjectFault
-		execOpts.FaultCall = *flagFaultCall
-		execOpts.FaultNth = *flagFaultNth
+	if features[host.FeatureDelayKcovMmap].Enabled {
+		config.Flags |= ipc.FlagDelayKcovMmap
 	}
 	if featuresFlags["tun"].Enabled && features[host.FeatureNetInjection].Enabled {
 		config.Flags |= ipc.FlagEnableTun
@@ -341,6 +354,9 @@ func createConfig(target *prog.Target, features *host.Features, featuresFlags cs
 	}
 	if featuresFlags["devlink_pci"].Enabled && features[host.FeatureDevlinkPCI].Enabled {
 		config.Flags |= ipc.FlagEnableDevlinkPCI
+	}
+	if featuresFlags["nic_vf"].Enabled && features[host.FeatureNicVF].Enabled {
+		config.Flags |= ipc.FlagEnableNicVF
 	}
 	if featuresFlags["vhci"].Enabled && features[host.FeatureVhciInjection].Enabled {
 		config.Flags |= ipc.FlagEnableVhciInjection

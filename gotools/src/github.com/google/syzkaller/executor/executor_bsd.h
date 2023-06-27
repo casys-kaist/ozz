@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <sys/ioctl.h>
+#include <sys/kcov.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -32,8 +33,9 @@ static void os_init(int argc, char** argv, void* data, size_t data_size)
 	flags |= MAP_EXCL;
 #endif
 
-	if (mmap(data, data_size, prot, flags, -1, 0) != data)
-		fail("mmap of data segment failed");
+	void* got = mmap(data, data_size, prot, flags, -1, 0);
+	if (data != got)
+		failmsg("mmap of data segment failed", "want %p, got %p", data, got);
 
 	// Makes sure the file descriptor limit is sufficient to map control pipes.
 	struct rlimit rlim;
@@ -48,13 +50,6 @@ static intptr_t execute_syscall(const call_t* c, intptr_t a[kMaxArgs])
 	return __syscall(c->sys_nr, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8]);
 }
 
-#if GOOS_freebsd || GOOS_openbsd || GOOS_netbsd
-
-// KCOV support was added to FreeBSD in https://svnweb.freebsd.org/changeset/base/342962
-// KCOV support added to NetBSD in https://github.com/NetBSD/src/commit/080a26f01d79ded8a2154c128950d1d663c6ca88
-
-#include <sys/kcov.h>
-
 static void cover_open(cover_t* cov, bool extra)
 {
 	int fd = open("/dev/kcov", O_RDWR);
@@ -67,7 +62,7 @@ static void cover_open(cover_t* cov, bool extra)
 #if GOOS_freebsd
 	if (ioctl(cov->fd, KIOSETBUFSIZE, kCoverSize))
 		fail("ioctl init trace write failed");
-	size_t mmap_alloc_size = kCoverSize * KCOV_ENTRY_SIZE;
+	cov->mmap_alloc_size = kCoverSize * KCOV_ENTRY_SIZE;
 #elif GOOS_openbsd
 	unsigned long cover_size = kCoverSize;
 	if (ioctl(cov->fd, KIOSETBUFSIZE, &cover_size))
@@ -79,7 +74,7 @@ static void cover_open(cover_t* cov, bool extra)
 		if (ioctl(cov->fd, KIOREMOTEATTACH, &args))
 			fail("ioctl remote attach failed");
 	}
-	size_t mmap_alloc_size = kCoverSize * (is_kernel_64_bit ? 8 : 4);
+	cov->mmap_alloc_size = kCoverSize * (is_kernel_64_bit ? 8 : 4);
 #elif GOOS_netbsd
 	uint64_t cover_size;
 	if (extra) {
@@ -96,15 +91,22 @@ static void cover_open(cover_t* cov, bool extra)
 		if (ioctl(cov->fd, KCOV_IOC_SETBUFSIZE, &cover_size))
 			fail("ioctl init trace write failed");
 	}
-	size_t mmap_alloc_size = cover_size * KCOV_ENTRY_SIZE;
+	cov->mmap_alloc_size = cover_size * KCOV_ENTRY_SIZE;
 #endif
+}
 
-	void* mmap_ptr = mmap(NULL, mmap_alloc_size, PROT_READ | PROT_WRITE,
+static void cover_mmap(cover_t* cov)
+{
+	if (cov->data != NULL)
+		fail("cover_mmap invoked on an already mmapped cover_t object");
+	void* mmap_ptr = mmap(NULL, cov->mmap_alloc_size, PROT_READ | PROT_WRITE,
 			      MAP_SHARED, cov->fd, 0);
 	if (mmap_ptr == MAP_FAILED)
 		fail("cover mmap failed");
 	cov->data = (char*)mmap_ptr;
-	cov->data_end = cov->data + mmap_alloc_size;
+	cov->data_end = cov->data + cov->mmap_alloc_size;
+	cov->data_offset = is_kernel_64_bit ? sizeof(uint64_t) : sizeof(uint32_t);
+	cov->pc_offset = 0;
 }
 
 static void cover_protect(cover_t* cov)
@@ -172,9 +174,6 @@ static bool use_cover_edges(uint64 pc)
 {
 	return true;
 }
-#else
-#include "nocover.h"
-#endif
 
 #if GOOS_netbsd
 #define SYZ_HAVE_FEATURES 1
@@ -184,6 +183,10 @@ static feature_t features[] = {
 };
 
 static void setup_sysctl(void)
+{
+}
+
+static void setup_cgroups(void)
 {
 }
 #endif

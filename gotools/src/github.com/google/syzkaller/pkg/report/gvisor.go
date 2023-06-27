@@ -12,7 +12,7 @@ type gvisor struct {
 	*config
 }
 
-func ctorGvisor(cfg *config) (Reporter, []string, error) {
+func ctorGvisor(cfg *config) (reporterImpl, []string, error) {
 	ctx := &gvisor{
 		config: cfg,
 	}
@@ -31,6 +31,7 @@ func ctorGvisor(cfg *config) (Reporter, []string, error) {
 		"race: limit on 8128 simultaneously alive goroutines is exceeded, dying",
 		"ERROR: ThreadSanitizer", // Go race failing due to OOM.
 		"FATAL: ThreadSanitizer",
+		"ThreadSanitizer: clock allocator overflow \\(65536\\*1024\\). Dying.",
 	}
 	return ctx, suppressions, nil
 }
@@ -156,7 +157,7 @@ var gvisorOopses = append([]*oops{
 		[]oopsFormat{
 			{
 				title:        compile("WARNING: DATA RACE"),
-				report:       compile("WARNING: DATA RACE\n(?:.*\n)*?  (?:[a-zA-Z0-9./-_]+/)([a-zA-Z0-9.()*_]+)\\(\\)\n"),
+				report:       compile("WARNING: DATA RACE\n(?:.*\n)*?  (?:[a-zA-Z0-9./_-]+/)([a-zA-Z0-9.()*_]+)\\(\\)\n"),
 				fmt:          "DATA RACE in %[1]v",
 				noStackTrace: true,
 			},

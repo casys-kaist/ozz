@@ -12,13 +12,13 @@ import (
 )
 
 var (
-	flagExecutor = flag.String("executor", "./syz-executor", "path to executor binary")
-	flagThreaded = flag.Bool("threaded", true, "use threaded mode in executor")
-	flagCollide  = flag.Bool("collide", true, "collide syscalls to provoke data races")
-	flagSignal   = flag.Bool("cover", false, "collect feedback signals (coverage)")
-	flagSandbox  = flag.String("sandbox", "none", "sandbox for fuzzing (none/setuid/namespace/android)")
-	flagDebug    = flag.Bool("debug", false, "debug output from executor")
-	flagSlowdown = flag.Int("slowdown", 1, "execution slowdown caused by emulation/instrumentation")
+	flagExecutor   = flag.String("executor", "./syz-executor", "path to executor binary")
+	flagThreaded   = flag.Bool("threaded", true, "use threaded mode in executor")
+	flagSignal     = flag.Bool("cover", false, "collect feedback signals (coverage)")
+	flagSandbox    = flag.String("sandbox", "none", "sandbox for fuzzing (none/setuid/namespace/android)")
+	flagSandboxArg = flag.Int("sandbox_arg", 0, "argument for sandbox runner to adjust it via config")
+	flagDebug      = flag.Bool("debug", false, "debug output from executor")
+	flagSlowdown   = flag.Int("slowdown", 1, "execution slowdown caused by emulation/instrumentation")
 )
 
 func Default(target *prog.Target) (*ipc.Config, *ipc.ExecOpts, error) {
@@ -37,6 +37,7 @@ func Default(target *prog.Target) (*ipc.Config, *ipc.ExecOpts, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	c.SandboxArg = *flagSandboxArg
 	c.Flags |= sandboxFlags
 	c.UseShmem = sysTarget.ExecutorUsesShmem
 	c.UseForkServer = sysTarget.ExecutorUsesForkServer
@@ -46,8 +47,8 @@ func Default(target *prog.Target) (*ipc.Config, *ipc.ExecOpts, error) {
 	if *flagThreaded {
 		opts.Flags |= ipc.FlagThreaded
 	}
-	if *flagCollide {
-		opts.Flags |= ipc.FlagCollide
+	if *flagSignal {
+		opts.Flags |= ipc.FlagCollectSignal
 	}
 
 	return c, opts, nil

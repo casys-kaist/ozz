@@ -4,9 +4,9 @@ Hello,
 {{end -}}
 syzbot {{if .First}}found{{else}}has found a reproducer for{{end}} the following issue on:
 
-HEAD commit:    {{formatShortHash .KernelCommit}} {{formatCommitTableTitle .KernelCommitTitle}}
+HEAD commit:    {{formatTagHash .KernelCommit}} {{formatCommitTableTitle .KernelCommitTitle}}
 git tree:       {{.KernelRepoAlias}}
-{{if .LogLink}}console output: {{.LogLink}}
+{{if .LogLink}}{{if .LogHasStrace}}console+strace{{else}}console output{{end}}: {{.LogLink}}
 {{end}}{{if .KernelConfigLink}}kernel config:  {{.KernelConfigLink}}
 {{end}}dashboard link: {{.Link}}
 {{if .CompilerID}}compiler:       {{.CompilerID}}
@@ -16,7 +16,10 @@ git tree:       {{.KernelRepoAlias}}
 {{end}}{{if and .Moderation .Maintainers}}CC:             {{.Maintainers}}
 {{end}}{{if and (not .NoRepro) (not .ReproCLink) (not .ReproSyzLink)}}
 Unfortunately, I don't have any reproducer for this issue yet.
-{{end}}
+{{end}}{{if .Assets}}
+Downloadable assets:
+{{range $i, $asset := .Assets}}{{$asset.Title}}: {{$asset.DownloadURL}}
+{{end}}{{end}}
 {{if .BisectCause}}{{if .BisectCause.Commit}}The issue was bisected to:
 
 commit {{.BisectCause.Commit.Hash}}
@@ -26,7 +29,7 @@ Date:   {{formatKernelTime .BisectCause.Commit.Date}}
     {{.BisectCause.Commit.Title}}
 {{else if .BisectCause.Commits}}Bisection is inconclusive: the first bad commit could be any of:
 {{range $com := .BisectCause.Commits}}
-{{formatShortHash $com.Hash}} {{$com.Title}}{{end}}
+{{formatTagHash $com.Hash}} {{$com.Title}}{{end}}
 {{else}}Bisection is inconclusive: the issue happens on the oldest tested release.
 {{end}}
 bisection log:  {{.BisectCause.LogLink}}

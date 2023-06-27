@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/google/syzkaller/pkg/kconfig"
 	"github.com/google/syzkaller/pkg/vcs"
@@ -18,6 +19,8 @@ import (
 type Instance struct {
 	Name      string
 	Kernel    Kernel
+	Compiler  string
+	Linker    string
 	Verbatim  []byte
 	Shell     []Shell
 	Features  Features
@@ -78,38 +81,48 @@ type rawFile struct {
 		Repo string
 		Tag  string
 	}
+	Compiler string
+	Linker   string
 	Shell    []yaml.Node
 	Verbatim string
 	Config   []yaml.Node
 }
 
-func parseMainSpec(file string) ([]*Instance, error) {
+func parseMainSpec(file string) ([]*Instance, []string, error) {
 	data, err := ioutil.ReadFile(file)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %v", err)
+		return nil, nil, fmt.Errorf("failed to read config file: %v", err)
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	raw := new(rawMain)
 	if err := dec.Decode(raw); err != nil {
-		return nil, fmt.Errorf("failed to parse %v: %v", file, err)
+		return nil, nil, fmt.Errorf("failed to parse %v: %v", file, err)
 	}
+	var unusedFeatures []string
 	var instances []*Instance
 	for _, inst := range raw.Instances {
 		for name, features := range inst {
+			if name == "_" {
+				unusedFeatures = features
+				continue
+			}
 			inst, err := parseInstance(name, filepath.Dir(file), features, raw.Includes)
 			if err != nil {
-				return nil, err
+				return nil, nil, fmt.Errorf("%v: %v", name, err)
 			}
 			instances = append(instances, inst)
+			if constraintsInclude(features, featBaseline) {
+				continue
+			}
 			inst, err = parseInstance(name+"-base", filepath.Dir(file), append(features, featBaseline), raw.Includes)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			instances = append(instances, inst)
 		}
 	}
-	return instances, nil
+	return instances, unusedFeatures, nil
 }
 
 func parseInstance(name, configDir string, features []string, includes []map[string][]string) (*Instance, error) {
@@ -172,17 +185,33 @@ func mergeFile(inst *Instance, raw *rawFile, file string, errs *Errors) {
 		}
 		inst.Kernel = raw.Kernel
 	}
+	if raw.Compiler != "" {
+		if inst.Compiler != "" {
+			errs.push("%v: compiler is set twice", file)
+		}
+		inst.Compiler = raw.Compiler
+	}
+	if raw.Linker != "" {
+		if inst.Linker != "" {
+			errs.push("%v: linker is set twice", file)
+		}
+		inst.Linker = raw.Linker
+	}
+	prependShell := []Shell{}
 	for _, node := range raw.Shell {
 		cmd, _, constraints, err := parseNode(node)
 		if err != nil {
 			errs.push("%v:%v: %v", file, node.Line, err)
 		}
-		inst.Shell = append(inst.Shell, Shell{
+		prependShell = append(prependShell, Shell{
 			Cmd:         cmd,
 			Constraints: constraints,
 		})
 	}
-	inst.Verbatim = append(append(inst.Verbatim, raw.Verbatim...), '\n')
+	inst.Shell = append(prependShell, inst.Shell...)
+	if raw.Verbatim != "" {
+		inst.Verbatim = append(append(inst.Verbatim, strings.TrimSpace(raw.Verbatim)...), '\n')
+	}
 	for _, node := range raw.Config {
 		mergeConfig(inst, file, node, false, errs)
 	}

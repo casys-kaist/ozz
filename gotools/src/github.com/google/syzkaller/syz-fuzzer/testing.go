@@ -124,6 +124,15 @@ func checkMachine(args *checkArgs) (*rpctype.CheckArgs, error) {
 	if err := checkRevisions(args); err != nil {
 		return nil, err
 	}
+	globFiles, err := host.CollectGlobsInfo(args.target.GetGlobs())
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect glob info: %v", err)
+	}
+	// TODO: make host.DetectSupportedSyscalls below filter out globs with no values.
+	// Also make prog package more strict with respect to generation/mutation of globs
+	// with no values (they still can appear in tests and tools). We probably should
+	// generate an empty string for these and never mutate.
+	args.target.UpdateGlobs(globFiles)
 	features, err := host.Check(args.target)
 	if err != nil {
 		return nil, err
@@ -148,24 +157,28 @@ func checkMachine(args *checkArgs) (*rpctype.CheckArgs, error) {
 	if err := checkSimpleProgram(args, features); err != nil {
 		return nil, err
 	}
-	return checkCalls(args, features)
-}
-
-func checkCalls(args *checkArgs, features *host.Features) (*rpctype.CheckArgs, error) {
 	res := &rpctype.CheckArgs{
 		Features:      features,
 		EnabledCalls:  make(map[string][]int),
 		DisabledCalls: make(map[string][]rpctype.SyscallReason),
+		GlobFiles:     globFiles,
 	}
+	if err := checkCalls(args, res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func checkCalls(args *checkArgs, res *rpctype.CheckArgs) error {
 	sandboxes := []string{args.sandbox}
 	if args.allSandboxes {
 		if args.sandbox != "none" {
 			sandboxes = append(sandboxes, "none")
 		}
-		if args.sandbox != "setuid" && features[host.FeatureSandboxSetuid].Enabled {
+		if args.sandbox != "setuid" && res.Features[host.FeatureSandboxSetuid].Enabled {
 			sandboxes = append(sandboxes, "setuid")
 		}
-		if args.sandbox != "namespace" && features[host.FeatureSandboxNamespace].Enabled {
+		if args.sandbox != "namespace" && res.Features[host.FeatureSandboxNamespace].Enabled {
 			sandboxes = append(sandboxes, "namespace")
 		}
 		// TODO: Add "android" sandbox here when needed. Will require fixing runtests.
@@ -175,7 +188,7 @@ func checkCalls(args *checkArgs, features *host.Features) (*rpctype.CheckArgs, e
 		res.EnabledCalls[sandbox] = enabledCalls
 		res.DisabledCalls[sandbox] = disabledCalls
 		if err != nil {
-			return res, err
+			return err
 		}
 	}
 	if args.allSandboxes {
@@ -190,7 +203,7 @@ func checkCalls(args *checkArgs, features *host.Features) (*rpctype.CheckArgs, e
 		}
 		res.EnabledCalls[""] = enabled
 	}
-	return res, nil
+	return nil
 }
 
 func checkRevisions(args *checkArgs) error {
@@ -217,7 +230,7 @@ func checkRevisions(args *checkArgs) error {
 		return fmt.Errorf("mismatching fuzzer/executor git revisions: %v vs %v",
 			prog.GitRevision, vers[3])
 	}
-	if args.gitRevision != "" && args.gitRevision != prog.GitRevision {
+	if args.gitRevision != prog.GitRevision {
 		return fmt.Errorf("mismatching manager/fuzzer git revisions: %v vs %v",
 			args.gitRevision, prog.GitRevision)
 	}
@@ -225,9 +238,9 @@ func checkRevisions(args *checkArgs) error {
 		return fmt.Errorf("mismatching fuzzer/executor system call descriptions: %v vs %v",
 			args.target.Revision, vers[2])
 	}
-	if args.targetRevision != "" && args.targetRevision != args.target.Revision {
-		return fmt.Errorf("mismatching manager/fuzzer system call descriptions: %v vs %v",
-			args.targetRevision, args.target.Revision)
+	if args.target.Revision != args.targetRevision {
+		return fmt.Errorf("mismatching fuzzer/manager system call descriptions: %v vs %v",
+			args.target.Revision, args.targetRevision)
 	}
 	return nil
 }
@@ -281,7 +294,8 @@ func buildCallList(target *prog.Target, enabledCalls []int, sandbox string) (
 			calls[c] = true
 		}
 	}
-	_, unsupported, err := host.DetectSupportedSyscalls(target, sandbox)
+
+	_, unsupported, err := host.DetectSupportedSyscalls(target, sandbox, calls)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to detect host supported syscalls: %v", err)
 	}

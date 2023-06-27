@@ -13,7 +13,7 @@ import (
 func Fuzz(data []byte) int {
 	res := 0
 	for os, reporter := range fuzzReporters {
-		typ := reporter.(*reporterWrapper).typ
+		typ := reporter.typ
 		containsCrash := reporter.ContainsCrash(data)
 		rep := reporter.Parse(data)
 		if containsCrash != (rep != nil) {
@@ -50,8 +50,8 @@ func Fuzz(data []byte) int {
 				typ, rep.SkipPos, rep.StartPos, rep.EndPos))
 		}
 		// If we parse from StartPos, we must find the same report.
-		rep1 := reporter.Parse(data[rep.StartPos:])
-		if rep1 == nil || rep1.Title != rep.Title || rep1.StartPos != 0 {
+		rep1 := reporter.ParseFrom(data, rep.StartPos)
+		if rep1 == nil || rep1.Title != rep.Title || rep1.StartPos != rep.StartPos {
 			title, startPos := "", -1
 			if rep1 != nil {
 				title, startPos = rep1.Title, rep1.StartPos
@@ -64,14 +64,19 @@ func Fuzz(data []byte) int {
 	return res
 }
 
-var fuzzReporters = func() map[string]Reporter {
-	reporters := make(map[string]Reporter)
+var fuzzReporters = func() map[string]*Reporter {
+	reporters := make(map[string]*Reporter)
 	for os := range ctors {
 		if os == targets.Windows {
 			continue
 		}
+		target := targets.Get(os, targets.AMD64)
+		if target == nil {
+			continue
+		}
 		cfg := &mgrconfig.Config{
 			Derived: mgrconfig.Derived{
+				SysTarget:  target,
 				TargetOS:   os,
 				TargetArch: targets.AMD64,
 			},
@@ -80,7 +85,7 @@ var fuzzReporters = func() map[string]Reporter {
 		if err != nil {
 			panic(err)
 		}
-		if _, ok := reporter.(*stub); ok {
+		if _, ok := reporter.impl.(*stub); ok {
 			continue
 		}
 		reporters[os] = reporter

@@ -13,14 +13,15 @@ import (
 
 // Target describes target OS/arch pair.
 type Target struct {
-	OS           string
-	Arch         string
-	Revision     string // unique hash representing revision of the descriptions
-	PtrSize      uint64
-	PageSize     uint64
-	NumPages     uint64
-	DataOffset   uint64
-	LittleEndian bool
+	OS                string
+	Arch              string
+	Revision          string // unique hash representing revision of the descriptions
+	PtrSize           uint64
+	PageSize          uint64
+	NumPages          uint64
+	DataOffset        uint64
+	LittleEndian      bool
+	ExecutorUsesShmem bool
 
 	Syscalls  []*Syscall
 	Resources []*ResourceDesc
@@ -31,7 +32,10 @@ type Target struct {
 
 	// Neutralize neutralizes harmful calls by transforming them into non-harmful ones
 	// (e.g. an ioctl that turns off console output is turned into ioctl that turns on output).
-	Neutralize func(c *Call)
+	// fixStructure determines whether it's allowed to make structural changes (e.g. add or
+	// remove arguments). It is helpful e.g. when we do neutralization while iterating over the
+	// arguments.
+	Neutralize func(c *Call, fixStructure bool) error
 
 	// AnnotateCall annotates a syscall invocation in C reproducers.
 	// The returned string will be placed inside a comment except for the
@@ -52,6 +56,9 @@ type Target struct {
 
 	// Additional special invalid pointer values besides NULL to use.
 	SpecialPointers []uint64
+
+	// Special file name length that can provoke bugs (e.g. PATH_MAX).
+	SpecialFileLenghts []int
 
 	// Filled by prog package:
 	SyscallMap map[string]*Syscall
@@ -118,7 +125,7 @@ func AllTargets() []*Target {
 }
 
 func (target *Target) lazyInit() {
-	target.Neutralize = func(c *Call) {}
+	target.Neutralize = func(c *Call, fixStructure bool) error { return nil }
 	target.AnnotateCall = func(c ExecCall) string { return "" }
 	target.initTarget()
 	target.initArch(target)
@@ -131,12 +138,22 @@ func (target *Target) lazyInit() {
 	if len(target.SpecialPointers) > maxSpecialPointers {
 		panic("too many special pointers")
 	}
+	if len(target.SpecialFileLenghts) == 0 {
+		// Just some common lengths that can be used as PATH_MAX/MAX_NAME.
+		target.SpecialFileLenghts = []int{256, 512, 4096}
+	}
+	for _, ln := range target.SpecialFileLenghts {
+		if ln <= 0 || ln >= memAllocMaxMem {
+			panic(fmt.Sprintf("bad special file length %v", ln))
+		}
+	}
 	// These are used only during lazyInit.
 	target.ConstMap = nil
 	target.types = nil
 }
 
 func (target *Target) initTarget() {
+	checkMaxCallID(len(target.Syscalls) - 1)
 	target.ConstMap = make(map[string]uint64)
 	for _, c := range target.Consts {
 		target.ConstMap[c.Name] = c.Value
@@ -149,8 +166,6 @@ func (target *Target) initTarget() {
 	for i, c := range target.Syscalls {
 		c.ID = i
 		target.SyscallMap[c.Name] = c
-		c.inputResources = target.getInputResources(c)
-		c.outputResources = target.getOutputResources(c)
 	}
 
 	target.populateResourceCtors()
@@ -172,8 +187,10 @@ func (target *Target) GetConst(name string) uint64 {
 }
 
 func (target *Target) sanitize(c *Call, fix bool) error {
-	target.Neutralize(c)
-	return nil
+	// For now, even though we accept the fix argument, it does not have the full effect.
+	// It de facto only denies structural changes, e.g. deletions of arguments.
+	// TODO: rewrite the corresponding sys/*/init.go code.
+	return target.Neutralize(c, fix)
 }
 
 func RestoreLinks(syscalls []*Syscall, resources []*ResourceDesc, types []Type) {
@@ -203,7 +220,7 @@ func restoreLinks(syscalls []*Syscall, resources []*ResourceDesc, types []Type) 
 		resourceMap[res.Name] = res
 	}
 
-	ForeachType(syscalls, func(typ Type, ctx TypeCtx) {
+	ForeachType(syscalls, func(typ Type, ctx *TypeCtx) {
 		if ref, ok := typ.(Ref); ok {
 			typ = types[ref]
 			*ctx.Ptr = typ
@@ -224,6 +241,30 @@ func (target *Target) DefaultChoiceTable() *ChoiceTable {
 		target.defaultChoiceTable = target.BuildChoiceTable(nil, nil)
 	})
 	return target.defaultChoiceTable
+}
+
+func (target *Target) GetGlobs() map[string]bool {
+	globs := make(map[string]bool)
+	ForeachType(target.Syscalls, func(typ Type, ctx *TypeCtx) {
+		switch a := typ.(type) {
+		case *BufferType:
+			if a.Kind == BufferGlob {
+				globs[a.SubKind] = true
+			}
+		}
+	})
+	return globs
+}
+
+func (target *Target) UpdateGlobs(globFiles map[string][]string) {
+	ForeachType(target.Syscalls, func(typ Type, ctx *TypeCtx) {
+		switch a := typ.(type) {
+		case *BufferType:
+			if a.Kind == BufferGlob {
+				a.Values = globFiles[a.SubKind]
+			}
+		}
+	})
 }
 
 type Gen struct {

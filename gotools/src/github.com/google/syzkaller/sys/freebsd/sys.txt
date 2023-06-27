@@ -19,6 +19,10 @@ include <sys/resource.h>
 include <time.h>
 include <signal.h>
 include <sys/wait.h>
+include <sys/time.h>
+include <sys/specialfd.h>
+
+type signo int32[0:SIGRTMAX]
 
 syz_execute_func(text ptr[in, text[target]])
 
@@ -54,7 +58,7 @@ freebsd11_mknod(file ptr[in, filename], mod flags[mknod_mode], dev int32)
 freebsd11_mknodat(dirfd fd_dir, file ptr[in, filename], mod flags[mknod_mode], dev int32)
 chmod(file ptr[in, filename], mode flags[open_mode])
 fchmod(fd fd, mode flags[open_mode])
-fchmodat(dirfd fd_dir, file ptr[in, filename], mode flags[open_mode])
+fchmodat(dirfd fd_dir, file ptr[in, filename], mode flags[open_mode], flags flags[at_flags])
 lchmod(file ptr[in, filename], mode flags[open_mode])
 chown(file ptr[in, filename], uid uid, gid gid)
 lchown(file ptr[in, filename], uid uid, gid gid)
@@ -64,7 +68,10 @@ chflags(file ptr[in, filename], flags flags[chflags_flags])
 chflagsat(fd fd, file ptr[in, filename], flags flags[chflags_flags], atflag flags[at_flags])
 fchflags(fd fd, flags flags[chflags_flags])
 lchflags(file ptr[in, filename], flags flags[chflags_flags])
-faccessat(dirfd fd_dir, pathname ptr[in, filename], mode flags[open_mode], flags flags[faccessat_flags])
+faccessat(dirfd fd_dir, pathname ptr[in, filename], mode flags[access_mode], flags flags[faccessat_flags])
+access(pathname ptr[in, filename], mode flags[access_mode])
+eaccess(pathname ptr[in, filename], mode flags[access_mode])
+profil(samples buffer[inout], size len[samples], offt intptr, scale int32)
 utimes(filename ptr[in, filename], times ptr[in, itimerval])
 futimesat(dir fd_dir, pathname ptr[in, filename], times ptr[in, itimerval])
 utimensat(dir fd_dir, pathname ptr[in, filename], times ptr[in, itimerval], flags flags[utimensat_flags])
@@ -77,10 +84,16 @@ setuid(uid uid)
 setgid(gid gid)
 getuid() uid
 geteuid() uid
+setegid(egid gid)
+seteuid(euid uid)
+getsid(pid pid) pid
+issetugid()
+setsid() pid
 setpgid(pid pid, pgid pid)
 getpgid(pid pid) pid
 getpgrp(pid pid) pid
 getpid() pid
+getppid() pid
 setreuid(ruid uid, euid uid)
 setregid(rgid gid, egid gid)
 setresuid(ruid uid, euid uid, suid uid)
@@ -89,6 +102,12 @@ getresuid(ruid ptr[out, uid], euid ptr[out, uid], suid ptr[out, uid])
 getresgid(rgid ptr[out, gid], egid ptr[out, gid], sgid ptr[out, gid])
 getgroups(size len[list], list ptr[inout, array[gid]])
 setgroups(size len[list], list ptr[in, array[gid]])
+getpriority(which flags[priority_which], who int32)
+setpriority(which flags[priority_which], who int32, prio int32)
+getlogin(buf buffer[out], size len[buf])
+setlogin(buf buffer[in])
+getloginclass(buf buffer[out], size len[buf])
+setloginclass(buf buffer[in])
 
 link(old ptr[in, filename], new ptr[in, filename])
 linkat(oldfd fd_dir, old ptr[in, filename], newfd fd_dir, new ptr[in, filename], flags flags[linkat_flags])
@@ -117,21 +136,41 @@ fchdir(fd fd)
 copy_file_range(infd fd, inoffp ptr[inout, fileoff[int64]], outfd fd, outoffp ptr[inout, fileoff[int64]], len int64, flags flags[copy_file_range_flags])
 __realpathat(dirfd fd, path ptr[in, filename], buf ptr[out, string], size len[buf], flags flags[realpathat_flags])
 undelete(path ptr[in, filename])
+acct(filename ptr[in, filename, opt])
+__specialfd$eventfd(type const[SPECIALFD_EVENTFD], req ptr[in, eventfd], len len[req]) fd
+setfib(fib int32)
 
 getrusage(who flags[rusage_who], usage ptr[out, rusage])
 getrlimit(res flags[rlimit_type], rlim ptr[out, rlimit])
 setrlimit(res flags[rlimit_type], rlim ptr[in, rlimit])
 
+freebsd11_statfs(path ptr[in, filename], buf ptr[out, freebsd11_statfs])
+freebsd11_fstatfs(fd fd, buf ptr[out, freebsd11_statfs])
+statfs(path ptr[in, filename], buf ptr[out, statfs])
+fstatfs(fd fd, buf ptr[out, statfs])
+
 clock_gettime(id flags[clock_id], tp ptr[out, timespec])
 clock_settime(id flags[clock_id], tp ptr[in, timespec])
 clock_getres(id flags[clock_id], tp ptr[out, timespec])
 clock_nanosleep(id flags[clock_id], flags flags[timer_flags], rqtp ptr[in, timespec], rmtp ptr[out, timespec, opt])
+sigaction(signo signo, act ptr[in, sigaction], oact ptr[out, sigaction, opt])
+sigprocmask(how flags[sigprocmask_how], set ptr[in, sigset, opt], oset ptr[out, sigset, opt])
+sigsuspend(sigmask ptr[in, sigset])
+sigpending(set ptr[out, sigset])
+sigtimedwait(set ptr[in, sigset], info ptr[out, siginfo, opt], timeout ptr[in, timespec])
+sigwaitinfo(set ptr[in, sigset], info ptr[out, siginfo, opt])
+sigwait(set ptr[in, sigset], sig intptr)
+sigqueue(pid pid, signo signo, value sigval)
 sigaltstack(ss vma, oss ptr[out, intptr, opt])
 nanosleep(req ptr[in, timespec], rem ptr[out, timespec, opt])
 getitimer(which flags[getitimer_which], cur ptr[out, itimerval])
 setitimer(which flags[getitimer_which], new ptr[in, itimerval], old ptr[out, itimerval, opt])
 exit(code intptr)
 wait4(pid pid, status ptr[out, int32, opt], options flags[wait_options], ru ptr[out, rusage, opt])
+fork() pid
+vfork() pid
+rfork(flags flags[rfork_flags])
+umask(mode flags[open_mode])
 
 thr_new(param ptr[in, thr_param], param_size bytesize[param])
 thr_self(lwpid ptr[out, lwpid])
@@ -148,8 +187,56 @@ pollfd {
 	revents	const[0, int16]
 }
 
+sigaction {
+	sigaction_u	ptr[in, text[target]]
+	sa_flags	flags[sigaction_flags, int32]
+	sa_mask		sigset
+}
+
 sigset {
-	mask	int64
+	mask	array[int32, _SIG_WORDS]
+}
+
+siginfo {
+	si_signo	int32
+	si_errno	int32
+	si_code		int32
+	si_pid		pid
+	si_uid		uid
+	si_status	int32
+	si_addr		intptr
+	si_value	sigval
+	reason		reason
+}
+
+reason [
+	fault	fault_r
+	timer	timer_r
+	mesgq	mesgq_r
+	poll	poll_r
+	spare	spare_r
+]
+
+fault_r {
+	trapno	int32
+}
+
+timer_r {
+	timerid	int32
+	overrun	int32
+}
+
+mesgq_r {
+	mqd	int32
+}
+
+poll_r {
+	band	intptr
+}
+
+spare_r {
+	spare1	intptr
+	spare2	array[int32, 7]
 }
 
 timespec {
@@ -240,20 +327,26 @@ linger {
 	linger	int32
 }
 
+eventfd {
+	initval	int32
+	flags	int32
+}
+
 pollfd_events = POLLIN, POLLPRI, POLLOUT, POLLERR, POLLHUP, POLLNVAL, POLLRDNORM, POLLRDBAND, POLLWRNORM, POLLWRBAND, POLLINIGNEOF
 mknod_mode = S_IFREG, S_IFCHR, S_IFBLK, S_IFIFO, S_IFSOCK, S_IRUSR, S_IWUSR, S_IXUSR, S_IRGRP, S_IWGRP, S_IXGRP, S_IROTH, S_IWOTH, S_IXOTH
-at_flags = AT_SYMLINK_NOFOLLOW, AT_SYMLINK_FOLLOW
-linkat_flags = AT_SYMLINK_FOLLOW
-unlinkat_flags = 0, AT_REMOVEDIR
+at_flags = 0, AT_SYMLINK_NOFOLLOW, AT_SYMLINK_FOLLOW, AT_RESOLVE_BENEATH, AT_EMPTY_PATH
+linkat_flags = 0, AT_SYMLINK_FOLLOW, AT_RESOLVE_BENEATH, AT_EMPTY_PATH
+unlinkat_flags = 0, AT_REMOVEDIR, AT_RESOLVE_BENEATH
 flock_op = LOCK_SH, LOCK_EX, LOCK_UN, LOCK_NB
-faccessat_flags = AT_EACCESS, AT_SYMLINK_NOFOLLOW, AT_SYMLINK_FOLLOW, AT_REMOVEDIR, AT_BENEATH
+faccessat_flags = 0, AT_EACCESS, AT_SYMLINK_NOFOLLOW, AT_SYMLINK_FOLLOW, AT_REMOVEDIR, AT_EMPTY_PATH
+access_mode = R_OK, W_OK, X_OK, F_OK
 rusage_who = RUSAGE_SELF, RUSAGE_CHILDREN, RUSAGE_THREAD
 rlimit_type = RLIMIT_AS, RLIMIT_CORE, RLIMIT_CPU, RLIMIT_DATA, RLIMIT_FSIZE, RLIMIT_MEMLOCK, RLIMIT_NOFILE, RLIMIT_NPROC, RLIMIT_RSS, RLIMIT_STACK
 clock_id = CLOCK_REALTIME, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID
 getitimer_which = ITIMER_REAL, ITIMER_VIRTUAL, ITIMER_PROF
 wait_options = WNOHANG, WUNTRACED, WCONTINUED, WEXITED, WSTOPPED, WCONTINUED, WNOHANG, WNOWAIT
 timer_flags = 0, TIMER_ABSTIME
-utimensat_flags = 0, AT_SYMLINK_NOFOLLOW
+utimensat_flags = 0, AT_SYMLINK_NOFOLLOW, AT_RESOLVE_BENEATH, AT_EMPTY_PATH
 fcntl_dupfd = F_DUPFD, F_DUPFD_CLOEXEC
 fcntl_getflags = F_GETFD, F_GETFL
 fcntl_lock = F_SETLK, F_SETLKW, F_GETLK
@@ -264,7 +357,11 @@ minherit_flags = INHERIT_SHARE, INHERIT_NONE, INHERIT_COPY, INHERIT_ZERO
 copy_file_range_flags = 0
 realpathat_flags = 0
 chflags_flags = SF_APPEND, SF_ARCHIVED, SF_IMMUTABLE, SF_NOUNLINK, SF_SNAPSHOT, UF_APPEND, UF_ARCHIVE, UF_HIDDEN, UF_IMMUTABLE, UF_NODUMP, UF_NOUNLINK, UF_OFFLINE, UF_OPAQUE, UF_READONLY, UF_REPARSE, UF_SPARSE, UF_SYSTEM
+rfork_flags = RFPROC, RFNOWAIT, RFFDG, RFCFDG, RFTHREAD, RFSIGSHARE, RFMEM, RFTSIGZMB, RFLINUXTHPN
+priority_which = PRIO_PROCESS, PRIO_PGRP, PRIO_USER
 
 rtprio_functions = RTP_LOOKUP, RTP_SET
 rtprio_types = RTP_PRIO_REALTIME, RTP_PRIO_NORMAL, RTP_PRIO_IDLE
 thr_flags = THR_SUSPENDED, THR_SYSTEM_SCOPE
+sigprocmask_how = SIG_BLOCK, SIG_UNBLOCK, SIG_SETMASK
+sigaction_flags = SA_NOCLDSTOP, SA_NOCLDWAIT, SA_ONSTACK, SA_NODEFER, SA_RESETHAND, SA_RESTART, SA_SIGINFO

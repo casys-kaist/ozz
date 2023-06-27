@@ -76,6 +76,9 @@ type osCommon struct {
 	KernelObject string
 	// Name of cpp(1) executable.
 	CPP string
+	// Syscalls on which pseudo syscalls depend. Syzkaller will make sure that __NR* or SYS* definitions
+	// for those syscalls are enabled.
+	PseudoSyscallDeps map[string][]string
 	// Common CFLAGS for this OS.
 	cflags []string
 }
@@ -116,6 +119,7 @@ type Timeouts struct {
 const (
 	Akaros  = "akaros"
 	FreeBSD = "freebsd"
+	Darwin  = "darwin"
 	Fuchsia = "fuchsia"
 	Linux   = "linux"
 	NetBSD  = "netbsd"
@@ -147,8 +151,8 @@ func GetEx(OS, arch string, clang bool) *Target {
 	if target == nil {
 		return nil
 	}
+	target.init.Do(target.lazyInit)
 	if clang == useClang {
-		target.init.Do(target.lazyInit)
 		return target
 	}
 	target.initOther.Do(func() {
@@ -168,7 +172,7 @@ var List = map[string]map[string]*Target{
 			PtrSize:  8,
 			PageSize: 4 << 10,
 			// Compile with -no-pie due to issues with ASan + ASLR on ppc64le.
-			CFlags: []string{"-m64", "-fsanitize=address", "-no-pie"},
+			CFlags: []string{"-fsanitize=address", "-no-pie"},
 			osCommon: osCommon{
 				SyscallNumbers:         true,
 				SyscallPrefix:          "SYS_",
@@ -180,7 +184,7 @@ var List = map[string]map[string]*Target{
 			PtrSize:  8,
 			PageSize: 8 << 10,
 			// Compile with -no-pie due to issues with ASan + ASLR on ppc64le.
-			CFlags: []string{"-m64", "-fsanitize=address", "-no-pie"},
+			CFlags: []string{"-fsanitize=address", "-no-pie"},
 			osCommon: osCommon{
 				SyscallNumbers:         true,
 				SyscallPrefix:          "SYS_",
@@ -192,7 +196,7 @@ var List = map[string]map[string]*Target{
 			PtrSize:        4,
 			PageSize:       8 << 10,
 			Int64Alignment: 4,
-			CFlags:         []string{"-m32", "-static"},
+			CFlags:         []string{"-static"},
 			osCommon: osCommon{
 				SyscallNumbers:         true,
 				Int64SyscallArgs:       true,
@@ -204,7 +208,7 @@ var List = map[string]map[string]*Target{
 		TestArch32ForkShmem: {
 			PtrSize:  4,
 			PageSize: 4 << 10,
-			CFlags:   []string{"-m32", "-static"},
+			CFlags:   []string{"-static-pie"},
 			osCommon: osCommon{
 				SyscallNumbers:         true,
 				Int64SyscallArgs:       true,
@@ -281,6 +285,7 @@ var List = map[string]map[string]*Target{
 			PtrSize:          8,
 			PageSize:         4 << 10,
 			DataOffset:       0xfffff000,
+			CFlags:           []string{"-fPIE"},
 			LittleEndian:     false,
 			Triple:           "s390x-linux-gnu",
 			KernelArch:       "s390",
@@ -330,6 +335,33 @@ var List = map[string]map[string]*Target{
 				return nr == 482 || nr >= 569
 			},
 		},
+		RiscV64: {
+			PtrSize:      8,
+			PageSize:     4 << 10,
+			LittleEndian: true,
+			CCompiler:    "clang",
+			CFlags:       []string{"-m64"},
+			NeedSyscallDefine: func(nr uint64) bool {
+				// freebsd_12_shm_open, shm_open2, shm_rename, __realpathat, close_range, copy_file_range
+				return nr == 482 || nr >= 569
+			},
+		},
+	},
+	Darwin: {
+		AMD64: {
+			PtrSize:      8,
+			PageSize:     4 << 10,
+			DataOffset:   512 << 24,
+			LittleEndian: true,
+			CCompiler:    "clang",
+			CFlags: []string{
+				"-m64",
+				"-I", sourceDirVar + "/san",
+				// FIXME(HerrSpace): syscall was marked as deprecated on macos
+				"-Wno-deprecated-declarations",
+			},
+			NeedSyscallDefine: dontNeedSyscallDefine,
+		},
 	},
 	NetBSD: {
 		AMD64: {
@@ -338,7 +370,7 @@ var List = map[string]map[string]*Target{
 			LittleEndian: true,
 			CFlags: []string{
 				"-m64",
-				"-static",
+				"-static-pie",
 				"--sysroot", sourceDirVar + "/dest/",
 			},
 			CCompiler: sourceDirVar + "/tools/bin/x86_64--netbsd-g++",
@@ -350,7 +382,8 @@ var List = map[string]map[string]*Target{
 			PageSize:     4 << 10,
 			LittleEndian: true,
 			CCompiler:    "c++",
-			CFlags:       []string{"-m64", "-static", "-lutil"},
+			// PIE is enabled on OpenBSD by default, so no need for -static-pie.
+			CFlags: []string{"-m64", "-static", "-lutil"},
 			NeedSyscallDefine: func(nr uint64) bool {
 				switch nr {
 				case 8: // SYS___tfork
@@ -436,7 +469,14 @@ var oses = map[string]osCommon{
 		ExecutorUsesShmem:      true,
 		ExecutorUsesForkServer: true,
 		KernelObject:           "vmlinux",
-		cflags:                 []string{"-static"},
+		PseudoSyscallDeps: map[string][]string{
+			"syz_read_part_table": {"memfd_create"},
+			"syz_mount_image":     {"memfd_create"},
+			"syz_io_uring_setup":  {"io_uring_setup"},
+			"syz_clone3":          {"clone3", "exit"},
+			"syz_clone":           {"clone", "exit"},
+		},
+		cflags: []string{"-static-pie"},
 	},
 	FreeBSD: {
 		SyscallNumbers:         true,
@@ -446,7 +486,35 @@ var oses = map[string]osCommon{
 		ExecutorUsesForkServer: true,
 		KernelObject:           "kernel.full",
 		CPP:                    "g++",
-		cflags:                 []string{"-static", "-lc++"},
+		// FreeBSD is missing toolchain support for static PIEs.
+		cflags: []string{
+			"-static",
+			"-lc++",
+			// For some configurations -no-pie is passed to the compiler,
+			// which is not used by clang.
+			// Ensure clang does not complain about it.
+			"-Wno-unused-command-line-argument",
+		},
+	},
+	Darwin: {
+		SyscallNumbers:    true,
+		Int64SyscallArgs:  true,
+		SyscallPrefix:     "SYS_",
+		ExecutorUsesShmem: true,
+		// FIXME(HerrSpace): ForkServer is b0rked in a peculiar way. I did some
+		// printf debugging in parseOutput in ipc.go. It usually works for a
+		// few executions. Eventually the reported ncmd stops making sense and
+		// the resulting replies are partially garbage. I also looked at the
+		// executor side of things, but that's harder to track as we are just
+		// banging bytes in the shmem there and don't use structs like on the
+		// go side.
+		ExecutorUsesForkServer: false,
+		KernelObject:           "kernel.kasan",
+		// Note: We need a real g++ here, not the symlink to clang++ common on
+		// macOS systems. Homebrews gcc package suffixes these with the gcc
+		// version to avoid conflicting with the macOS symlink. Currently -11.
+		CPP:    "g++-11",
+		cflags: []string{"-lc++"},
 	},
 	NetBSD: {
 		BuildOS:                Linux,
@@ -505,11 +573,25 @@ var (
 		"-Wparentheses",
 		"-Wunused-const-variable",
 		"-Wframe-larger-than=16384", // executor uses stacks of limited size, so no jumbo frames
+		"-Wno-stringop-overflow",
+		"-Wno-array-bounds",
+		"-Wno-format-overflow",
+		"-Wno-unused-but-set-variable",
+		"-Wno-unused-command-line-argument",
 	}
 	optionalCFlags = map[string]bool{
-		"-static":                 true, // some distributions don't have static libraries
-		"-Wunused-const-variable": true, // gcc 5 does not support this flag
-		"-fsanitize=address":      true, // some OSes don't have ASAN
+		"-static":                           true, // some distributions don't have static libraries
+		"-static-pie":                       true, // this flag is also not supported everywhere
+		"-Wunused-const-variable":           true, // gcc 5 does not support this flag
+		"-fsanitize=address":                true, // some OSes don't have ASAN
+		"-Wno-stringop-overflow":            true,
+		"-Wno-array-bounds":                 true,
+		"-Wno-format-overflow":              true,
+		"-Wno-unused-but-set-variable":      true,
+		"-Wno-unused-command-line-argument": true,
+	}
+	fallbackCFlags = map[string]string{
+		"-static-pie": "-static", // if an ASLR static binary is impossible, build just a static one
 	}
 )
 
@@ -541,40 +623,35 @@ func init() {
 			initTarget(target, OS, arch)
 		}
 	}
-	goarch := runtime.GOARCH
+	arch32, arch64 := splitArch(runtime.GOARCH)
 	goos := runtime.GOOS
 	if goos == "android" {
 		goos = Linux
 	}
 	for _, target := range List[TestOS] {
-		if List[goos] != nil {
-			if host := List[goos][goarch]; host != nil {
-				target.CCompiler = host.CCompiler
-				target.CPP = host.CPP
-				if goos == FreeBSD {
-					// For some configurations -no-pie is passed to the compiler,
-					// which is not used by clang.
-					// Ensure clang does not complain about it.
-					target.CFlags = append(target.CFlags, "-Wno-unused-command-line-argument")
-					// When building executor for the test OS, clang needs
-					// to link against the libc++ library.
-					target.CFlags = append(target.CFlags, "-lc++")
-				}
-				// In ESA/390 mode, the CPU is able to address only 31bit of memory but
-				// arithmetic operations are still 32bit
-				// Fix cflags by replacing compiler's -m32 option with -m31
-				if goarch == S390x {
-					for i := range target.CFlags {
-						target.CFlags[i] = strings.Replace(target.CFlags[i], "-m32", "-m31", -1)
-					}
-				}
-			}
-			if target.PtrSize == 4 && goos == FreeBSD && goarch == AMD64 {
-				// A hack to let 32-bit "test" target tests run on FreeBSD:
-				// freebsd/386 requires a non-default DataOffset to avoid
-				// clobbering mappings created by the C runtime. Since that is the
-				// only target with this constraint, just special-case it for now.
-				target.DataOffset = List[goos][I386].DataOffset
+		if List[goos] == nil {
+			continue
+		}
+		arch := arch64
+		if target.PtrSize == 4 {
+			arch = arch32
+		}
+		host := List[goos][arch]
+		if host == nil {
+			continue
+		}
+		target.CCompiler = host.CCompiler
+		target.CPP = host.CPP
+		target.CFlags = append(append([]string{}, host.CFlags...), target.CFlags...)
+		target.CFlags = processMergedFlags(target.CFlags)
+		// At least FreeBSD/386 requires a non-default DataOffset value.
+		target.DataOffset = host.DataOffset
+		// In ESA/390 mode, the CPU is able to address only 31bit of memory but
+		// arithmetic operations are still 32bit
+		// Fix cflags by replacing compiler's -m32 option with -m31
+		if arch == S390x {
+			for i := range target.CFlags {
+				target.CFlags[i] = strings.Replace(target.CFlags[i], "-m32", "-m31", -1)
 			}
 		}
 		target.BuildOS = goos
@@ -599,10 +676,7 @@ func initTarget(target *Target, OS, arch string) {
 		target.DataOffset = 512 << 20
 	}
 	target.NumPages = (16 << 20) / target.PageSize
-	sourceDir := os.Getenv("SOURCEDIR_" + strings.ToUpper(OS))
-	if sourceDir == "" {
-		sourceDir = os.Getenv("SOURCEDIR")
-	}
+	sourceDir := getSourceDir(target)
 	for sourceDir != "" && sourceDir[len(sourceDir)-1] == '/' {
 		sourceDir = sourceDir[:len(sourceDir)-1]
 	}
@@ -652,6 +726,12 @@ func initTarget(target *Target, OS, arch string) {
 		target.HostEndian = binary.LittleEndian
 	} else {
 		target.HostEndian = binary.BigEndian
+	}
+	// Temporal hack.
+	if OS == Linux && os.Getenv("SYZ_STARNIX_HACK") != "" {
+		target.ExecutorUsesShmem = false
+		target.ExecutorUsesForkServer = false
+		target.HostFuzzer = true
 	}
 }
 
@@ -743,16 +823,32 @@ func (target *Target) lazyInit() {
 	// Only fail on CI for native build.
 	// On CI we want to fail loudly if cross-compilation breaks.
 	// Also fail if SOURCEDIR_GOOS is set b/c in that case user probably assumes it will work.
-	if (target.OS != runtime.GOOS || !runningOnCI) && os.Getenv("SOURCEDIR_"+strings.ToUpper(target.OS)) == "" {
+	if (target.OS != runtime.GOOS || !runningOnCI) && getSourceDir(target) == "" {
 		if _, err := exec.LookPath(target.CCompiler); err != nil {
 			target.BrokenCompiler = fmt.Sprintf("%v is missing (%v)", target.CCompiler, err)
 			return
 		}
 	}
+
+	flagsToCheck := append([]string{}, target.CFlags...)
+	for _, value := range fallbackCFlags {
+		flagsToCheck = append(flagsToCheck, value)
+	}
+
 	flags := make(map[string]*bool)
+	commonCFlags := []string{}
+	uncommonCFlags := []string{}
 	var wg sync.WaitGroup
-	for _, flag := range target.CFlags {
+	for _, flag := range flagsToCheck {
 		if !optionalCFlags[flag] {
+			commonCFlags = append(commonCFlags, flag)
+			continue
+		}
+		uncommonCFlags = append(uncommonCFlags, flag)
+	}
+	for _, flag := range uncommonCFlags {
+		_, exists := flags[flag]
+		if exists {
 			continue
 		}
 		res := new(bool)
@@ -760,24 +856,32 @@ func (target *Target) lazyInit() {
 		wg.Add(1)
 		go func(flag string) {
 			defer wg.Done()
-			*res = checkFlagSupported(target, flag)
+			*res = checkFlagSupported(target, commonCFlags, flag)
 		}(flag)
 	}
 	wg.Wait()
-	for i := 0; i < len(target.CFlags); i++ {
-		if res := flags[target.CFlags[i]]; res != nil && !*res {
-			copy(target.CFlags[i:], target.CFlags[i+1:])
-			target.CFlags = target.CFlags[:len(target.CFlags)-1]
-			i--
+	newCFlags := []string{}
+	for _, flag := range target.CFlags {
+		for {
+			if res := flags[flag]; res == nil || *res {
+				// The flag is either verified to be supported or must be supported.
+				newCFlags = append(newCFlags, flag)
+			} else if fallback := fallbackCFlags[flag]; fallback != "" {
+				// The flag is not supported, but probably we can replace it by another one.
+				flag = fallback
+				continue
+			}
+			break
 		}
 	}
+	target.CFlags = newCFlags
 	// Check that the compiler is actually functioning. It may be present, but still broken.
 	// Common for Linux distros, over time we've seen:
 	//	Error: alignment too large: 15 assumed
 	//	fatal error: asm/unistd.h: No such file or directory
 	//	fatal error: asm/errno.h: No such file or directory
 	//	collect2: error: ld terminated with signal 11 [Segmentation fault]
-	if runningOnCI || os.Getenv("SOURCEDIR_"+strings.ToUpper(target.OS)) != "" {
+	if runningOnCI || getSourceDir(target) != "" {
 		return // On CI all compilers are expected to work, so we don't do the following check.
 	}
 	args := []string{"-x", "c++", "-", "-o", "/dev/null"}
@@ -790,10 +894,91 @@ func (target *Target) lazyInit() {
 	}
 }
 
-func checkFlagSupported(target *Target, flag string) bool {
-	cmd := exec.Command(target.CCompiler, "-x", "c++", "-", "-o", "/dev/null", flag)
+func checkFlagSupported(target *Target, targetCFlags []string, flag string) bool {
+	args := []string{"-x", "c++", "-", "-o", "/dev/null", "-Werror", flag}
+	args = append(args, targetCFlags...)
+	cmd := exec.Command(target.CCompiler, args...)
 	cmd.Stdin = strings.NewReader(simpleProg)
 	return cmd.Run() == nil
+}
+
+// Split an arch into a pair of related 32 and 64 bit arch names.
+// If the arch is unknown, we assume that the arch is 64 bit.
+func splitArch(arch string) (string, string) {
+	type pair struct {
+		name32 string
+		name64 string
+	}
+	pairs := []pair{
+		{I386, AMD64},
+		{ARM, ARM64},
+	}
+	for _, p := range pairs {
+		if p.name32 == arch || p.name64 == arch {
+			return p.name32, p.name64
+		}
+	}
+	return "", arch
+}
+
+func processMergedFlags(flags []string) []string {
+	mutuallyExclusive := [][]string{
+		// For GCC, "-static-pie -static" is not equal to "-static".
+		// And since we do it anyway, also clean up those that do get overridden -
+		// this will improve the flags list readability.
+		{"-static", "-static-pie", "-no-pie", "-pie"},
+	}
+	// For mutually exclusive groups, keep only the last flag.
+	for _, group := range mutuallyExclusive {
+		m := map[string]bool{}
+		for _, s := range group {
+			m[s] = true
+		}
+		keep := ""
+		for i := len(flags) - 1; i >= 0; i-- {
+			if m[flags[i]] {
+				keep = flags[i]
+				break
+			}
+		}
+		if keep != "" {
+			newFlags := []string{}
+			for _, s := range flags {
+				if s == keep || !m[s] {
+					newFlags = append(newFlags, s)
+				}
+			}
+			flags = newFlags
+		}
+	}
+	// Clean up duplicates.
+	dup := map[string]bool{}
+	newFlags := []string{}
+	for _, s := range flags {
+		if dup[s] {
+			continue
+		}
+		newFlags = append(newFlags, s)
+		dup[s] = true
+	}
+	return newFlags
+}
+
+func getSourceDir(target *Target) string {
+	// First try the most granular env option.
+	name := fmt.Sprintf("SOURCEDIR_%s_%s_%s_%s",
+		strings.ToUpper(target.OS), strings.ToUpper(target.Arch),
+		strings.ToUpper(runtime.GOOS), strings.ToUpper(runtime.GOARCH),
+	)
+	if ret := os.Getenv(name); ret != "" {
+		return ret
+	}
+	// .. then the older one.
+	name = fmt.Sprintf("SOURCEDIR_%s", strings.ToUpper(target.OS))
+	if ret := os.Getenv(name); ret != "" {
+		return ret
+	}
+	return os.Getenv("SOURCEDIR")
 }
 
 func needSyscallDefine(nr uint64) bool     { return true }

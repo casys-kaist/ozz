@@ -4,6 +4,7 @@
 package qemu
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +26,7 @@ import (
 )
 
 func init() {
+	var _ vmimpl.Infoer = (*instance)(nil)
 	vmimpl.Register("qemu", ctor, true)
 }
 
@@ -40,6 +43,7 @@ type Config struct {
 	// "{{INDEX}}" is replaced with 0-based index of the VM (from 0 to Count-1).
 	// "{{TEMPLATE}}" is replaced with the path to a copy of workdir/template dir.
 	// "{{TCP_PORT}}" is replaced with a random free TCP port
+	// "{{FN%8}}" is replaced with PCI BDF (Function#%8) and PCI BDF Dev# += index/8
 	QemuArgs string `json:"qemu_args"`
 	// Location of the kernel for injected boot (e.g. arch/x86/boot/bzImage, optional).
 	// This is passed to QEMU as the -kernel option.
@@ -54,6 +58,9 @@ type Config struct {
 	// The modern way of describing QEMU hard disks is supported, so the value
 	// "drive index=0,media=disk,file=" is transformed to "-drive index=0,media=disk,file=image" for QEMU.
 	ImageDevice string `json:"image_device"`
+	// EFI images containing the EFI itself, as well as this VMs EFI variables.
+	EfiCodeDevice string `json:"efi_code_device"`
+	EfiVarsDevice string `json:"efi_vars_device"`
 	// QEMU network device type to use.
 	// If not specified, some default per-arch value will be used.
 	// See the full list with qemu-system-x86_64 -device help.
@@ -64,6 +71,8 @@ type Config struct {
 	Mem int `json:"mem"`
 	// For building kernels without -snapshot for pkg/build (true by default).
 	Snapshot bool `json:"snapshot"`
+	// Magic key used to dongle macOS to the device.
+	AppleSmcOsk string `json:"apple_smc_osk"`
 }
 
 type Pool struct {
@@ -71,6 +80,7 @@ type Pool struct {
 	cfg        *Config
 	target     *targets.Target
 	archConfig *archConfig
+	version    string
 }
 
 type instance struct {
@@ -78,6 +88,8 @@ type instance struct {
 	cfg         *Config
 	target      *targets.Target
 	archConfig  *archConfig
+	version     string
+	args        []string
 	image       string
 	debug       bool
 	os          string
@@ -119,41 +131,29 @@ var archConfigs = map[string]*archConfig{
 		// But other arches don't use e1000e, e.g. arm64 uses virtio by default.
 		NetDev: "e1000",
 		RngDev: "virtio-rng-pci",
-		CmdLine: append(linuxCmdline,
+		CmdLine: []string{
 			"root=/dev/sda",
 			"console=ttyS0",
-			"kvm-intel.nested=1",
-			"kvm-intel.unrestricted_guest=1",
-			"kvm-intel.vmm_exclusive=1",
-			"kvm-intel.fasteoi=1",
-			"kvm-intel.ept=1",
-			"kvm-intel.flexpriority=1",
-			"kvm-intel.vpid=1",
-			"kvm-intel.emulate_invalid_guest_state=1",
-			"kvm-intel.eptad=1",
-			"kvm-intel.enable_shadow_vmcs=1",
-			"kvm-intel.pml=1",
-			"kvm-intel.enable_apicv=1",
-		),
+		},
 	},
 	"linux/386": {
 		Qemu:   "qemu-system-i386",
 		NetDev: "e1000",
 		RngDev: "virtio-rng-pci",
-		CmdLine: append(linuxCmdline,
+		CmdLine: []string{
 			"root=/dev/sda",
 			"console=ttyS0",
-		),
+		},
 	},
 	"linux/arm64": {
 		Qemu:     "qemu-system-aarch64",
 		QemuArgs: "-machine virt,virtualization=on -cpu cortex-a57",
 		NetDev:   "virtio-net-pci",
 		RngDev:   "virtio-rng-pci",
-		CmdLine: append(linuxCmdline,
+		CmdLine: []string{
 			"root=/dev/vda",
 			"console=ttyAMA0",
-		),
+		},
 	},
 	"linux/arm": {
 		Qemu:                   "qemu-system-arm",
@@ -161,27 +161,26 @@ var archConfigs = map[string]*archConfig{
 		NetDev:                 "virtio-net-device",
 		RngDev:                 "virtio-rng-device",
 		UseNewQemuImageOptions: true,
-		CmdLine: append(linuxCmdline,
+		CmdLine: []string{
 			"root=/dev/vda",
 			"console=ttyAMA0",
-		),
+		},
 	},
 	"linux/mips64le": {
 		Qemu:     "qemu-system-mips64el",
 		QemuArgs: "-M malta -cpu MIPS64R2-generic -nodefaults",
 		NetDev:   "e1000",
 		RngDev:   "virtio-rng-pci",
-		CmdLine: append(linuxCmdline,
+		CmdLine: []string{
 			"root=/dev/sda",
 			"console=ttyS0",
-		),
+		},
 	},
 	"linux/ppc64le": {
 		Qemu:     "qemu-system-ppc64",
 		QemuArgs: "-enable-kvm -vga none",
 		NetDev:   "virtio-net-pci",
 		RngDev:   "virtio-rng-pci",
-		CmdLine:  linuxCmdline,
 	},
 	"linux/riscv64": {
 		Qemu:                   "qemu-system-riscv64",
@@ -189,25 +188,47 @@ var archConfigs = map[string]*archConfig{
 		NetDev:                 "virtio-net-pci",
 		RngDev:                 "virtio-rng-pci",
 		UseNewQemuImageOptions: true,
-		CmdLine: append(linuxCmdline,
+		CmdLine: []string{
 			"root=/dev/vda",
 			"console=ttyS0",
-		),
+		},
 	},
 	"linux/s390x": {
 		Qemu:     "qemu-system-s390x",
 		QemuArgs: "-M s390-ccw-virtio -cpu max,zpci=on",
 		NetDev:   "virtio-net-pci",
 		RngDev:   "virtio-rng-ccw",
-		CmdLine: append(linuxCmdline,
+		CmdLine: []string{
 			"root=/dev/vda",
-		),
+			// The following kernel parameters is a temporary
+			// work-around for not having CONFIG_CMDLINE on s390x.
+			"net.ifnames=0",
+			"biosdevname=0",
+		},
 	},
 	"freebsd/amd64": {
 		Qemu:     "qemu-system-x86_64",
 		QemuArgs: "-enable-kvm",
 		NetDev:   "e1000",
 		RngDev:   "virtio-rng-pci",
+	},
+	"freebsd/riscv64": {
+		Qemu:                   "qemu-system-riscv64",
+		QemuArgs:               "-machine virt",
+		NetDev:                 "virtio-net-pci",
+		RngDev:                 "virtio-rng-pci",
+		UseNewQemuImageOptions: true,
+	},
+	"darwin/amd64": {
+		Qemu: "qemu-system-x86_64",
+		QemuArgs: strings.Join([]string{
+			"-accel hvf -machine q35 ",
+			"-cpu Penryn,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,",
+			"+pcid,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check ",
+		}, ""),
+		TargetDir: "/tmp",
+		NetDev:    "e1000-82545em",
+		RngDev:    "virtio-rng-pci",
 	},
 	"netbsd/amd64": {
 		Qemu:     "qemu-system-x86_64",
@@ -224,6 +245,13 @@ var archConfigs = map[string]*archConfig{
 		CmdLine: []string{
 			"kernel.serial=legacy",
 			"kernel.halt-on-panic=true",
+			// Set long (300sec) thresholds for kernel lockup detector to
+			// prevent false alarms from potentially oversubscribed hosts.
+			// (For more context, see fxbug.dev/109612.)
+			"kernel.lockup-detector.critical-section-threshold-ms=300000",
+			"kernel.lockup-detector.critical-section-fatal-threshold-ms=300000",
+			"kernel.lockup-detector.heartbeat-age-threshold-ms=300000",
+			"kernel.lockup-detector.heartbeat-age-fatal-threshold-ms=300000",
 		},
 	},
 	"akaros/amd64": {
@@ -232,18 +260,6 @@ var archConfigs = map[string]*archConfig{
 		NetDev:   "e1000",
 		RngDev:   "virtio-rng-pci",
 	},
-}
-
-var linuxCmdline = []string{
-	"earlyprintk=serial",
-	"oops=panic",
-	"nmi_watchdog=panic",
-	"panic_on_warn=1",
-	"panic=1",
-	"ftrace_dump_on_oops=orig_cpu",
-	"vsyscall=native",
-	"net.ifnames=0",
-	"biosdevname=0",
 }
 
 func ctor(env *vmimpl.Env) (vmimpl.Pool, error) {
@@ -291,9 +307,17 @@ func ctor(env *vmimpl.Env) (vmimpl.Pool, error) {
 	}
 	cfg.Kernel = osutil.Abs(cfg.Kernel)
 	cfg.Initrd = osutil.Abs(cfg.Initrd)
+
+	output, err := osutil.RunCmd(time.Minute, "", cfg.Qemu, "--version")
+	if err != nil {
+		return nil, err
+	}
+	version := string(bytes.Split(output, []byte{'\n'})[0])
+
 	pool := &Pool{
 		env:        env,
 		cfg:        cfg,
+		version:    version,
 		target:     targets.Get(env.OS, env.Arch),
 		archConfig: archConfig,
 	}
@@ -329,6 +353,9 @@ func (pool *Pool) Create(workdir string, index int) (vmimpl.Instance, error) {
 		if i < 1000 && strings.Contains(err.Error(), "ould not set up host forwarding rule") {
 			continue
 		}
+		if i < 1000 && strings.Contains(err.Error(), "Device or resource busy") {
+			continue
+		}
 		return nil, err
 	}
 }
@@ -339,6 +366,7 @@ func (pool *Pool) ctor(workdir, sshkey, sshuser string, index int) (vmimpl.Insta
 		cfg:        pool.cfg,
 		target:     pool.target,
 		archConfig: pool.archConfig,
+		version:    pool.version,
 		image:      pool.env.Image,
 		debug:      pool.env.Debug,
 		os:         pool.env.OS,
@@ -400,7 +428,7 @@ func (inst *instance) boot() error {
 	args := []string{
 		"-m", strconv.Itoa(inst.cfg.Mem),
 		"-smp", strconv.Itoa(inst.cfg.CPU),
-		"-chardev", fmt.Sprintf("socket,id=SOCKSYZ,server,nowait,host=localhost,port=%v", inst.monport),
+		"-chardev", fmt.Sprintf("socket,id=SOCKSYZ,server=on,wait=off,host=localhost,port=%v", inst.monport),
 		"-mon", "chardev=SOCKSYZ,mode=control",
 		"-display", "none",
 		"-serial", "stdio",
@@ -462,9 +490,25 @@ func (inst *instance) boot() error {
 			"-append", strings.Join(cmdline, " "),
 		)
 	}
+	if inst.cfg.EfiCodeDevice != "" {
+		args = append(args,
+			"-drive", "if=pflash,format=raw,readonly=on,file="+inst.cfg.EfiCodeDevice,
+		)
+	}
+	if inst.cfg.EfiVarsDevice != "" {
+		args = append(args,
+			"-drive", "if=pflash,format=raw,readonly=on,file="+inst.cfg.EfiVarsDevice,
+		)
+	}
+	if inst.cfg.AppleSmcOsk != "" {
+		args = append(args,
+			"-device", "isa-applesmc,osk="+inst.cfg.AppleSmcOsk,
+		)
+	}
 	if inst.debug {
 		log.Logf(0, "running command: %v %#v", inst.cfg.Qemu, args)
 	}
+	inst.args = args
 	qemu := osutil.Command(inst.cfg.Qemu, args...)
 	qemu.Stdout = inst.wpipe
 	qemu.Stderr = inst.wpipe
@@ -508,6 +552,26 @@ func (inst *instance) boot() error {
 	return nil
 }
 
+// "vfio-pci,host=BN:DN.{{FN%8}},addr=0x11".
+func handleVfioPciArg(arg string, index int) string {
+	if !strings.Contains(arg, "{{FN%8}}") {
+		return arg
+	}
+	if index > 7 {
+		re := regexp.MustCompile(`vfio-pci,host=[a-bA-B0-9]+(:[a-bA-B0-9]{1,8}).{{FN%8}},[^:.,]+$`)
+		matches := re.FindAllStringSubmatch(arg, -1)
+		if len(matches[0]) != 2 {
+			return arg
+		}
+		submatch := matches[0][1]
+		dnSubmatch, _ := strconv.ParseInt(submatch[1:], 16, 64)
+		devno := dnSubmatch + int64(index/8)
+		arg = strings.ReplaceAll(arg, submatch, fmt.Sprintf(":%02x", devno))
+	}
+	arg = strings.ReplaceAll(arg, "{{FN%8}}", fmt.Sprint(index%8))
+	return arg
+}
+
 func splitArgs(str, templateDir string, index int) (args []string) {
 	for _, arg := range strings.Split(str, " ") {
 		if arg == "" {
@@ -515,6 +579,7 @@ func splitArgs(str, templateDir string, index int) (args []string) {
 		}
 		arg = strings.ReplaceAll(arg, "{{INDEX}}", fmt.Sprint(index))
 		arg = strings.ReplaceAll(arg, "{{TEMPLATE}}", templateDir)
+		arg = handleVfioPciArg(arg, index)
 		const tcpPort = "{{TCP_PORT}}"
 		if strings.Contains(arg, tcpPort) {
 			arg = strings.ReplaceAll(arg, tcpPort, fmt.Sprint(vmimpl.UnusedTCPPort()))
@@ -534,7 +599,7 @@ func (inst *instance) Forward(port int) (string, error) {
 		}
 		inst.forwardPort = port
 	}
-	return fmt.Sprintf("localhost:%v", port), nil
+	return fmt.Sprintf("127.0.0.1:%v", port), nil
 }
 
 func (inst *instance) targetDir() string {
@@ -645,6 +710,11 @@ func (inst *instance) Run(timeout time.Duration, stop <-chan bool, command strin
 		cmd.Wait()
 	}()
 	return inst.merger.Output, errc, nil
+}
+
+func (inst *instance) Info() ([]byte, error) {
+	info := fmt.Sprintf("%v\n%v %q\n", inst.version, inst.cfg.Qemu, inst.args)
+	return []byte(info), nil
 }
 
 func (inst *instance) Diagnose(rep *report.Report) ([]byte, bool) {

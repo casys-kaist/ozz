@@ -4,9 +4,11 @@
 package main
 
 import (
+	"net/http"
 	"strings"
 	"time"
 
+	"github.com/google/syzkaller/pkg/auth"
 	"github.com/google/syzkaller/pkg/hash"
 	"github.com/google/syzkaller/pkg/host"
 	"github.com/google/syzkaller/pkg/log"
@@ -16,7 +18,23 @@ import (
 	"github.com/google/syzkaller/prog"
 )
 
-func (mgr *Manager) hubSyncLoop() {
+type keyGetter func() (string, error)
+
+func pickGetter(key string) keyGetter {
+	if key != "" {
+		return func() (string, error) { return key, nil }
+	}
+	// Attempts oauth when the configured hub_key is empty.
+	tokenCache, err := auth.MakeCache(http.NewRequest, http.DefaultClient.Do)
+	if err != nil {
+		log.Fatalf("failed to make auth cache %v", err)
+	}
+	return func() (string, error) {
+		return tokenCache.Get(time.Now())
+	}
+}
+
+func (mgr *Manager) hubSyncLoop(keyGet keyGetter) {
 	hc := &HubConnector{
 		mgr:           mgr,
 		cfg:           mgr.cfg,
@@ -27,6 +45,7 @@ func (mgr *Manager) hubSyncLoop() {
 		leak:          mgr.checkResult.Features[host.FeatureLeak].Enabled,
 		fresh:         mgr.fresh,
 		hubReproQueue: mgr.hubReproQueue,
+		keyGet:        keyGet,
 	}
 	if mgr.cfg.Reproduce && mgr.dash != nil {
 		hc.needMoreRepros = mgr.needMoreRepros
@@ -47,12 +66,13 @@ type HubConnector struct {
 	newRepros      [][]byte
 	hubReproQueue  chan *Crash
 	needMoreRepros chan chan bool
+	keyGet         keyGetter
 }
 
 // HubManagerView restricts interface between HubConnector and Manager.
 type HubManagerView interface {
 	getMinimizedCorpus() (corpus, repros [][]byte)
-	addNewCandidates(candidates []rpctype.RPCCandidate)
+	addNewCandidates(candidates []rpctype.Candidate)
 }
 
 func (hc *HubConnector) loop() {
@@ -77,9 +97,13 @@ func (hc *HubConnector) loop() {
 }
 
 func (hc *HubConnector) connect(corpus [][]byte) (*rpctype.RPCClient, error) {
+	key, err := hc.keyGet()
+	if err != nil {
+		return nil, err
+	}
 	a := &rpctype.HubConnectArgs{
 		Client:  hc.cfg.HubClient,
-		Key:     hc.cfg.HubKey,
+		Key:     key,
 		Manager: hc.cfg.Name,
 		Domain:  hc.domain,
 		Fresh:   hc.fresh,
@@ -114,9 +138,13 @@ func (hc *HubConnector) connect(corpus [][]byte) (*rpctype.RPCClient, error) {
 }
 
 func (hc *HubConnector) sync(hub *rpctype.RPCClient, corpus [][]byte) error {
+	key, err := hc.keyGet()
+	if err != nil {
+		return err
+	}
 	a := &rpctype.HubSyncArgs{
 		Client:  hc.cfg.HubClient,
-		Key:     hc.cfg.HubKey,
+		Key:     key,
 		Manager: hc.cfg.Name,
 	}
 	sigs := make(map[hash.Sig]bool)
@@ -173,9 +201,9 @@ func (hc *HubConnector) sync(hub *rpctype.RPCClient, corpus [][]byte) error {
 }
 
 func (hc *HubConnector) processProgs(inputs []rpctype.HubInput) (minimized, smashed, dropped int) {
-	candidates := make([]rpctype.RPCCandidate, 0, len(inputs))
+	candidates := make([]rpctype.Candidate, 0, len(inputs))
 	for _, inp := range inputs {
-		bad, disabled := checkProgram(hc.target, hc.enabledCalls, inp.Prog)
+		bad, disabled := checkProgram(hc.target, hc.enabledCalls, false, inp.Prog)
 		if bad || disabled {
 			log.Logf(0, "rejecting program from hub (bad=%v, disabled=%v):\n%s",
 				bad, disabled, inp)
@@ -189,7 +217,7 @@ func (hc *HubConnector) processProgs(inputs []rpctype.HubInput) (minimized, smas
 		if smash {
 			smashed++
 		}
-		candidates = append(candidates, rpctype.RPCCandidate{
+		candidates = append(candidates, rpctype.Candidate{
 			Prog:      inp.Prog,
 			Minimized: min,
 			Smashed:   smash,
@@ -228,7 +256,7 @@ func splitDomains(domain string) (string, string) {
 func (hc *HubConnector) processRepros(repros [][]byte) int {
 	dropped := 0
 	for _, repro := range repros {
-		bad, disabled := checkProgram(hc.target, hc.enabledCalls, repro)
+		bad, disabled := checkProgram(hc.target, hc.enabledCalls, false, repro)
 		if bad || disabled {
 			log.Logf(0, "rejecting repro from hub (bad=%v, disabled=%v):\n%s",
 				bad, disabled, repro)

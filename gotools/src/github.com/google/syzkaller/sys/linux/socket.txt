@@ -41,13 +41,13 @@ shutdown(fd sock, how flags[shutdown_flags])
 getsockopt(fd sock, level int32, optname int32, optval buffer[out], optlen ptr[inout, len[optval, int32]])
 setsockopt(fd sock, level int32, optname int32, optval buffer[in], optlen len[optval])
 
-socket_domain = AF_UNIX, AF_INET, AF_INET6, AF_IPX, AF_NETLINK, AF_X25, AF_AX25, AF_ATMPVC, AF_APPLETALK, AF_PACKET, AF_VSOCK, AF_XDP, AF_TIPC, AF_RXRPC, AF_PPPOX, AF_RDS, AF_ROSE, AF_PHONET, AF_NFC, AF_NETROM, AF_KEY, AF_KCM, AF_ISDN, AF_SMC, AF_CAN, AF_CAIF, AF_BLUETOOTH, AF_LLC, AF_ALG, AF_QIPCRTR
+socket_domain = AF_UNIX, AF_INET, AF_INET6, AF_NETLINK, AF_X25, AF_AX25, AF_ATMPVC, AF_APPLETALK, AF_PACKET, AF_VSOCK, AF_XDP, AF_TIPC, AF_RXRPC, AF_PPPOX, AF_RDS, AF_ROSE, AF_PHONET, AF_NFC, AF_NETROM, AF_KEY, AF_KCM, AF_ISDN, AF_SMC, AF_CAN, AF_CAIF, AF_BLUETOOTH, AF_LLC, AF_ALG, AF_QIPCRTR
 socket_type = SOCK_STREAM, SOCK_DGRAM, SOCK_RAW, SOCK_RDM, SOCK_SEQPACKET, SOCK_DCCP, SOCK_PACKET, SOCK_NONBLOCK, SOCK_CLOEXEC
 accept_flags = SOCK_NONBLOCK, SOCK_CLOEXEC
 shutdown_flags = SHUT_RD, SHUT_WR
 send_flags = MSG_CONFIRM, MSG_DONTROUTE, MSG_DONTWAIT, MSG_EOR, MSG_MORE, MSG_NOSIGNAL, MSG_OOB, MSG_PROBE, MSG_BATCH, MSG_FASTOPEN, MSG_ZEROCOPY
 recv_flags = MSG_CMSG_CLOEXEC, MSG_DONTWAIT, MSG_ERRQUEUE, MSG_OOB, MSG_PEEK, MSG_TRUNC, MSG_WAITALL, MSG_WAITFORONE
-cmsg_levels = SOL_SOCKET, IPPROTO_ICMP, SOL_IP, SOL_TCP, SOL_UDP, SOL_IPV6, SOL_ICMPV6, SOL_SCTP, SOL_UDPLITE, SOL_RAW, SOL_IPX, SOL_AX25, SOL_ATALK, SOL_NETROM, SOL_ROSE, SOL_DECNET, SOL_PACKET, SOL_ATM, SOL_AAL, SOL_IRDA, SOL_NETBEUI, SOL_LLC, SOL_DCCP, SOL_NETLINK, SOL_TIPC, SOL_RXRPC, SOL_PPPOL2TP, SOL_BLUETOOTH, SOL_PNPIPE, SOL_RDS, SOL_IUCV, SOL_CAIF, SOL_ALG, SOL_NFC, SOL_KCM
+cmsg_levels = SOL_SOCKET, IPPROTO_ICMP, SOL_IP, SOL_TCP, SOL_UDP, SOL_IPV6, SOL_ICMPV6, SOL_SCTP, SOL_UDPLITE, SOL_RAW, SOL_AX25, SOL_ATALK, SOL_NETROM, SOL_ROSE, SOL_PACKET, SOL_ATM, SOL_AAL, SOL_IRDA, SOL_NETBEUI, SOL_LLC, SOL_DCCP, SOL_NETLINK, SOL_TIPC, SOL_RXRPC, SOL_PPPOL2TP, SOL_BLUETOOTH, SOL_PNPIPE, SOL_RDS, SOL_IUCV, SOL_CAIF, SOL_ALG, SOL_NFC, SOL_KCM
 
 sock_pair {
 	fd0	sock
@@ -55,13 +55,12 @@ sock_pair {
 }
 
 # This sockaddr type corresponds to the struct sockaddr and is 16 bytes or less.
-# TODO: add AF_APPLETALK, AF_ATMPVC, AF_ROSE, AF_DECnet, AF_ATMSVC, AF_IRDA, AF_IB, AF_IUCV
+# TODO: add AF_APPLETALK, AF_ATMPVC, AF_ROSE, AF_ATMSVC, AF_IRDA, AF_IB, AF_IUCV
 # Note: AF_UNIX, AF_INET6, AF_PACKET, AF_ALG, AF_PPPOX sockaddr is bigger than 16 bytes
 # Note: AF_NETROM sockaddr is the same as AF_AX25
 sockaddr [
 	in		sockaddr_in
 	ax25		sockaddr_ax25
-	ipx		sockaddr_ipx
 	nl		sockaddr_nl
 	llc		sockaddr_llc
 	can		sockaddr_can
@@ -87,7 +86,6 @@ sockaddr_storage [
 	in		sockaddr_in
 	x25		sockaddr_x25
 	ax25		full_sockaddr_ax25
-	ipx		sockaddr_ipx
 	in6		sockaddr_in6
 	nl		sockaddr_nl
 	ll		sockaddr_ll
@@ -285,7 +283,7 @@ ifreq_ioctls = SIOCGIFNAME, SIOCSIFLINK, SIOCGIFFLAGS, SIOCSIFFLAGS, SIOCGIFADDR
 
 ioctl$sock_ifreq(fd sock, cmd flags[ifreq_ioctls], arg ptr[inout, ifreq])
 
-ioctl$sock_SIOCGIFINDEX(fd sock, cmd const[SIOCGIFINDEX], arg ptr[inout, ifreq_t[ifindex]])
+ioctl$sock_SIOCGIFINDEX(fd sock, cmd const[SIOCGIFINDEX], arg ptr[out, ifreq_t[ifindex]])
 
 ioctl$sock_SIOCGIFBR(fd sock, cmd const[SIOCGIFBR], arg ptr[inout, brctl_arg])
 ioctl$sock_SIOCSIFBR(fd sock, cmd const[SIOCSIFBR], arg ptr[inout, brctl_arg])
@@ -328,7 +326,7 @@ resource ifindex[int32]
 
 type ifreq_dev_t[DEVNAME, ELEM] {
 	ifr_ifrn	string[DEVNAME, IFNAMSIZ]	(in)
-	elem		ELEM	(out)
+	elem		ELEM
 } [size[IFREQ_SIZE]]
 
 type ifreq_t[ELEM] ifreq_dev_t[devnames, ELEM]
@@ -385,7 +383,7 @@ rtentry {
 # Note: lapb0, bpq0 and hwsim0 are only present in init namespace.
 # Note: for roseN and nrN we should use proc type, but for simplicity we currently use N=0.
 # Note: netdevsim0 and netpci0 are renamed in initialize_devlink_ports()
-devnames = "", "lo", "tunl0", "gre0", "gretap0", "ip_vti0", "ip6_vti0", "sit0", "ip6tnl0", "ip6gre0", "ip6gretap0", "bond0", "dummy0", "nr0", "rose0", "erspan0", "vlan0", "bridge0", "vcan0", "team0", "syz_tun", "veth0", "veth1", "veth0_to_bridge", "veth1_to_bridge", "veth0_to_bond", "veth1_to_bond", "veth0_to_team", "veth1_to_team", "bridge_slave_0", "bridge_slave_1", "bond_slave_0", "bond_slave_1", "team_slave_0", "team_slave_1", "syzkaller0", "syzkaller1", "veth0_to_hsr", "veth1_to_hsr", "hsr0", "ip6erspan0", "vxcan1", "caif0", "batadv0", "veth0_to_batadv", "veth1_to_batadv", "batadv_slave_0", "batadv_slave_1", "netdevsim0", "netpci0", "xfrm0", "veth0_virt_wifi", "veth1_virt_wifi", "virt_wifi0", "veth0_vlan", "veth1_vlan", "vlan0", "vlan1", "macvlan0", "macvlan1", "ipvlan0", "ipvlan1", "veth0_macvtap", "veth1_macvtap", "macvtap0", "macsec0", "geneve0", "geneve1", "wg0", "wg1", "wg2", "wlan0", "wlan1"
+devnames = "", "lo", "tunl0", "gre0", "gretap0", "ip_vti0", "ip6_vti0", "sit0", "ip6tnl0", "ip6gre0", "ip6gretap0", "bond0", "dummy0", "nr0", "rose0", "erspan0", "vlan0", "bridge0", "vcan0", "team0", "syz_tun", "veth0", "veth1", "veth0_to_bridge", "veth1_to_bridge", "veth0_to_bond", "veth1_to_bond", "veth0_to_team", "veth1_to_team", "bridge_slave_0", "bridge_slave_1", "bond_slave_0", "bond_slave_1", "team_slave_0", "team_slave_1", "syzkaller0", "syzkaller1", "veth0_to_hsr", "veth1_to_hsr", "hsr0", "ip6erspan0", "vxcan1", "caif0", "batadv0", "veth0_to_batadv", "veth1_to_batadv", "batadv_slave_0", "batadv_slave_1", "netdevsim0", "netpci0", "nicvf0", "xfrm0", "veth0_virt_wifi", "veth1_virt_wifi", "virt_wifi0", "veth0_vlan", "veth1_vlan", "vlan0", "vlan1", "macvlan0", "macvlan1", "ipvlan0", "ipvlan1", "veth0_macvtap", "veth1_macvtap", "macvtap0", "macsec0", "geneve0", "geneve1", "wg0", "wg1", "wg2", "wlan0", "wlan1", "dvmrp0", "dvmrp1", "pimreg", "pimreg0", "pimreg1", "pim6reg", "pim6reg0", "pim6reg1"
 
 type devname string[devnames, IFNAMSIZ]
 

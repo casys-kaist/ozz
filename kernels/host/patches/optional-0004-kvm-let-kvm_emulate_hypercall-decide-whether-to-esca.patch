@@ -1,0 +1,26 @@
+From 597604bc944318b498d3dcd0c3b6643f31a55a7f Mon Sep 17 00:00:00 2001
+From: "Dae R. Jeong" <threeearcat@gmail.com>
+Date: Fri, 3 Jun 2022 11:14:18 +0900
+Subject: [PATCH] kvm: let kvm_emulate_hypercall() decide whether to escape VM
+
+---
+ arch/x86/kvm/vmx.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/arch/x86/kvm/vmx.c b/arch/x86/kvm/vmx.c
+index 3c280db..edfe852 100644
+--- a/arch/x86/kvm/vmx.c
++++ b/arch/x86/kvm/vmx.c
+@@ -6143,8 +6143,7 @@ static int handle_halt(struct kvm_vcpu *vcpu)
+ 
+ static int handle_vmcall(struct kvm_vcpu *vcpu)
+ {
+-	kvm_emulate_hypercall(vcpu);
+-	return 1;
++	return kvm_emulate_hypercall(vcpu);
+ }
+ 
+ static int handle_invd(struct kvm_vcpu *vcpu)
+-- 
+2.7.4
+

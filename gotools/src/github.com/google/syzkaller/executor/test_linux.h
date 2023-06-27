@@ -43,7 +43,7 @@ static int test_one(int text_type, const char* text, int text_size, int flags, u
 		printf("cpu mmap failed (%d)\n", errno);
 		return 1;
 	}
-	int vm_mem_size = 96 << 10;
+	int vm_mem_size = 24 * SYZ_PAGE_SIZE; // Allocate what executor allocates for vma[24]
 	void* vm_mem = mmap(0, vm_mem_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (vm_mem == MAP_FAILED) {
 		printf("mmap failed (%d)\n", errno);
@@ -57,8 +57,11 @@ static int test_one(int text_type, const char* text, int text_size, int flags, u
 		printf("syz_kvm_setup_cpu failed (%d)\n", errno);
 		return 1;
 	}
-	if (ioctl(cpufd, KVM_RUN, 0)) {
-		printf("KVM_RUN failed (%d)\n", errno);
+
+	int ret = ioctl(cpufd, KVM_RUN, 0);
+	// KVM_RUN returns positive values on PPC64
+	if (ret < 0) {
+		printf("KVM_RUN returned %d, errno=%d\n", ret, errno);
 		return 1;
 	}
 	struct kvm_regs regs;
@@ -78,6 +81,12 @@ static int test_one(int text_type, const char* text, int text_size, int flags, u
 #ifdef GOARCH_amd64
 	if (check_rax && regs.rax != 0xbadc0de) {
 		printf("wrong result: rax=0x%llx\n", (long long)regs.rax);
+		dump_cpu_state(cpufd, (char*)vm_mem);
+		return 1;
+	}
+#elif GOARCH_ppc64le
+	if (check_rax && regs.gpr[3] != 0xbadc0de) {
+		printf("wrong result: gps[3]=0x%llx\n", (long long)regs.gpr[3]);
 		dump_cpu_state(cpufd, (char*)vm_mem);
 		return 1;
 	}
@@ -107,10 +116,10 @@ static int test_kvm()
 	// if (res = test_one(32, text32_div0, sizeof(text32_div0)-1, 0, KVM_EXIT_HLT, true))
 	//	return res;
 
+#ifdef GOARCH_amd64
 	const char text8[] = "\x66\xb8\xde\xc0\xad\x0b";
 	if ((res = test_one(8, text8, sizeof(text8) - 1, 0, KVM_EXIT_HLT, true)))
 		return res;
-#ifdef GOARCH_amd64
 	if ((res = test_one(8, text8, sizeof(text8) - 1, KVM_SETUP_VIRT86, KVM_EXIT_SHUTDOWN, true)))
 		return res;
 	if ((res = test_one(8, text8, sizeof(text8) - 1, KVM_SETUP_VIRT86 | KVM_SETUP_PAGING, KVM_EXIT_SHUTDOWN, true)))
@@ -164,6 +173,20 @@ static int test_kvm()
 		if ((res = test_one(32, text_rsm, sizeof(text_rsm) - 1, KVM_SETUP_SMM, KVM_EXIT_HLT, false)))
 			return res;
 	}
+#elif GOARCH_ppc64le
+	for (unsigned i = 0; i < (1 << 5); ++i) {
+		res = test_one(8, kvm_ppc64_mr, sizeof(kvm_ppc64_mr) - 1, i, KVM_EXIT_DEBUG, true);
+		if (res)
+			return res;
+		res = test_one(8, kvm_ppc64_ld, sizeof(kvm_ppc64_ld) - 1, i, KVM_EXIT_DEBUG, true);
+		if (res)
+			return res;
+	}
+#else
+	// Keeping gcc happy
+	const char text8[] = "\x66\xb8\xde\xc0\xad\x0b";
+	if ((res = test_one(8, text8, sizeof(text8) - 1, 0, KVM_EXIT_HLT, true)))
+		return res;
 #endif
 
 	return 0;
@@ -193,7 +216,6 @@ static void dump_seg(const char* name, struct kvm_segment* seg)
 
 static void dump_cpu_state(int cpufd, char* vm_mem)
 {
-#ifdef GOARCH_amd64
 	struct kvm_sregs sregs;
 	if (ioctl(cpufd, KVM_GET_SREGS, &sregs)) {
 		printf("KVM_GET_SREGS failed (%d)\n", errno);
@@ -204,6 +226,7 @@ static void dump_cpu_state(int cpufd, char* vm_mem)
 		printf("KVM_GET_REGS failed (%d)\n", errno);
 		return;
 	}
+#ifdef GOARCH_amd64
 	printf("RIP=0x%llx RAX=0x%llx RDX=0x%llx RCX=0x%llx RBX=0x%llx CF=%d ZF=%d\n",
 	       regs.rip, regs.rax, regs.rdx, regs.rcx, regs.rbx, !!(regs.rflags & (1 << 0)), !!(regs.rflags & (1 << 6)));
 	printf("CR0=0x%llx CR2=0x%llx CR4=0x%llx EFER=0x%llx\n",
@@ -226,5 +249,17 @@ static void dump_cpu_state(int cpufd, char* vm_mem)
 			       ((long long*)vm_mem)[i], ((long long*)vm_mem)[i + 1], ((long long*)vm_mem)[i + 2], ((long long*)vm_mem)[i + 3]);
 		}
 	}
+#elif GOARCH_ppc64 || GOARCH_ppc64le
+	printf("NIP %016lx\n", regs.pc);
+	printf("MSR %016lx\n", regs.msr);
+	printf("GPR00 %016lx %016lx %016lx %016lx\n", regs.gpr[0], regs.gpr[1], regs.gpr[2], regs.gpr[3]);
+	printf("GPR04 %016lx %016lx %016lx %016lx\n", regs.gpr[4], regs.gpr[5], regs.gpr[6], regs.gpr[7]);
+	printf("GPR08 %016lx %016lx %016lx %016lx\n", regs.gpr[8], regs.gpr[9], regs.gpr[10], regs.gpr[11]);
+	printf("GPR12 %016lx %016lx %016lx %016lx\n", regs.gpr[12], regs.gpr[13], regs.gpr[14], regs.gpr[15]);
+	printf("GPR16 %016lx %016lx %016lx %016lx\n", regs.gpr[16], regs.gpr[17], regs.gpr[18], regs.gpr[19]);
+	printf("GPR20 %016lx %016lx %016lx %016lx\n", regs.gpr[20], regs.gpr[21], regs.gpr[22], regs.gpr[23]);
+	printf("GPR24 %016lx %016lx %016lx %016lx\n", regs.gpr[24], regs.gpr[25], regs.gpr[26], regs.gpr[27]);
+	printf("GPR28 %016lx %016lx %016lx %016lx\n", regs.gpr[28], regs.gpr[29], regs.gpr[30], regs.gpr[31]);
+	printf(" SRR0 %016lx  SRR1 %016lx\n", regs.srr0, regs.srr1);
 #endif
 }

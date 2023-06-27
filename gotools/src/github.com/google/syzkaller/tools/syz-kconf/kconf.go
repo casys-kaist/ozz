@@ -51,11 +51,11 @@ func main() {
 	if err != nil {
 		tool.Failf("failed to create repo: %v", err)
 	}
-	instances, err := parseMainSpec(*flagConfig)
+	instances, unusedFeatures, err := parseMainSpec(*flagConfig)
 	if err != nil {
 		tool.Fail(err)
 	}
-	if err := checkConfigs(instances); err != nil {
+	if err := checkConfigs(instances, unusedFeatures); err != nil {
 		tool.Fail(err)
 	}
 	// In order to speed up the process we generate instances that use the same kernel revision in parallel.
@@ -72,7 +72,7 @@ func main() {
 				tool.Failf("failed to checkout %v/%v: %v", inst.Kernel.Repo, inst.Kernel.Tag, err)
 			}
 		}
-		releaseTag, err := repo.ReleaseTag("HEAD")
+		releaseTag, err := releaseTag(*flagSourceDir)
 		if err != nil {
 			tool.Fail(err)
 		}
@@ -115,8 +115,11 @@ func main() {
 	}
 }
 
-func checkConfigs(instances []*Instance) error {
+func checkConfigs(instances []*Instance, unusedFeatures []string) error {
 	allFeatures := make(Features)
+	for _, feat := range unusedFeatures {
+		allFeatures[feat] = true
+	}
 	for _, inst := range instances {
 		for feat := range inst.Features {
 			allFeatures[feat] = true
@@ -126,6 +129,10 @@ func checkConfigs(instances []*Instance) error {
 	errorString := ""
 	for _, inst := range instances {
 		for _, cfg := range inst.Configs {
+			if strings.HasPrefix(cfg.Name, "CONFIG_") {
+				msg := fmt.Sprintf("Warning: excessive CONFIG_ in %v at %v:%v ?", cfg.Name, cfg.File, cfg.Line)
+				errorString += "\n" + msg
+			}
 			for _, feat := range cfg.Constraints {
 				if feat[0] == '-' {
 					feat = feat[1:]
@@ -238,7 +245,7 @@ func (ctx *Context) executeShell() error {
 		}
 		args := strings.Split(shell.Cmd, " ")
 		for i := 1; i < len(args); i++ {
-			args[i] = strings.ReplaceAll(args[i], "${BUILDDIR}", ctx.BuildDir)
+			args[i] = ctx.replaceVars(args[i])
 		}
 		if args[0] == "make" {
 			if err := ctx.Make(args[1:]...); err != nil {
@@ -421,9 +428,39 @@ func (ctx *Context) Make(args ...string) error {
 	if ctx.Target.Triple != "" {
 		args = append(args, "CROSS_COMPILE="+ctx.Target.Triple+"-")
 	}
-	if ctx.Target.KernelCompiler != "" {
+	if ctx.Inst.Compiler != "" {
+		args = append(args, "CC="+ctx.replaceVars(ctx.Inst.Compiler))
+	} else if ctx.Target.KernelCompiler != "" {
 		args = append(args, "CC="+ctx.Target.KernelCompiler)
+	}
+	if ctx.Inst.Linker != "" {
+		args = append(args, "LD="+ctx.replaceVars(ctx.Inst.Linker))
 	}
 	_, err := osutil.RunCmd(10*time.Minute, ctx.SourceDir, "make", args...)
 	return err
 }
+
+func (ctx *Context) replaceVars(str string) string {
+	str = strings.ReplaceAll(str, "${SOURCEDIR}", ctx.SourceDir)
+	str = strings.ReplaceAll(str, "${BUILDDIR}", ctx.BuildDir)
+	str = strings.ReplaceAll(str, "${ARCH}", ctx.Target.KernelArch)
+	return str
+}
+
+func releaseTag(dir string) (string, error) {
+	data, err := ioutil.ReadFile(filepath.Join(dir, "Makefile"))
+	if err != nil {
+		return "", err
+	}
+	return releaseTagImpl(data)
+}
+
+func releaseTagImpl(data []byte) (string, error) {
+	match := makefileReleaseRe.FindSubmatch(data)
+	if match == nil {
+		return "", fmt.Errorf("did not find VERSION/PATCHLEVEL in the kernel Makefile")
+	}
+	return fmt.Sprintf("v%s.%s", match[1], match[2]), nil
+}
+
+var makefileReleaseRe = regexp.MustCompile(`\nVERSION = ([0-9]+)(?:\n.*)*\nPATCHLEVEL = ([0-9]+)\n`)

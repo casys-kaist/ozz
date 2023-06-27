@@ -8,12 +8,14 @@
 package vmimpl
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/big"
 	"net"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/google/syzkaller/pkg/log"
@@ -59,20 +61,27 @@ type Instance interface {
 	Close()
 }
 
+// Infoer is an optional interface that can be implemented by Instance.
+type Infoer interface {
+	// MachineInfo returns additional info about the VM, e.g. VMM version/arguments.
+	Info() ([]byte, error)
+}
+
 // Env contains global constant parameters for a pool of VMs.
 type Env struct {
 	// Unique name
 	// Can be used for VM name collision resolution if several pools share global name space.
-	Name     string
-	OS       string // target OS
-	Arch     string // target arch
-	Workdir  string
-	Image    string
-	SSHKey   string
-	SSHUser  string
-	Timeouts targets.Timeouts
-	Debug    bool
-	Config   []byte // json-serialized VM-type-specific config
+	Name      string
+	OS        string // target OS
+	Arch      string // target arch
+	Workdir   string
+	Image     string
+	SSHKey    string
+	SSHUser   string
+	Timeouts  targets.Timeouts
+	Debug     bool
+	Config    []byte // json-serialized VM-type-specific config
+	KernelSrc string
 }
 
 // BootError is returned by Pool.Create when VM does not boot.
@@ -162,7 +171,11 @@ func Multiplex(cmd *exec.Cmd, merger *OutputMerger, console io.Closer, timeout t
 }
 
 func RandomPort() int {
-	return rand.Intn(64<<10-1<<10) + 1<<10
+	n, err := rand.Int(rand.Reader, big.NewInt(64<<10-1<<10))
+	if err != nil {
+		panic(err)
+	}
+	return int(n.Int64()) + 1<<10
 }
 
 func UnusedTCPPort() int {
@@ -174,4 +187,44 @@ func UnusedTCPPort() int {
 			return port
 		}
 	}
+}
+
+// Escapes double quotes(and nested double quote escapes). Ignores any other escapes.
+// Reference: https://www.gnu.org/software/bash/manual/html_node/Double-Quotes.html
+func EscapeDoubleQuotes(inp string) string {
+	var ret strings.Builder
+	for pos := 0; pos < len(inp); pos++ {
+		// If inp[pos] is not a double quote or a backslash, just use
+		// as is.
+		if inp[pos] != '"' && inp[pos] != '\\' {
+			ret.WriteByte(inp[pos])
+			continue
+		}
+		// If it is a double quote, escape.
+		if inp[pos] == '"' {
+			ret.WriteString("\\\"")
+			continue
+		}
+		// If we detect a backslash, reescape only if what it's already escaping
+		// is a double-quotes.
+		temp := ""
+		j := pos
+		for ; j < len(inp); j++ {
+			if inp[j] == '\\' {
+				temp += string(inp[j])
+				continue
+			}
+			// If the escape corresponds to a double quotes, re-escape.
+			// Else, just use as is.
+			if inp[j] == '"' {
+				temp = temp + temp + "\\\""
+			} else {
+				temp += string(inp[j])
+			}
+			break
+		}
+		ret.WriteString(temp)
+		pos = j
+	}
+	return ret.String()
 }

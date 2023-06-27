@@ -6,6 +6,7 @@ package backend
 import (
 	"fmt"
 
+	"github.com/google/syzkaller/pkg/host"
 	"github.com/google/syzkaller/sys/targets"
 )
 
@@ -13,17 +14,25 @@ type Impl struct {
 	Units     []*CompileUnit
 	Symbols   []*Symbol
 	Frames    []Frame
-	Symbolize func(pcs []uint64) ([]Frame, error)
+	Symbolize func(pcs map[*Module][]uint64) ([]Frame, error)
 	RestorePC func(pc uint32) uint64
+}
+
+type Module struct {
+	Name string
+	Path string
+	Addr uint64
 }
 
 type CompileUnit struct {
 	ObjectUnit
-	Path string
+	Path   string
+	Module *Module
 }
 
 type Symbol struct {
 	ObjectUnit
+	Module     *Module
 	Unit       *CompileUnit
 	Start      uint64
 	End        uint64
@@ -38,9 +47,10 @@ type ObjectUnit struct {
 }
 
 type Frame struct {
-	PC   uint64
-	Name string
-	Path string
+	Module *Module
+	PC     uint64
+	Name   string
+	Path   string
 	Range
 }
 
@@ -53,12 +63,16 @@ type Range struct {
 
 const LineEnd = 1 << 30
 
-func Make(target *targets.Target, vm, objDir, srcDir, buildDir string) (*Impl, error) {
+func Make(target *targets.Target, vm, objDir, srcDir, buildDir string,
+	moduleObj []string, modules []host.KernelModule) (*Impl, error) {
 	if objDir == "" {
 		return nil, fmt.Errorf("kernel obj directory is not specified")
 	}
-	if vm == "gvisor" {
-		return makeGvisor(target, objDir, srcDir, buildDir)
+	if target.OS == "darwin" {
+		return makeMachO(target, objDir, srcDir, buildDir, moduleObj, modules)
 	}
-	return makeELF(target, objDir, srcDir, buildDir)
+	if vm == "gvisor" {
+		return makeGvisor(target, objDir, srcDir, buildDir, modules)
+	}
+	return makeELF(target, objDir, srcDir, buildDir, moduleObj, modules)
 }

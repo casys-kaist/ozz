@@ -70,7 +70,7 @@ func run(p *analysis.Pass) (interface{}, error) {
 			switch n := n.(type) {
 			case *ast.BinaryExpr:
 				pass.checkStringLenCompare(n)
-			case *ast.FuncType:
+			case *ast.FuncDecl:
 				pass.checkFuncArgs(n)
 			case *ast.CallExpr:
 				pass.checkFlagDefinition(n)
@@ -98,8 +98,8 @@ func (pass *Pass) report(pos ast.Node, msg string, args ...interface{}) {
 	})
 }
 
-func (pass *Pass) typ(e ast.Expr) types.Type {
-	return pass.TypesInfo.Types[e].Type
+func (pass *Pass) typ(e ast.Expr) string {
+	return pass.TypesInfo.Types[e].Type.String()
 }
 
 // checkComment warns about C++-style multiline comments (we don't use them in the codebase)
@@ -145,7 +145,7 @@ var (
 	noPeriodComment   = regexp.MustCompile(`^// [A-Z][a-z].+[a-z]$`)
 	lowerCaseComment  = regexp.MustCompile(`^// [a-z]+ `)
 	onelineExceptions = regexp.MustCompile(`// want \"|http:|https:`)
-	specialComment    = regexp.MustCompile(`//go:generate|// nolint:`)
+	specialComment    = regexp.MustCompile(`//go:generate|//go:build|//go:embed|// nolint:`)
 )
 
 // checkStringLenCompare checks for string len comparisons with 0.
@@ -170,7 +170,7 @@ func (pass *Pass) isStringLenCall(n ast.Expr) bool {
 	if !ok || fun.Name != "len" {
 		return false
 	}
-	return pass.typ(call.Args[0]).String() == "string"
+	return pass.typ(call.Args[0]) == "string"
 }
 
 func (pass *Pass) isIntZeroLiteral(n ast.Expr) bool {
@@ -179,23 +179,29 @@ func (pass *Pass) isIntZeroLiteral(n ast.Expr) bool {
 }
 
 // checkFuncArgs checks for "func foo(a int, b int)" -> "func foo(a, b int)".
-func (pass *Pass) checkFuncArgs(n *ast.FuncType) {
-	pass.checkFuncArgList(n.Params.List)
-	if n.Results != nil {
-		pass.checkFuncArgList(n.Results.List)
+func (pass *Pass) checkFuncArgs(n *ast.FuncDecl) {
+	variadic := pass.TypesInfo.ObjectOf(n.Name).(*types.Func).Type().(*types.Signature).Variadic()
+	pass.checkFuncArgList(n.Type.Params.List, variadic)
+	if n.Type.Results != nil {
+		pass.checkFuncArgList(n.Type.Results.List, false)
 	}
 }
 
-func (pass *Pass) checkFuncArgList(fields []*ast.Field) {
+func (pass *Pass) checkFuncArgList(fields []*ast.Field, variadic bool) {
 	firstBad := -1
-	var prev types.Type
+	var prev string
 	for i, field := range fields {
 		if len(field.Names) == 0 {
 			pass.reportFuncArgs(fields, firstBad, i)
-			firstBad, prev = -1, nil
+			firstBad, prev = -1, ""
 			continue
 		}
 		this := pass.typ(field.Type)
+		// For variadic functions the actual type of the last argument is a slice,
+		// but we don't want to warn on "a []int, b ...int".
+		if variadic && i == len(fields)-1 {
+			this = "..." + this
+		}
 		if prev != this {
 			pass.reportFuncArgs(fields, firstBad, i)
 			firstBad, prev = -1, this
@@ -218,7 +224,7 @@ func (pass *Pass) reportFuncArgs(fields []*ast.Field, first, last int) {
 			names += ", " + name.Name
 		}
 	}
-	pass.report(fields[first], "Use '%v %v'", names[2:], fields[first].Type)
+	pass.report(fields[first], "Use '%v %v'", names[2:], pass.typ(fields[first].Type))
 }
 
 func (pass *Pass) checkFlagDefinition(n *ast.CallExpr) {
@@ -290,7 +296,7 @@ func (pass *Pass) logFormatArg(n *ast.CallExpr) (arg int, newLine, sure bool) {
 		return -1, false, false
 	}
 	switch fmt.Sprintf("%v.%v", fun.X, fun.Sel) {
-	case "log.Print", "log.Printf", "log.Fatal", "log.Fatalf", "fmt.Error", "fmt.Errorf":
+	case "log.Print", "log.Printf", "log.Fatal", "log.Fatalf", "fmt.Error", "fmt.Errorf", "jp.Logf":
 		return 0, false, true
 	case "log.Logf":
 		return 1, false, true

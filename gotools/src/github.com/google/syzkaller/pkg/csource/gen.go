@@ -1,7 +1,8 @@
 // Copyright 2017 syzkaller project authors. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 
-// +build
+//go:build ignore
+// +build ignore
 
 package main
 
@@ -38,9 +39,12 @@ func main() {
 		"common_usb_linux.h",
 		"common_usb_netbsd.h",
 		"common_usb.h",
+		"common_ext.h",
 		"android/android_seccomp.h",
 		"kvm.h",
-		"kvm.S.h",
+		"kvm_amd64.S.h",
+		"kvm_ppc64le.S.h",
+		"common_zlib.h",
 	}
 	data = replaceIncludes(executorFilenames, "../../executor/", data)
 	androidFilenames := []string{
@@ -48,11 +52,18 @@ func main() {
 		"arm_app_policy.h",
 		"x86_64_app_policy.h",
 		"x86_app_policy.h",
+		"arm64_system_policy.h",
+		"arm_system_policy.h",
+		"x86_64_system_policy.h",
+		"x86_system_policy.h",
 	}
 	data = replaceIncludes(androidFilenames, "../../executor/android/", data)
+	// Remove `//` comments, but keep lines which start with `//%`.
 	for _, remove := range []string{
-		"(\n|^)\\s*//.*",
-		"\\s*//.*",
+		"(\n|^)\\s*//$",
+		"(\n|^)\\s*//[^%].*",
+		"\\s*//$",
+		"\\s*//[^%].*",
 	} {
 		data = regexp.MustCompile(remove).ReplaceAll(data, nil)
 	}

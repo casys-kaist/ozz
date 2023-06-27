@@ -4,10 +4,12 @@
 package host
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/syzkaller/pkg/csource"
+	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/pkg/osutil"
 	"github.com/google/syzkaller/prog"
 	"github.com/google/syzkaller/sys/targets"
@@ -17,6 +19,7 @@ const (
 	FeatureCoverage = iota
 	FeatureComparisons
 	FeatureExtraCoverage
+	FeatureDelayKcovMmap
 	FeatureSandboxSetuid
 	FeatureSandboxNamespace
 	FeatureSandboxAndroid
@@ -26,6 +29,7 @@ const (
 	FeatureNetDevices
 	FeatureKCSAN
 	FeatureDevlinkPCI
+	FeatureNicVF
 	FeatureUSBEmulation
 	FeatureVhciInjection
 	FeatureWifiEmulation
@@ -58,6 +62,7 @@ func Check(target *prog.Target) (*Features, error) {
 		FeatureCoverage:         {Name: "code coverage", Reason: unsupported},
 		FeatureComparisons:      {Name: "comparison tracing", Reason: unsupported},
 		FeatureExtraCoverage:    {Name: "extra coverage", Reason: unsupported},
+		FeatureDelayKcovMmap:    {Name: "delay kcov mmap", Reason: unsupported},
 		FeatureSandboxSetuid:    {Name: "setuid sandbox", Reason: unsupported},
 		FeatureSandboxNamespace: {Name: "namespace sandbox", Reason: unsupported},
 		FeatureSandboxAndroid:   {Name: "Android sandbox", Reason: unsupported},
@@ -67,6 +72,7 @@ func Check(target *prog.Target) (*Features, error) {
 		FeatureNetDevices:       {Name: "net device setup", Reason: unsupported},
 		FeatureKCSAN:            {Name: "concurrency sanitizer", Reason: unsupported},
 		FeatureDevlinkPCI:       {Name: "devlink PCI setup", Reason: unsupported},
+		FeatureNicVF:            {Name: "NIC VF setup", Reason: unsupported},
 		FeatureUSBEmulation:     {Name: "USB emulation", Reason: unsupported},
 		FeatureVhciInjection:    {Name: "hci packet injection", Reason: unsupported},
 		FeatureWifiEmulation:    {Name: "wifi device emulation", Reason: unsupported},
@@ -80,6 +86,9 @@ func Check(target *prog.Target) (*Features, error) {
 			continue
 		}
 		if reason := check(); reason == "" {
+			if n == FeatureCoverage && !target.ExecutorUsesShmem {
+				return nil, fmt.Errorf("enabling FeatureCoverage requires enabling ExecutorUsesShmem")
+			}
 			res[n].Enabled = true
 			res[n].Reason = "enabled"
 		} else {
@@ -116,7 +125,8 @@ func Setup(target *prog.Target, features *Features, featureFlags csource.Feature
 	if featureFlags["ieee802154"].Enabled && features[Feature802154Emulation].Enabled {
 		args = append(args, "802154")
 	}
-	_, err := osutil.RunCmd(5*time.Minute, "", executor, args...)
+	output, err := osutil.RunCmd(5*time.Minute, "", executor, args...)
+	log.Logf(1, "executor %v\n%s", args, output)
 	return err
 }
 

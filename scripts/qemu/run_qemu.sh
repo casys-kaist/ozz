@@ -1,9 +1,16 @@
 #!/bin/sh -e
 
+$SCRIPTS_DIR/linux/__create_symlinks.sh "linux"
+$SCRIPTS_DIR/linux/__check_suffix.sh "linux"
+
+_UID=$(id -u)
+
 MEMORY=2048
-PORT=5555
-HMP="-monitor unix:/tmp/monitor.sock,server,nowait -serial mon:stdio"
-QMP="-qmp unix:/tmp/qmp.sock,server,nowait"
+PORT=$(echo "5555 + $_UID" | bc -l)
+GDBPORT=$(echo "1234 + $_UID" | bc -l)
+
+HMP="-monitor unix:$TMP_DIR/monitor.sock,server,nowait -serial mon:stdio"
+QMP="-qmp unix:$TMP_DIR/qmp.sock,server,nowait"
 
 if [ -z $NO_SNAPSHOT ]; then
 	SNAPSHOT="-snapshot"
@@ -22,15 +29,15 @@ if [ -z $ARCH ]; then
 fi
 
 if [ $ARCH = "x86_64" ]; then
-	QEMU=qemu-system-x86_64
+	QEMU=$QEMU_X86
 	IMAGE="$KERNELS_DIR/guest/images/x86_64/stretch.img"
 	KERNEL="$KERNELS_DIR/guest/builds/x86_64/arch/x86_64/boot/bzImage"
 	NETWORK="-netdev user,id=vnet0,hostfwd=tcp::$PORT-:22 \
 		-device virtio-net-pci,netdev=vnet0"
-	KERNELCMD='console=ttyS0 root=/dev/sda crashkernel=512M selinux=0'
+	KERNELCMD='console=ttyS0 root=/dev/sda crashkernel=512M selinux=0 null_blk.submit_queues=2'
 	MACHINE=
 else
-	QEMU=qemu-system-aarch64
+	QEMU=$QEMU_ARM
 	IMAGE="$KERNELS_DIR/guest/images/arm64/rootfs.ext3"
 	KERNEL="$KERNELS_DIR/guest/builds/arm64/arch/arm64/boot/Image"
 	NETWORK="-net user,hostfwd=tcp:127.0.0.1:$PORT-:22 -net nic"
@@ -54,5 +61,5 @@ $QEMU -smp cpus=$NUM_CPUS \
 	  $QMP\
 	  $SNAPSHOT \
 	  $MACHINE \
-      -s \
+      -gdb tcp::"$GDBPORT" \
 	  $KVM 2>&1 | tee $VM_LOGFILE

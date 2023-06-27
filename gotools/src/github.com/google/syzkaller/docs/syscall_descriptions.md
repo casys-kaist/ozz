@@ -38,7 +38,7 @@ The in-memory representation can be [transformed](/prog/encoding.go) to/from
 textual form to store in on-disk corpus, show to humans, etc.
 
 There is also another [binary representation](/prog/decodeexec.go)
-of the programs (called `exec`), that is much simpler, does not contains rich type information (irreversible)
+of the programs (called `exec`), that is much simpler, does not contain rich type information (irreversible)
 and is used for actual execution (interpretation) of programs by [executor](/executor/executor.cc).
 
 ## Describing new system calls
@@ -51,7 +51,7 @@ Currently all syscall descriptions are manually-written. There is an
 for this process and some ongoing work, but we are not there yet to have a
 fully-automated way to generate descriptions.
 There is a helper [headerparser](headerparser_usage.md) utility that can auto-generate
-some parts of descriptions from header files.
+some parts of descriptions from header files. Visual Studio Code has [syz-lang extension](https://marketplace.visualstudio.com/items?itemName=AndreyArtemiev.syzlang-extension&ssr=false#overview) for highlighting syntax.
 
 To enable fuzzing of a new kernel interface:
 
@@ -145,11 +145,8 @@ with [syz-check](/tools/syz-check/check.go).
 
 For example, if there is an existing enum `v4l2_buf_type` in the kernel headers,
 use this name for flags in descriptions as well. The same for structs, unions,
-fields, etc. For syscall variants, use the command name after the `$` sign.
+fields, etc. For syscall and struct variants, append the variant name after the `$` sign.
 For example, `fcntl$F_GET_RW_HINT`, `ioctl$FIOCLEX`, `setsockopt$SO_TIMESTAMP`.
-
-If you need to describe several variants of the same kernel struct, the naming
-convention understood by `syz-check` is `<ORIGINAL_KERNEL_NAME>_some_suffix`.
 
 <div id="ordering"/>
 
@@ -274,8 +271,8 @@ of the descriptions correctness. The fuzzer may get around some bugs in the desc
 from what the descriptions say, but it makes it considerably harder for the fuzzer to progress.
 
 Tests stored in `sys/OS/test/*` provide a more direct testing of the descriptions. Each test is just
-a program with checked syscall return values. The syntax of the programs is not currently documented,
-but look at the [existing examples](/sys/linux/test) and at the program [deserialization code](/prog/encoding.go).
+a program with checked syscall return values. The syntax of the programs is briefly described [here](program_syntax.md).
+You can also look at the [existing examples](/sys/linux/test) and at the program [deserialization code](/prog/encoding.go).
 `AUTO` keyword can be used as a value for consts and pointers, for pointers it will lead to
 some reasonable sequential allocation of memory addresses.
 

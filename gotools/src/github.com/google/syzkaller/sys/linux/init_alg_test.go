@@ -1,6 +1,7 @@
 // Copyright 2017 syzkaller project authors. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 
+//go:build linux
 // +build linux
 
 package linux
@@ -214,4 +215,17 @@ func testAlg(t *testing.T, typ, name string) (ok, skip bool) {
 		return false, false
 	}
 	return true, false
+}
+
+func TestAlgDups(t *testing.T) {
+	dups := make(map[string]bool)
+	for _, algs := range allAlgs {
+		for _, alg := range algs {
+			key := fmt.Sprintf("%v(%v)", alg.name, alg.args)
+			if dups[key] {
+				t.Errorf("duplicate alg: %+v", alg)
+			}
+			dups[key] = true
+		}
+	}
 }

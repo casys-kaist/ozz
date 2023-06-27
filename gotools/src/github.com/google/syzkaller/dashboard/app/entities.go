@@ -12,7 +12,7 @@ import (
 	"github.com/google/syzkaller/dashboard/dashapi"
 	"github.com/google/syzkaller/pkg/hash"
 	"golang.org/x/net/context"
-	db "google.golang.org/appengine/datastore"
+	db "google.golang.org/appengine/v2/datastore"
 )
 
 // This file contains definitions of entities stored in datastore.
@@ -21,7 +21,7 @@ const (
 	maxTextLen   = 200
 	MaxStringLen = 1024
 
-	maxCrashes = 40
+	maxBugHistoryDays = 365 * 5
 )
 
 type Manager struct {
@@ -49,6 +49,12 @@ type ManagerStats struct {
 	TotalExecs        int64
 }
 
+type Asset struct {
+	Type        dashapi.AssetType
+	DownloadURL string
+	CreateDate  time.Time
+}
+
 type Build struct {
 	Namespace           string
 	Manager             string
@@ -67,19 +73,25 @@ type Build struct {
 	KernelCommitTitle   string    `datastore:",noindex"`
 	KernelCommitDate    time.Time `datastore:",noindex"`
 	KernelConfig        int64     // reference to KernelConfig text entity
+	Assets              []Asset   // build-related assets
+	AssetsLastCheck     time.Time // the last time we checked the assets for deprecation
 }
 
 type Bug struct {
-	Namespace      string
-	Seq            int64 // sequences of the bug with the same title
-	Title          string
-	MergedTitles   []string // crash titles that we already merged into this bug
-	AltTitles      []string // alternative crash titles that we may merge into this bug
-	Status         int
-	DupOf          string
-	NumCrashes     int64
-	NumRepro       int64
+	Namespace    string
+	Seq          int64 // sequences of the bug with the same title
+	Title        string
+	MergedTitles []string // crash titles that we already merged into this bug
+	AltTitles    []string // alternative crash titles that we may merge into this bug
+	Status       int
+	StatusReason dashapi.BugStatusReason // e.g. if the bug status is "invalid", here's the reason why
+	DupOf        string
+	NumCrashes   int64
+	NumRepro     int64
+	// ReproLevel is the best ever found repro level for this bug.
+	// HeadReproLevel is best known repro level that still works on the HEAD commit.
 	ReproLevel     dashapi.ReproLevel
+	HeadReproLevel dashapi.ReproLevel `datastore:"HeadReproLevel"`
 	BisectCause    BisectStatus
 	BisectFix      BisectStatus
 	HasReport      bool
@@ -101,6 +113,66 @@ type Bug struct {
 	// bit 0 - the bug is published
 	// bit 1 - don't want to publish it (syzkaller build/test errors)
 	KcidbStatus int64
+	DailyStats  []BugDailyStats
+	Tags        BugTags
+}
+
+type BugTags struct {
+	Subsystems []BugSubsystem
+}
+
+type BugSubsystem struct {
+	// For now, let's keep the bare minimum number of fields.
+	// The subsystem names we use now are not stable and should not be relied upon.
+	// Once the subsystem management functionality is fully implemented, we'll
+	// override everything stored here.
+	Name string
+}
+
+func (bug *Bug) addSubsystem(subsystem BugSubsystem) {
+	for _, item := range bug.Tags.Subsystems {
+		if item.Name == subsystem.Name {
+			return
+		}
+	}
+	bug.Tags.Subsystems = append(bug.Tags.Subsystems, subsystem)
+}
+
+func (bug *Bug) hasSubsystem(name string) bool {
+	for _, item := range bug.Tags.Subsystems {
+		if item.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (bug *Bug) Load(ps []db.Property) error {
+	if err := db.LoadStruct(bug, ps); err != nil {
+		return err
+	}
+	headReproFound := false
+	for _, p := range ps {
+		if p.Name == "HeadReproLevel" {
+			headReproFound = true
+			break
+		}
+	}
+	if !headReproFound {
+		// The field is new, so it won't be set in all entities.
+		// Assume it to be equal to the best found repro for the bug.
+		bug.HeadReproLevel = bug.ReproLevel
+	}
+	return nil
+}
+
+func (bug *Bug) Save() ([]db.Property, error) {
+	return db.SaveStruct(bug)
+}
+
+type BugDailyStats struct {
+	Date       int // YYYYMMDD
+	CrashCount int
 }
 
 type Commit struct {
@@ -113,13 +185,17 @@ type Commit struct {
 }
 
 type BugReporting struct {
-	Name       string // refers to Reporting.Name
-	ID         string // unique ID per BUG/BugReporting used in commucation with external systems
-	ExtID      string // arbitrary reporting ID that is passed back in dashapi.BugReport
-	Link       string
-	CC         string             // additional emails added to CC list (|-delimited list)
-	CrashID    int64              // crash that we've last reported in this reporting
-	Auto       bool               // was it auto-upstreamed/obsoleted?
+	Name    string // refers to Reporting.Name
+	ID      string // unique ID per BUG/BugReporting used in commucation with external systems
+	ExtID   string // arbitrary reporting ID that is passed back in dashapi.BugReport
+	Link    string
+	CC      string // additional emails added to CC list (|-delimited list)
+	CrashID int64  // crash that we've last reported in this reporting
+	Auto    bool   // was it auto-upstreamed/obsoleted?
+	// If Dummy is true, the corresponding Reporting stage was introduced later and the object was just
+	// inserted to preserve consistency across the system. Even though it's indicated as Closed and Reported,
+	// it never actually was.
+	Dummy      bool
 	ReproLevel dashapi.ReproLevel // may be less then bug.ReproLevel if repro arrived but we didn't report it yet
 	OnHold     time.Time          // if set, the bug must not be upstreamed
 	Reported   time.Time
@@ -129,22 +205,97 @@ type BugReporting struct {
 type Crash struct {
 	// May be different from bug.Title due to AltTitles.
 	// May be empty for old bugs, in such case bug.Title is the right title.
-	Title       string
-	Manager     string
-	BuildID     string
-	Time        time.Time
-	Reported    time.Time // set if this crash was ever reported
-	Maintainers []string  `datastore:",noindex"`
-	Log         int64     // reference to CrashLog text entity
-	Report      int64     // reference to CrashReport text entity
-	ReproOpts   []byte    `datastore:",noindex"`
-	ReproSyz    int64     // reference to ReproSyz text entity
-	ReproC      int64     // reference to ReproC text entity
-	MachineInfo int64     // Reference to MachineInfo text entity.
+	Title           string
+	Manager         string
+	BuildID         string
+	Time            time.Time
+	Reported        time.Time // set if this crash was ever reported
+	References      []CrashReference
+	Maintainers     []string            `datastore:",noindex"`
+	Log             int64               // reference to CrashLog text entity
+	Flags           int64               // properties of the Crash
+	Report          int64               // reference to CrashReport text entity
+	ReportElements  CrashReportElements // parsed parts of the crash report
+	ReproOpts       []byte              `datastore:",noindex"`
+	ReproSyz        int64               // reference to ReproSyz text entity
+	ReproC          int64               // reference to ReproC text entity
+	ReproIsRevoked  bool                // the repro no longer triggers the bug on HEAD
+	LastReproRetest time.Time           // the last time when the repro was re-checked
+	MachineInfo     int64               // Reference to MachineInfo text entity.
 	// Custom crash priority for reporting (greater values are higher priority).
 	// For example, a crash in mainline kernel has higher priority than a crash in a side branch.
 	// For historical reasons this is called ReportLen.
-	ReportLen int64
+	ReportLen       int64
+	Assets          []Asset   // crash-related assets
+	AssetsLastCheck time.Time // the last time we checked the assets for deprecation
+}
+
+type CrashReportElements struct {
+	GuiltyFiles []string // guilty files as determined during the crash report parsing
+}
+
+type CrashReferenceType string
+
+const (
+	CrashReferenceReporting = "reporting"
+	CrashReferenceJob       = "job"
+	// This one is needed for backward compatibility.
+	crashReferenceUnknown = "unknown"
+)
+
+type CrashReference struct {
+	Type CrashReferenceType
+	// For CrashReferenceReporting, it refers to Reporting.Name
+	// For CrashReferenceJob, it refers to extJobID(jobKey)
+	Key  string
+	Time time.Time
+}
+
+func (crash *Crash) AddReference(newRef CrashReference) {
+	crash.Reported = newRef.Time
+	for i, ref := range crash.References {
+		if ref.Type != newRef.Type || ref.Key != newRef.Key {
+			continue
+		}
+		crash.References[i].Time = newRef.Time
+		return
+	}
+	crash.References = append(crash.References, newRef)
+}
+
+func (crash *Crash) ClearReference(t CrashReferenceType, key string) {
+	newRefs := []CrashReference{}
+	crash.Reported = time.Time{}
+	for _, ref := range crash.References {
+		if ref.Type == t && ref.Key == key {
+			continue
+		}
+		if ref.Time.After(crash.Reported) {
+			crash.Reported = ref.Time
+		}
+		newRefs = append(newRefs, ref)
+	}
+	crash.References = newRefs
+}
+
+func (crash *Crash) Load(ps []db.Property) error {
+	if err := db.LoadStruct(crash, ps); err != nil {
+		return err
+	}
+	// Earlier we only relied on Reported, which does not let us reliably unreport a crash.
+	// We need some means of ref counting, so let's create a dummy reference to keep the
+	// crash from being purged.
+	if !crash.Reported.IsZero() && len(crash.References) == 0 {
+		crash.References = append(crash.References, CrashReference{
+			Type: crashReferenceUnknown,
+			Time: crash.Reported,
+		})
+	}
+	return nil
+}
+
+func (crash *Crash) Save() ([]db.Property, error) {
+	return db.SaveStruct(crash)
 }
 
 // ReportingState holds dynamic info associated with reporting.
@@ -165,6 +316,7 @@ type ReportingStateEntry struct {
 //   - test of a committed fix
 //   - reproduce crash
 //   - test that crash still happens on HEAD
+//
 // Job has Bug as parent entity.
 type Job struct {
 	Type      JobType
@@ -183,10 +335,12 @@ type Job struct {
 	KernelRepo   string
 	KernelBranch string
 	Patch        int64 // reference to Patch text entity
+	KernelConfig int64 // reference to the kernel config entity
 
-	Attempts int // number of times we tried to execute this job
-	Started  time.Time
-	Finished time.Time // if set, job is finished
+	Attempts    int       // number of times we tried to execute this job
+	IsRunning   bool      // the job might have been started, but never finished
+	LastStarted time.Time `datastore:"Started"`
+	Finished    time.Time // if set, job is finished
 
 	// Result of execution:
 	CrashTitle  string // if empty, we did not hit crash during testing
@@ -199,6 +353,10 @@ type Job struct {
 	Flags       JobFlags
 
 	Reported bool // have we reported result back to user?
+}
+
+func (job *Job) IsFinished() bool {
+	return !job.Finished.IsZero()
 }
 
 type JobType int
@@ -505,6 +663,32 @@ func bugKeyHash(ns, title string, seq int64) string {
 	return hash.String([]byte(fmt.Sprintf("%v-%v-%v-%v", config.Namespaces[ns].Key, ns, title, seq)))
 }
 
+func loadSimilarBugs(c context.Context, bug *Bug) ([]*Bug, error) {
+	domain := config.Namespaces[bug.Namespace].SimilarityDomain
+	dedup := make(map[string]bool)
+	dedup[bug.keyHash()] = true
+
+	ret := []*Bug{}
+	for _, title := range bug.AltTitles {
+		var similar []*Bug
+		_, err := db.NewQuery("Bug").
+			Filter("AltTitles=", title).
+			GetAll(c, &similar)
+		if err != nil {
+			return nil, err
+		}
+		for _, bug := range similar {
+			if config.Namespaces[bug.Namespace].SimilarityDomain != domain ||
+				dedup[bug.keyHash()] {
+				continue
+			}
+			dedup[bug.keyHash()] = true
+			ret = append(ret, bug)
+		}
+	}
+	return ret, nil
+}
+
 // Since these IDs appear in Reported-by tags in commit, we slightly limit their size.
 const reportingHashLen = 20
 
@@ -533,13 +717,74 @@ func (bug *Bug) getCommitInfo(i int) Commit {
 	return Commit{}
 }
 
-func markCrashReported(c context.Context, crashID int64, bugKey *db.Key, now time.Time) error {
+func (bug *Bug) increaseCrashStats(now time.Time) {
+	bug.NumCrashes++
+	date := timeDate(now)
+	if len(bug.DailyStats) == 0 || bug.DailyStats[len(bug.DailyStats)-1].Date < date {
+		bug.DailyStats = append(bug.DailyStats, BugDailyStats{date, 1})
+	} else {
+		// It is theoretically possible that this method might get into a situation, when
+		// the latest saved date is later than now. But we assume that this can only happen
+		// in a small window around the start of the day and it is better to attribute a
+		// crash to the next day than to get a mismatch between NumCrashes and the sum of
+		// CrashCount.
+		bug.DailyStats[len(bug.DailyStats)-1].CrashCount++
+	}
+
+	if len(bug.DailyStats) > maxBugHistoryDays {
+		bug.DailyStats = bug.DailyStats[len(bug.DailyStats)-maxBugHistoryDays:]
+	}
+}
+
+func (bug *Bug) dailyStatsTail(from time.Time) []BugDailyStats {
+	startDate := timeDate(from)
+	startPos := len(bug.DailyStats)
+	for ; startPos > 0; startPos-- {
+		if bug.DailyStats[startPos-1].Date < startDate {
+			break
+		}
+	}
+	return bug.DailyStats[startPos:]
+}
+
+func (bug *Bug) dashapiStatus() (dashapi.BugStatus, error) {
+	var status dashapi.BugStatus
+	switch bug.Status {
+	case BugStatusOpen:
+		status = dashapi.BugStatusOpen
+	case BugStatusFixed:
+		status = dashapi.BugStatusFixed
+	case BugStatusInvalid:
+		status = dashapi.BugStatusInvalid
+	case BugStatusDup:
+		status = dashapi.BugStatusDup
+	default:
+		return status, fmt.Errorf("unknown bugs status %v", bug.Status)
+	}
+	return status, nil
+}
+
+func addCrashReference(c context.Context, crashID int64, bugKey *db.Key, ref CrashReference) error {
 	crash := new(Crash)
 	crashKey := db.NewKey(c, "Crash", "", crashID, bugKey)
 	if err := db.Get(c, crashKey, crash); err != nil {
 		return fmt.Errorf("failed to get reported crash %v: %v", crashID, err)
 	}
-	crash.Reported = now
+	crash.AddReference(ref)
+	if _, err := db.Put(c, crashKey, crash); err != nil {
+		return fmt.Errorf("failed to put reported crash %v: %v", crashID, err)
+	}
+	return nil
+}
+
+func removeCrashReference(c context.Context, crashID int64, bugKey *db.Key,
+	t CrashReferenceType, key string) error {
+	crash := new(Crash)
+	crashKey := db.NewKey(c, "Crash", "", crashID, bugKey)
+	if err := db.Get(c, crashKey, crash); err != nil {
+		return fmt.Errorf("failed to get reported crash %v: %v", crashID, err)
+	}
+	crash.ClearReference(t, key)
 	if _, err := db.Put(c, crashKey, crash); err != nil {
 		return fmt.Errorf("failed to put reported crash %v: %v", crashID, err)
 	}
@@ -589,6 +834,19 @@ func stringInList(list []string, str string) bool {
 	return false
 }
 
+func stringListsIntersect(a, b []string) bool {
+	m := map[string]bool{}
+	for _, strA := range a {
+		m[strA] = true
+	}
+	for _, strB := range b {
+		if m[strB] {
+			return true
+		}
+	}
+	return false
+}
+
 func mergeString(list []string, str string) []string {
 	if !stringInList(list, str) {
 		list = append(list, str)
@@ -601,4 +859,9 @@ func mergeStringList(list, add []string) []string {
 		list = mergeString(list, str)
 	}
 	return list
+}
+
+// dateTime converts date in YYYYMMDD format back to Time.
+func dateTime(date int) time.Time {
+	return time.Date(date/10000, time.Month(date/100%100), date%100, 0, 0, 0, 0, time.UTC)
 }

@@ -5,19 +5,52 @@ package prog
 
 import (
 	"fmt"
+	"reflect"
+
+	"github.com/google/syzkaller/pkg/ssb"
 )
 
 type Prog struct {
 	Target   *Target
 	Calls    []*Call
 	Comments []string
+	// TODO: Razzer mechanism. if Threaded is true, p is already
+	// threaded so we don't thread it more. This is possibly a
+	// limittation of Razzer. Improve this if possible.
+	Threaded bool
+	Contender
+	Schedule
+	ssb.FlushVector
+}
+
+// These properties are parsed and serialized according to the tag and the type
+// of the corresponding fields.
+// IMPORTANT: keep the exact values of "key" tag for existing props unchanged,
+// otherwise the backwards compatibility would be broken.
+type CallProps struct {
+	FailNth int  `key:"fail_nth"`
+	Async   bool `key:"async"`
+	Rerun   int  `key:"rerun"`
 }
 
 type Call struct {
 	Meta    *Syscall
 	Args    []Arg
 	Ret     *ResultArg
+	Props   CallProps
+	Thread  uint64
+	Epoch   uint64
 	Comment string
+}
+
+func MakeCall(meta *Syscall, args []Arg) *Call {
+	return &Call{
+		Meta:   meta,
+		Args:   args,
+		Ret:    MakeReturnArg(meta.Ret),
+		Thread: ^uint64(0),
+		Epoch:  ^uint64(0),
+	}
 }
 
 type Arg interface {
@@ -203,12 +236,21 @@ func (arg *GroupArg) Size() uint64 {
 	}
 	switch typ := typ0.(type) {
 	case *StructType:
-		var size uint64
-		for _, fld := range arg.Inner {
-			size += fld.Size()
-		}
-		if typ.AlignAttr != 0 && size%typ.AlignAttr != 0 {
-			size += typ.AlignAttr - size%typ.AlignAttr
+		var size, offset uint64
+		for i, fld := range arg.Inner {
+			if i == typ.OverlayField {
+				offset = 0
+			}
+			offset += fld.Size()
+			// Add dynamic alignment at the end and before the overlay part.
+			if i+1 == len(arg.Inner) || i+1 == typ.OverlayField {
+				if typ.AlignAttr != 0 && offset%typ.AlignAttr != 0 {
+					offset += typ.AlignAttr - offset%typ.AlignAttr
+				}
+			}
+			if size < offset {
+				size = offset
+			}
 		}
 		return size
 	case *ArrayType:
@@ -317,6 +359,12 @@ func (p *Prog) insertBefore(c *Call, calls []*Call) {
 		newCalls = append(newCalls, p.Calls[idx+1:]...)
 	}
 	p.Calls = newCalls
+	inserted := len(calls)
+	for i, ci := range p.Contender.Calls {
+		if idx <= ci {
+			p.Contender.Calls[i] += inserted
+		}
+	}
 }
 
 // replaceArg replaces arg with arg1 in a program.
@@ -385,8 +433,13 @@ func removeArg(arg0 Arg) {
 	})
 }
 
+// The public alias for the removeArg method.
+func RemoveArg(arg Arg) {
+	removeArg(arg)
+}
+
 // removeCall removes call idx from p.
-func (p *Prog) removeCall(idx int) {
+func (p *Prog) RemoveCall(idx int) {
 	c := p.Calls[idx]
 	for _, arg := range c.Args {
 		removeArg(arg)
@@ -396,6 +449,11 @@ func (p *Prog) removeCall(idx int) {
 	}
 	copy(p.Calls[idx:], p.Calls[idx+1:])
 	p.Calls = p.Calls[:len(p.Calls)-1]
+	for i, ci := range p.Contender.Calls {
+		if idx <= ci {
+			p.Contender.Calls[i]--
+		}
+	}
 }
 
 func (p *Prog) sanitizeFix() {
@@ -411,4 +469,98 @@ func (p *Prog) sanitize(fix bool) error {
 		}
 	}
 	return nil
+}
+
+// TODO: This method might be more generic - it can be applied to any struct.
+func (props *CallProps) ForeachProp(f func(fieldName, key string, value reflect.Value)) {
+	valueObj := reflect.ValueOf(props).Elem()
+	typeObj := valueObj.Type()
+	for i := 0; i < valueObj.NumField(); i++ {
+		fieldValue := valueObj.Field(i)
+		fieldType := typeObj.Field(i)
+		f(fieldType.Name, fieldType.Tag.Get("key"), fieldValue)
+	}
+}
+
+type epochContext struct {
+	p      *Prog
+	epoch  uint64
+	thr    []bool
+	maxThr int
+}
+
+func (ctx *epochContext) newEpoch() {
+	ctx.epoch += 1
+	ctx.thr = make([]bool, ctx.maxThr)
+}
+
+func (ctx *epochContext) doneEpoch(c *Call) bool {
+	return ctx.thr[c.Thread]
+}
+
+func (ctx *epochContext) useThread(thr uint64) {
+	ctx.thr[thr] = true
+}
+
+func (p *Prog) fixupEpoch() {
+	// XXX: we don't really need this. The only case that epochs are
+	// incorrect is p is a sequential program. Otherwise, our
+	// implmenetaion is somewhere incorrect.
+	if p.Threaded {
+		return
+	}
+
+	if len(p.Calls) == 0 {
+		return
+	}
+
+	const undefined = ^uint64(0)
+	// TODO: fix maxThr
+	maxThr := 3
+	ctx := &epochContext{
+		p:      p,
+		epoch:  0,
+		thr:    make([]bool, maxThr),
+		maxThr: maxThr,
+	}
+
+	// The first call always runs in the thread0 at the epoch0
+	// NOTE: p is  a sequential prog
+	p.Calls[0].Thread, p.Calls[0].Epoch = 0, 0
+
+	for _, c := range p.Calls {
+		newepoch := false
+		if c.Epoch == undefined || c.Thread == undefined {
+			// NOTE: we do not allow only one of epoch and thread is
+			// undefined, and in that case, just consider both are
+			// undefined
+			newepoch = true
+			// the new epoch is about to start. thread 0 should be
+			// safe.
+			c.Thread = 0
+		}
+		if !newepoch && ctx.doneEpoch(c) {
+			newepoch = true
+		}
+		if newepoch {
+			ctx.newEpoch()
+		}
+		c.Epoch = ctx.epoch
+		ctx.useThread(c.Thread)
+	}
+}
+
+func (p *Prog) Frame() (uint64, uint64) {
+	thread, epoch := uint64(0), uint64(0)
+	for i := 0; i < len(p.Calls); i++ {
+		if thread < p.Calls[i].Thread {
+			thread = p.Calls[i].Thread
+		}
+		if epoch < p.Calls[i].Epoch {
+			epoch = p.Calls[i].Epoch
+		}
+	}
+	// the size of the frame is one larger than the max thread id and
+	// the max epoch.
+	return thread + 1, epoch + 1
 }

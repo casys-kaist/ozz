@@ -26,12 +26,14 @@ For other OS kernels check:
 [Fuchsia](docs/fuchsia/README.md),
 [NetBSD](docs/netbsd/README.md),
 [OpenBSD](docs/openbsd/setup.md),
+[Starnix](docs/starnix/README.md),
 [Windows](docs/windows/README.md),
 [gVisor](docs/gvisor/README.md).
 
 - [How to install syzkaller](docs/setup.md)
 - [How to use syzkaller](docs/usage.md)
 - [How syzkaller works](docs/internals.md)
+- [How to install syzbot](docs/setup_syzbot.md)
 - [How to contribute to syzkaller](docs/contributing.md)
 - [How to report Linux kernel bugs](docs/linux/reporting_kernel_bugs.md)
 - [Tech talks and articles](docs/talks.md)

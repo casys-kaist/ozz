@@ -7,7 +7,7 @@ import (
 	"regexp"
 )
 
-func ctorOpenbsd(cfg *config) (Reporter, []string, error) {
+func ctorOpenbsd(cfg *config) (reporterImpl, []string, error) {
 	symbolizeRes := []*regexp.Regexp{
 		// stack
 		regexp.MustCompile(` at ([A-Za-z0-9_]+)\+0x([0-9a-f]+)`),
@@ -19,8 +19,9 @@ func ctorOpenbsd(cfg *config) (Reporter, []string, error) {
 		return nil, nil, err
 	}
 	suppressions := []string{
-		"panic: fifo_badop called",
+		"panic: vop_generic_badop",
 		"witness: lock order reversal:\\n(.*\\n)*.*[0-9stnd]+ 0x[0-9a-f]+ inode(.*\\n)*.*lock order .* first seen at",
+		"panic:.*send disconnect: Broken pipe",
 	}
 	return ctx, suppressions, nil
 }
@@ -39,6 +40,10 @@ var openbsdOopses = append([]*oops{
 	{
 		[]byte("panic:"),
 		[]oopsFormat{
+			{
+				title: compile(`\nddb\{\d+\}> show panic(?Us:.*)[*]cpu\d+: ([^\n]+)(?Us:.*)\nddb\{\d+\}> trace`),
+				fmt:   "panic: %[1]v",
+			},
 			{
 				title: compile("panic: kernel diagnostic assertion (.+) failed: file \".*/([^\"]+)"),
 				fmt:   "assert %[1]v failed in %[2]v",
@@ -145,6 +150,10 @@ var openbsdOopses = append([]*oops{
 			{
 				title: compile("kernel: page fault trap, code=0.*\\nStopped at[ ]+([^\\+]+)"),
 				fmt:   "uvm_fault: %[1]v",
+			},
+			{
+				title: compile("kernel: protection fault trap, code=0.*\\nStopped at[ ]+([^\\+]+)"),
+				fmt:   "protection_fault: %[1]v",
 			},
 		},
 		[]*regexp.Regexp{

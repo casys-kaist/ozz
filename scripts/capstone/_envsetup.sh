@@ -1,0 +1,12 @@
+#!/bin/sh -e
+
+__export_envvar "CAPSTONE" "$TOOLCHAINS_DIR/capston"
+__append_path "$CAPSTONE_INSTALL/bin"
+
+__LIB_PATH="$CAPSTONE_INSTALL/lib"
+__INCLUDE_PATH="$CAPSTONE_INSTALL/include"
+
+export LD_LIBRARY_PATH="$__LIB_PATH"${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+export CGO_LDFLAGS="-L$__LIB_PATH $CGO_LDFLAGS"
+export CPATH="$__INCLUDE_PATH"${CPATH:+:$CPATH}
+export CAPSTONE_VERSION="4.0.2"

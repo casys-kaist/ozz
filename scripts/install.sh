@@ -18,6 +18,9 @@ __install_tool() {
 	if [ ! -f "$1/_install.sh" ]; then
 		return 0
 	fi
+	if [ -f "$1/SKIP" ] ; then
+		return 0
+	fi
 	unset -f  _install _build _download
 	unset _target
 	_SCRIPTDIR=$(realpath $1)
@@ -28,14 +31,14 @@ __install_tool() {
 		echo "Unknown target program and/or version"
 		return 1
 	fi
-	if __check_installed "$_target"; then
+	if __check_installed "$_target" "$FORCE"; then
 		# Just skip if it is already installed
 		echo "Already installed"
 		return 0
 	fi
-	_download || __exit "$TOOLNAME: download failed"
-	_build    || __exit "$TOOLNAME: build failed"
-	_install  || __exit "$TOOLNAME: install failed"
+	_download "$DOWNLOAD_OPTS" || __exit "$TOOLNAME: download failed"
+	_build    "$BUILD_OPTS"    || __exit "$TOOLNAME: build failed"
+	_install  "$INSTALL_OPTS"  || __exit "$TOOLNAME: install failed"
 	__mark_installed "$_target"
 	echo "Installing $TOOLNAME... done"
 }
@@ -49,8 +52,8 @@ __install_tools() {
 
 # Install a speicified tool/toolchains
 if [ -n "$1" ]; then
-	TOOLPATH="$SCRIPS_DIR/$1"
-	__install_tool $1
+	TOOLPATH="$SCRIPTS_DIR/$1"
+	__install_tool $TOOLPATH
 	exit $?
 fi
 

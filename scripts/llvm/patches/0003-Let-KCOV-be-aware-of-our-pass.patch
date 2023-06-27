@@ -1,0 +1,125 @@
+From ca07f81e6d2a6558d64ceaeb6da2f9803bf192a9 Mon Sep 17 00:00:00 2001
+From: "Dae R. Jeong" <threeearcat@gmail.com>
+Date: Sat, 6 Nov 2021 09:03:57 +0000
+Subject: [PATCH 3/3] Let KCOV be aware of our pass
+
+---
+ .../Instrumentation/SanitizerCoverage.cpp     | 51 +++++++++++++++++--
+ 1 file changed, 47 insertions(+), 4 deletions(-)
+
+diff --git a/llvm/lib/Transforms/Instrumentation/SanitizerCoverage.cpp b/llvm/lib/Transforms/Instrumentation/SanitizerCoverage.cpp
+index 2d4b07939463..4471b04038f3 100644
+--- a/llvm/lib/Transforms/Instrumentation/SanitizerCoverage.cpp
++++ b/llvm/lib/Transforms/Instrumentation/SanitizerCoverage.cpp
+@@ -259,6 +259,8 @@ private:
+ 
+   const SpecialCaseList *Allowlist;
+   const SpecialCaseList *Blocklist;
++
++  const Constant *SSBDoEmulate;
+ };
+ 
+ class ModuleSanitizerCoverageLegacyPass : public ModulePass {
+@@ -474,6 +476,8 @@ bool ModuleSanitizerCoverage::instrumentModule(
+   SanCovTracePCGuard =
+       M.getOrInsertFunction(SanCovTracePCGuardName, VoidTy, Int32PtrTy);
+ 
++  SSBDoEmulate = M.getOrInsertGlobal("__ssb_do_emulate", IRB.getInt8Ty());
++
+   for (auto &F : M)
+     instrumentFunction(F, DTCallback, PDTCallback);
+ 
+@@ -528,9 +532,34 @@ static bool isFullPostDominator(const BasicBlock *BB,
+   });
+ }
+ 
++static bool branchDependsOnConstant(const BranchInst *BI, const Constant *c) {
++  if (BI->isUnconditional())
++    return false;
++  Value *cond = BI->getCondition();
++  if (auto *CMP = dyn_cast<ICmpInst>(cond)) {
++    for (Instruction::op_iterator OI = CMP->op_begin(); OI != CMP->op_end(); ++OI) {
++      auto *val = OI->get();
++      if (LoadInst *LI = dyn_cast<LoadInst>(val)) {
++        if (LI->getPointerOperand() == c)
++          return true;
++      }
++    }
++  }
++  return false;
++}
++
++static bool terminatorDependsOnConstant(const BasicBlock *BB, const Constant *c) {
++  if (auto *inst = BB->getTerminator()) {
++    if (auto *BI = dyn_cast<BranchInst>(inst))
++      return branchDependsOnConstant(BI, c);
++  }
++  return false;
++}
++
+ static bool shouldInstrumentBlock(const Function &F, const BasicBlock *BB,
+                                   const DominatorTree *DT,
+                                   const PostDominatorTree *PDT,
++                                  const Constant *SSBDoEmulate,
+                                   const SanitizerCoverageOptions &Options) {
+   // Don't insert coverage for blocks containing nothing but unreachable: we
+   // will never call __sanitizer_cov() for them, so counting them in
+@@ -552,6 +581,11 @@ static bool shouldInstrumentBlock(const Function &F, const BasicBlock *BB,
+       &F.getEntryBlock() != BB)
+     return false;
+ 
++  if (auto *pred = BB->getSinglePredecessor()) {
++    if (terminatorDependsOnConstant(pred, SSBDoEmulate))
++      return false;
++  }
++
+   // Do not instrument full dominators, or full post-dominators with multiple
+   // predecessors.
+   return !isFullDominator(BB, DT)
+@@ -578,14 +612,23 @@ static bool IsBackEdge(BasicBlock *From, BasicBlock *To,
+ //
+ // Note that Cmp pruning is controlled by the same flag as the
+ // BB pruning.
+-static bool IsInterestingCmp(ICmpInst *CMP, const DominatorTree *DT,
++static bool IsInterestingCmp(ICmpInst *CMP, const DominatorTree *DT, const Constant *SSBDoEmulate, 
+                              const SanitizerCoverageOptions &Options) {
+-  if (!Options.NoPrune)
++  if (!Options.NoPrune) {
+     if (CMP->hasOneUse())
+       if (auto BR = dyn_cast<BranchInst>(CMP->user_back()))
+         for (BasicBlock *B : BR->successors())
+           if (IsBackEdge(BR->getParent(), B, DT))
+             return false;
++    for (Instruction::op_iterator OI = CMP->op_begin(); OI != CMP->op_end(); ++OI) {
++      auto *val = OI->get();
++      if (LoadInst *LI = dyn_cast<LoadInst>(val)) {
++        if (LI->getPointerOperand() == SSBDoEmulate) {
++          return false;
++        }
++      }
++    }
++  }
+   return true;
+ }
+ 
+@@ -631,7 +674,7 @@ void ModuleSanitizerCoverage::instrumentFunction(
+   bool IsLeafFunc = true;
+ 
+   for (auto &BB : F) {
+-    if (shouldInstrumentBlock(F, &BB, DT, PDT, Options))
++    if (shouldInstrumentBlock(F, &BB, DT, PDT, SSBDoEmulate, Options))
+       BlocksToInstrument.push_back(&BB);
+     for (auto &Inst : BB) {
+       if (Options.IndirectCalls) {
+@@ -641,7 +684,7 @@ void ModuleSanitizerCoverage::instrumentFunction(
+       }
+       if (Options.TraceCmp) {
+         if (ICmpInst *CMP = dyn_cast<ICmpInst>(&Inst))
+-          if (IsInterestingCmp(CMP, DT, Options))
++          if (IsInterestingCmp(CMP, DT, SSBDoEmulate, Options))
+             CmpTraceTargets.push_back(&Inst);
+         if (isa<SwitchInst>(&Inst))
+           SwitchTraceTargets.push_back(&Inst);
+-- 
+2.25.1
+

@@ -36,7 +36,7 @@ func TestSerializeData(t *testing.T) {
 			if !p.Scan() {
 				t.Fatalf("parser does not scan")
 			}
-			data1, err := p.deserializeData()
+			data1, _, err := p.deserializeData()
 			if err != nil {
 				t.Fatalf("failed to deserialize %q -> %s: %v", data, buf.Bytes(), err)
 			}
@@ -278,11 +278,12 @@ func TestDeserialize(t *testing.T) {
 			StrictErr: `out arg const[1, const] has non-default value: 2`,
 		},
 		{
-			In: `test$str1(&(0x7f0000000000)='foo\x00')`,
+			In:  `test$str1(&(0x7f0000000000)='foo\x00')`,
+			Out: `test$str1(&(0x7f0000000000))`,
 		},
 		{
 			In:        `test$str1(&(0x7f0000000000)='bar\x00')`,
-			Out:       `test$str1(&(0x7f0000000000)='foo\x00')`,
+			Out:       `test$str1(&(0x7f0000000000))`,
 			StrictErr: `bad string value "bar\x00", expect ["foo\x00"]`,
 		},
 		{
@@ -311,6 +312,29 @@ func TestDeserialize(t *testing.T) {
 			Out:       `test$opt2(0x0)`,
 			StrictErr: `non-nil argument for nil type`,
 		},
+		{
+			In:        `test$opt2(0x0) (non_existing_prop: 123)`,
+			Out:       `test$opt2(0x0)`,
+			StrictErr: `unknown call property: non_existing_prop`,
+		},
+		{
+			In:        `test$opt2(0x0) (fail_nth: zzz)`,
+			Out:       `test$opt2(0x0)`,
+			StrictErr: `invalid int value: zzz`,
+		},
+		{
+			In:        `test$opt2(0x0) (non_existing_prop: 123, fail_nth: 1)`,
+			Out:       `test$opt2(0x0) (fail_nth: 1)`,
+			StrictErr: `unknown call property: non_existing_prop`,
+		},
+		{
+			In:  `test$opt2(0x0) (fail_nth: 0)`,
+			Out: `test$opt2(0x0)`,
+		},
+		{
+			In:  `test$str2(&(0x7f0000000000)="$eJwqrqzKTszJSS0CBAAA//8TyQPi`,
+			Err: `want ", got EOF`,
+		},
 	})
 }
 
@@ -323,6 +347,13 @@ func TestSerializeDeserialize(t *testing.T) {
 		{
 			In:  `serialize1(&(0x7f0000000000)="0000000000000000", 0x8)`,
 			Out: `serialize1(&(0x7f0000000000)=""/8, 0x8)`,
+		},
+		{
+			In:  `serialize2(&(0x7f0000000000)="$c3l6a2FsbGVy")`,
+			Out: `serialize2(&(0x7f0000000000)='syzkaller')`,
+		},
+		{
+			In: `serialize3(&(0x7f0000000000)="$eJwqrqzKTszJSS0CBAAA//8TyQPi")`,
 		},
 	})
 }
@@ -381,6 +412,60 @@ func testSerializeDeserialize(t *testing.T, p0 *Prog, data0, data1 []byte) (bool
 		return false, n0, n1
 	}
 	return true, 0, 0
+}
+
+func TestSerializeCallProps(t *testing.T) {
+	target := initTargetTest(t, "test", "64")
+	type SerializeCallPropsTest struct {
+		prog  string
+		props []CallProps
+	}
+
+	tests := []SerializeCallPropsTest{
+		{
+			"serialize0(0x0)\n",
+			[]CallProps{{}},
+		},
+		{
+			"serialize0(0x0) ()\n",
+			[]CallProps{{}},
+		},
+		{
+			"serialize0(0x0) (fail_nth: 5)\n",
+			[]CallProps{{5, false, 0}},
+		},
+		{
+			"serialize0(0x0) (fail_nth)\n",
+			nil,
+		},
+		{
+			"serialize0(0x0) (fail_nth: \"5\")\n",
+			nil,
+		},
+		{
+			"serialize0(0x0) (async)\n",
+			[]CallProps{{0, true, 0}},
+		},
+		{
+			"serialize0(0x0) (async, rerun: 10)\n",
+			[]CallProps{{0, true, 10}},
+		},
+	}
+
+	for _, test := range tests {
+		p, err := target.Deserialize([]byte(test.prog), Strict)
+		if test.props != nil && err != nil {
+			t.Fatal(err)
+		} else if test.props == nil && err == nil {
+			t.Errorf("expected an error, but got none\n%s", test.prog)
+		}
+
+		for i, props := range test.props {
+			if !reflect.DeepEqual(props, p.Calls[i].Props) {
+				t.Errorf("%v-th call props differ: %v != %v", i, props, p.Calls[i].Props)
+			}
+		}
+	}
 }
 
 func TestDeserializeComments(t *testing.T) {

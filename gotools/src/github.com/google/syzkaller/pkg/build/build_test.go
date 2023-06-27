@@ -19,7 +19,7 @@ func TestCompilerIdentity(t *testing.T) {
 			if _, err := exec.LookPath(compiler); err != nil {
 				t.Skipf("compiler '%v' is not found: %v", compiler, err)
 			}
-			id, err := CompilerIdentity(compiler)
+			id, err := compilerIdentity(compiler)
 			if err != nil {
 				t.Fatalf("failed: %v", err)
 			}
@@ -507,5 +507,43 @@ make: *** [oldconfig] Error 2
 		"init/Kconfig:39: syntax error\ninit/Kconfig:38: invalid statement",
 		"",
 		"init/Kconfig",
+	},
+	{`
+  LD      vmlinux
+  BTFIDS  vmlinux
+FAILED unresolved symbol dctcp_update_alpha
+make: *** [Makefile:1292: vmlinux] Error 255
+`,
+		"FAILED unresolved symbol dctcp_update_alpha",
+		"",
+		"",
+	},
+	{`
+scripts/kconfig/conf  --syncconfig Kconfig
+
+*** Error during update of the configuration.
+
+make[2]: *** [scripts/kconfig/Makefile:41: syncconfig] Error 1
+make[1]: *** [Makefile:545: syncconfig] Error 2
+make: *** No rule to make target 'include/config/auto.conf', needed by 'include/config/kernel.release'.  Stop.
+make: *** Waiting for unfinished jobs....
+`,
+		"make: *** No rule to make target 'include/config/auto.conf', needed by 'include/config/kernel.release'.  Stop.",
+		"",
+		"",
+	},
+	{`
+sh: 1: column: not found
+FAILED: host_x64/obj/tools/docsgen/clidoc_out.tar.gz
+../../build/rbe/output-scanner.sh --label //tools/docsgen:invoke_clidoc\(//build/toolchain:host_x64\) host_x64/obj/tools/docsgen/clidoc_out.tar.gz -- ../../build/gn_run_binary.sh ../../prebuilt/third_party/clang/linux-x64/bin host_x64/clidoc -o host_x64/gen/tools/docsgen/sdk-docs --quiet --tarball-dir host_x64/obj/tools/docsgen/clidoc_out.tar.gz --depfile host_x64/obj/tools/docsgen/invoke_clidoc.d
+Error: Unable to write generate doc for "/syzkaller/managers/main/kernel/out/x64/host_x64/fpublish" to "host_x64/gen/tools/docsgen/sdk-docs"
+Caused by:
+    Error running help: Unexpected non-zero error code with tool "/syzkaller/managers/main/kernel/out/x64/host_x64/fpublish"
+                and subcommands [].
+ninja: build stopped: subcommand failed.
+`,
+		`Error: Unable to write generate doc for "/syzkaller/managers/main/kernel/out/x64/host_x64/fpublish" to "host_x64/gen/tools/docsgen/sdk-docs"`,
+		"",
+		"",
 	},
 }

@@ -6,9 +6,9 @@ package prog
 import (
 	"fmt"
 	"math/rand"
-	"os"
 	"testing"
-	"time"
+
+	"github.com/google/syzkaller/pkg/testutil"
 )
 
 // Export guts for testing.
@@ -23,29 +23,9 @@ var (
 	initTargetTest    = InitTargetTest
 )
 
-func randSource(t *testing.T) rand.Source {
-	seed := time.Now().UnixNano()
-	if os.Getenv("CI") != "" {
-		seed = 0 // required for deterministic coverage reports
-	}
-	t.Logf("seed=%v", seed)
-	return rand.NewSource(seed)
-}
-
-func iterCount() int {
-	iters := 1000
-	if testing.Short() {
-		iters /= 10
-	}
-	if raceEnabled {
-		iters /= 10
-	}
-	return iters
-}
-
 func initRandomTargetTest(t *testing.T, os, arch string) (*Target, rand.Source, int) {
 	target := initTargetTest(t, os, arch)
-	return target, randSource(t), iterCount()
+	return target, testutil.RandSource(t), testutil.IterCount()
 }
 
 func initTest(t *testing.T) (*Target, rand.Source, int) {
@@ -67,12 +47,12 @@ func testEachTarget(t *testing.T, fn func(t *testing.T, target *Target)) {
 func testEachTargetRandom(t *testing.T, fn func(t *testing.T, target *Target, rs rand.Source, iters int)) {
 	t.Parallel()
 	targets := AllTargets()
-	iters := iterCount()
+	iters := testutil.IterCount()
 	iters /= len(targets)
 	if iters < 3 {
 		iters = 3
 	}
-	rs0 := randSource(t)
+	rs0 := testutil.RandSource(t)
 	for _, target := range targets {
 		target := target
 		rs := rand.NewSource(rs0.Int63())
@@ -88,7 +68,7 @@ func skipTargetRace(t *testing.T, target *Target) {
 	// Race execution is slow and we are getting timeouts on CI.
 	// For tests that run for all targets, leave only 2 targets,
 	// this should be enough to detect some races.
-	if raceEnabled && (target.OS != "test" || target.Arch != "64" && target.Arch != "32") {
+	if testutil.RaceEnabled && (target.OS != "test" || target.Arch != "64" && target.Arch != "32") {
 		t.Skip("skipping all but test/64 targets in race mode")
 	}
 }

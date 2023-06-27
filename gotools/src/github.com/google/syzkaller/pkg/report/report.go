@@ -17,7 +17,7 @@ import (
 	"github.com/google/syzkaller/sys/targets"
 )
 
-type Reporter interface {
+type reporterImpl interface {
 	// ContainsCrash searches kernel console output for oops messages.
 	ContainsCrash(output []byte) bool
 
@@ -27,6 +27,13 @@ type Reporter interface {
 
 	// Symbolize symbolizes rep.Report and fills in Maintainers.
 	Symbolize(rep *Report) error
+}
+
+type Reporter struct {
+	typ          string
+	impl         reporterImpl
+	suppressions []*regexp.Regexp
+	interests    []*regexp.Regexp
 }
 
 type Report struct {
@@ -56,10 +63,12 @@ type Report struct {
 	CorruptedReason string
 	// Recipients is a list of RecipientInfo with Email, Display Name, and type.
 	Recipients vcs.Recipients
-	// guiltyFile is the source file that we think is to blame for the crash  (filled in by Symbolize).
-	guiltyFile string
+	// GuiltyFile is the source file that we think is to blame for the crash  (filled in by Symbolize).
+	GuiltyFile string
 	// reportPrefixLen is length of additional prefix lines that we added before actual crash report.
 	reportPrefixLen int
+	// symbolized is set if the report is symbolized.
+	symbolized bool
 }
 
 type Type int
@@ -90,9 +99,9 @@ func (t Type) String() string {
 }
 
 // NewReporter creates reporter for the specified OS/Type.
-func NewReporter(cfg *mgrconfig.Config) (Reporter, error) {
+func NewReporter(cfg *mgrconfig.Config) (*Reporter, error) {
 	typ := cfg.TargetOS
-	if cfg.Type == "gvisor" {
+	if cfg.Type == "gvisor" || cfg.Type == "starnix" {
 		typ = cfg.Type
 	}
 	ctor := ctors[typ]
@@ -103,8 +112,13 @@ func NewReporter(cfg *mgrconfig.Config) (Reporter, error) {
 	if err != nil {
 		return nil, err
 	}
+	interests, err := compileRegexps(cfg.Interests)
+	if err != nil {
+		return nil, err
+	}
 	config := &config{
 		target:         cfg.SysTarget,
+		vmType:         cfg.Type,
 		kernelSrc:      cfg.KernelSrc,
 		kernelBuildSrc: cfg.KernelBuildSrc,
 		kernelObj:      cfg.KernelObj,
@@ -118,7 +132,13 @@ func NewReporter(cfg *mgrconfig.Config) (Reporter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &reporterWrapper{rep, supps, typ}, nil
+	reporter := &Reporter{
+		typ:          typ,
+		impl:         rep,
+		suppressions: supps,
+		interests:    interests,
+	}
+	return reporter, nil
 }
 
 const (
@@ -131,8 +151,10 @@ const (
 var ctors = map[string]fn{
 	targets.Akaros:  ctorAkaros,
 	targets.Linux:   ctorLinux,
+	"starnix":       ctorFuchsia,
 	"gvisor":        ctorGvisor,
 	targets.FreeBSD: ctorFreebsd,
+	targets.Darwin:  ctorDarwin,
 	targets.NetBSD:  ctorNetbsd,
 	targets.OpenBSD: ctorOpenbsd,
 	targets.Fuchsia: ctorFuchsia,
@@ -141,13 +163,14 @@ var ctors = map[string]fn{
 
 type config struct {
 	target         *targets.Target
+	vmType         string
 	kernelSrc      string
 	kernelBuildSrc string
 	kernelObj      string
 	ignores        []*regexp.Regexp
 }
 
-type fn func(cfg *config) (Reporter, []string, error)
+type fn func(cfg *config) (reporterImpl, []string, error)
 
 func compileRegexps(list []string) ([]*regexp.Regexp, error) {
 	compiled := make([]*regexp.Regexp, len(list))
@@ -161,22 +184,23 @@ func compileRegexps(list []string) ([]*regexp.Regexp, error) {
 	return compiled, nil
 }
 
-type reporterWrapper struct {
-	Reporter
-	suppressions []*regexp.Regexp
-	typ          string
+func (reporter *Reporter) Parse(output []byte) *Report {
+	return reporter.ParseFrom(output, 0)
 }
 
-func (wrap *reporterWrapper) Parse(output []byte) *Report {
-	rep := wrap.Reporter.Parse(output)
+func (reporter *Reporter) ParseFrom(output []byte, minReportPos int) *Report {
+	rep := reporter.impl.Parse(output[minReportPos:])
 	if rep == nil {
 		return nil
 	}
+	rep.Output = output
+	rep.StartPos += minReportPos
+	rep.EndPos += minReportPos
 	rep.Title = sanitizeTitle(replaceTable(dynamicTitleReplacement, rep.Title))
 	for i, title := range rep.AltTitles {
 		rep.AltTitles[i] = sanitizeTitle(replaceTable(dynamicTitleReplacement, title))
 	}
-	rep.Suppressed = matchesAny(rep.Output, wrap.suppressions)
+	rep.Suppressed = matchesAny(rep.Output, reporter.suppressions)
 	if bytes.Contains(rep.Output, gceConsoleHangup) {
 		rep.Corrupted = true
 	}
@@ -185,7 +209,7 @@ func (wrap *reporterWrapper) Parse(output []byte) *Report {
 		rep.Frame = match[1]
 	}
 	rep.SkipPos = len(output)
-	if pos := bytes.IndexByte(output[rep.StartPos:], '\n'); pos != -1 {
+	if pos := bytes.IndexByte(rep.Output[rep.StartPos:], '\n'); pos != -1 {
 		rep.SkipPos = rep.StartPos + pos
 	}
 	if rep.EndPos < rep.SkipPos {
@@ -194,6 +218,59 @@ func (wrap *reporterWrapper) Parse(output []byte) *Report {
 		rep.EndPos = rep.SkipPos
 	}
 	return rep
+}
+
+func (reporter *Reporter) ContainsCrash(output []byte) bool {
+	return reporter.impl.ContainsCrash(output)
+}
+
+func (reporter *Reporter) Symbolize(rep *Report) error {
+	if rep.symbolized {
+		panic("Symbolize is called twice")
+	}
+	rep.symbolized = true
+	if err := reporter.impl.Symbolize(rep); err != nil {
+		return err
+	}
+	if !reporter.isInteresting(rep) {
+		rep.Suppressed = true
+	}
+	return nil
+}
+
+func (reporter *Reporter) isInteresting(rep *Report) bool {
+	if len(reporter.interests) == 0 {
+		return true
+	}
+	if matchesAnyString(rep.Title, reporter.interests) ||
+		matchesAnyString(rep.GuiltyFile, reporter.interests) {
+		return true
+	}
+	for _, title := range rep.AltTitles {
+		if matchesAnyString(title, reporter.interests) {
+			return true
+		}
+	}
+	for _, recipient := range rep.Recipients {
+		if matchesAnyString(recipient.Address.Address, reporter.interests) {
+			return true
+		}
+	}
+	return false
+}
+
+// There are cases when we need to extract a guilty file, but have no ability to do it the
+// proper way -- parse and symbolize the raw console output log. One of such cases is
+// the syz-fillreports tool, which only has access to the already symbolized logs.
+// ReportToGuiltyFile does its best to extract the data.
+func (reporter *Reporter) ReportToGuiltyFile(title string, report []byte) string {
+	ii, ok := reporter.impl.(interface {
+		extractGuiltyFileRaw(title string, report []byte) string
+	})
+	if !ok {
+		return ""
+	}
+	return ii.extractGuiltyFileRaw(title, report)
 }
 
 func extractReportType(rep *Report) Type {
@@ -218,20 +295,21 @@ func extractReportType(rep *Report) Type {
 	return Unknown
 }
 
-func IsSuppressed(reporter Reporter, output []byte) bool {
-	return matchesAny(output, reporter.(*reporterWrapper).suppressions) ||
+func IsSuppressed(reporter *Reporter, output []byte) bool {
+	return matchesAny(output, reporter.suppressions) ||
 		bytes.Contains(output, gceConsoleHangup)
 }
 
 // ParseAll returns all successive reports in output.
-func ParseAll(reporter Reporter, output []byte) (reports []*Report) {
+func ParseAll(reporter *Reporter, output []byte) (reports []*Report) {
+	skipPos := 0
 	for {
-		rep := reporter.Parse(output)
+		rep := reporter.ParseFrom(output, skipPos)
 		if rep == nil {
 			return
 		}
 		reports = append(reports, rep)
-		output = output[rep.SkipPos:]
+		skipPos = rep.SkipPos
 	}
 }
 
@@ -250,7 +328,11 @@ type replacement struct {
 
 func replaceTable(replacements []replacement, str string) string {
 	for _, repl := range replacements {
-		str = repl.match.ReplaceAllString(str, repl.replacement)
+		for stop := false; !stop; {
+			newStr := repl.match.ReplaceAllString(str, repl.replacement)
+			stop = newStr == str
+			str = newStr
+		}
 	}
 	return str
 }
@@ -269,13 +351,8 @@ var dynamicTitleReplacement = []replacement{
 	{
 		// Replace that everything looks like an address with "ADDR",
 		// addresses in descriptions can't be good regardless of the oops regexps.
-		regexp.MustCompile(`([^a-zA-Z0])(?:0x)?[0-9a-f]{6,}`),
+		regexp.MustCompile(`([^a-zA-Z0-9])(?:0x)?[0-9a-f]{6,}`),
 		"${1}ADDR",
-	},
-	{
-		// Replace that everything looks like a decimal number with "NUM".
-		regexp.MustCompile(`([^a-zA-Z0-9])[0-9]{5,}`),
-		"${1}NUM",
 	},
 	{
 		// Replace IP addresses.
@@ -284,8 +361,8 @@ var dynamicTitleReplacement = []replacement{
 	},
 	{
 		// Replace that everything looks like a file line number with "LINE".
-		regexp.MustCompile(`(:[0-9]+)+`),
-		":LINE",
+		regexp.MustCompile(`(\.\w+)(:[0-9]+)+`),
+		"${1}:LINE",
 	},
 	{
 		// Replace all raw references to runctions (e.g. "ip6_fragment+0x1052/0x2d80")
@@ -297,6 +374,20 @@ var dynamicTitleReplacement = []replacement{
 		// CPU numbers are not interesting.
 		regexp.MustCompile(`CPU#[0-9]+`),
 		"CPU",
+	},
+	{
+		// Replace with "NUM" everything that looks like a decimal number and has not
+		// been replaced yet. It might require multiple replacement executions as the
+		// matching substrings may overlap (e.g. "0,1,2").
+		regexp.MustCompile(`(\W)(\d+)(\W|$)`),
+		"${1}NUM${3}",
+	},
+	{
+		// Some decimal numbers can be a part of a function name,
+		// we need to preserve them (e.g. cfg80211* or nl802154*).
+		// However, if the number is too long, it's probably something else.
+		regexp.MustCompile(`(\d+){7,}`),
+		"NUM",
 	},
 }
 
@@ -340,7 +431,9 @@ type oopsFormat struct {
 	alt []string
 	// If not nil, a function name is extracted from the report and passed to fmt.
 	// If not nil but frame extraction fails, the report is considered corrupted.
-	stack        *stackFmt
+	stack *stackFmt
+	// Disable stack report corruption checking as it would expect one of stackStartRes to be
+	// present, but this format does not comply with that.
 	noStackTrace bool
 	corrupted    bool
 }
@@ -363,7 +456,7 @@ type stackFmt struct {
 	extractor frameExtractor
 }
 
-type frameExtractor func(frames []string) (frame, corrupted string)
+type frameExtractor func(frames []string) string
 
 var parseStackTrace *regexp.Regexp
 
@@ -437,15 +530,13 @@ func extractDescription(output []byte, oops *oops, params *stackParams) (
 		}
 		corrupted = ""
 		if f.stack != nil {
-			frame := ""
-			frame, corrupted = extractStackFrame(params, f.stack, output[match[0]:])
-			if frame == "" {
-				frame = "corrupted"
-				if corrupted == "" {
-					corrupted = "extracted no stack frame"
-				}
+			frames, ok := extractStackFrame(params, f.stack, output[match[0]:])
+			if !ok {
+				corrupted = corruptedNoFrames
 			}
-			args = append(args, frame)
+			for _, frame := range frames {
+				args = append(args, frame)
+			}
 		}
 		desc = fmt.Sprintf(f.fmt, args...)
 		for _, alt := range f.alt {
@@ -493,40 +584,68 @@ type stackParams struct {
 	stripFramePrefixes []string
 }
 
-func extractStackFrame(params *stackParams, stack *stackFmt, output []byte) (string, string) {
+func extractStackFrame(params *stackParams, stack *stackFmt, output []byte) ([]string, bool) {
 	skip := append([]string{}, params.skipPatterns...)
 	skip = append(skip, stack.skip...)
 	var skipRe *regexp.Regexp
 	if len(skip) != 0 {
 		skipRe = regexp.MustCompile(strings.Join(skip, "|"))
 	}
-	extractor := stack.extractor
-	if extractor == nil {
-		extractor = func(frames []string) (string, string) {
-			return frames[0], ""
+	extractor := func(frames []string) string {
+		if len(frames) == 0 {
+			return ""
 		}
+		if stack.extractor == nil {
+			return frames[0]
+		}
+		return stack.extractor(frames)
 	}
-	frame, corrupted := extractStackFrameImpl(params, output, skipRe, stack.parts, extractor)
-	if frame != "" || len(stack.parts2) == 0 {
-		return frame, corrupted
+	frames, ok := extractStackFrameImpl(params, output, skipRe, stack.parts, extractor)
+	if ok || len(stack.parts2) == 0 {
+		return frames, ok
 	}
 	return extractStackFrameImpl(params, output, skipRe, stack.parts2, extractor)
 }
 
 func extractStackFrameImpl(params *stackParams, output []byte, skipRe *regexp.Regexp,
-	parts []*regexp.Regexp, extractor frameExtractor) (string, string) {
+	parts []*regexp.Regexp, extractor frameExtractor) ([]string, bool) {
 	s := bufio.NewScanner(bytes.NewReader(output))
-	var frames []string
+	var frames, results []string
+	ok := true
+	numStackTraces := 0
 nextPart:
-	for _, part := range parts {
+	for partIdx := 0; ; partIdx++ {
+		if partIdx == len(parts) || parts[partIdx] == parseStackTrace && numStackTraces > 0 {
+			keyFrame := extractor(frames)
+			if keyFrame == "" {
+				keyFrame, ok = "corrupted", false
+			}
+			results = append(results, keyFrame)
+			frames = nil
+		}
+		if partIdx == len(parts) {
+			break
+		}
+		part := parts[partIdx]
 		if part == parseStackTrace {
+			numStackTraces++
 			for s.Scan() {
 				ln := s.Bytes()
 				if matchesAny(ln, params.corruptedLines) {
-					break nextPart
+					ok = false
+					continue nextPart
 				}
 				if matchesAny(ln, params.stackStartRes) {
 					continue nextPart
+				}
+
+				if partIdx != len(parts)-1 {
+					match := parts[partIdx+1].FindSubmatch(ln)
+					if match != nil {
+						frames = appendStackFrame(frames, match, params, skipRe)
+						partIdx++
+						continue nextPart
+					}
 				}
 				var match [][]byte
 				for _, re := range params.frameRes {
@@ -541,7 +660,8 @@ nextPart:
 			for s.Scan() {
 				ln := s.Bytes()
 				if matchesAny(ln, params.corruptedLines) {
-					break nextPart
+					ok = false
+					continue nextPart
 				}
 				match := part.FindSubmatch(ln)
 				if match == nil {
@@ -552,10 +672,7 @@ nextPart:
 			}
 		}
 	}
-	if len(frames) == 0 {
-		return "", corruptedNoFrames
-	}
-	return extractor(frames)
+	return results, ok
 }
 
 func appendStackFrame(frames []string, match [][]byte, params *stackParams, skipRe *regexp.Regexp) []string {
@@ -569,7 +686,6 @@ func appendStackFrame(frames []string, match [][]byte, params *stackParams, skip
 				frameName = strings.TrimPrefix(frameName, prefix)
 			}
 			frames = append(frames, frameName)
-			break
 		}
 	}
 	return frames
@@ -622,6 +738,15 @@ func matchesAny(line []byte, res []*regexp.Regexp) bool {
 	return false
 }
 
+func matchesAnyString(str string, res []*regexp.Regexp) bool {
+	for _, re := range res {
+		if re.MatchString(str) {
+			return true
+		}
+	}
+	return false
+}
+
 // replace replaces [start:end] in where with what, inplace.
 func replace(where []byte, start, end int, what []byte) []byte {
 	if len(what) >= end-start {
@@ -639,6 +764,8 @@ func replace(where []byte, start, end int, what []byte) []byte {
 var (
 	filenameRe    = regexp.MustCompile(`([a-zA-Z0-9_\-\./]*[a-zA-Z0-9_\-]+\.(c|h)):[0-9]+`)
 	reportFrameRe = regexp.MustCompile(`.* in ([a-zA-Z0-9_]+)`)
+	// Matches a slash followed by at least one directory nesting before .c/.h file.
+	deeperPathRe = regexp.MustCompile(`^/[a-zA-Z0-9_\-\./]+/[a-zA-Z0-9_\-]+\.(c|h)$`)
 )
 
 // These are produced by syzkaller itself.
@@ -651,6 +778,19 @@ var commonOopses = []*oops{
 			{
 				title:        compile("SYZFAIL:(.*)"),
 				fmt:          "SYZFAIL:%[1]v",
+				noStackTrace: true,
+			},
+		},
+		[]*regexp.Regexp{},
+	},
+	{
+		// Errors produced by log.Fatal functions.
+		[]byte("SYZFATAL:"),
+		[]oopsFormat{
+			{
+				title:        compile("SYZFATAL:(.*)()"),
+				alt:          []string{"SYZFATAL%[2]s"},
+				fmt:          "SYZFATAL:%[1]v",
 				noStackTrace: true,
 			},
 		},

@@ -1,0 +1,21 @@
+{
+    "name": "kssb",
+	"target": "linux/amd64",
+	"http": "127.0.0.1:56741",
+	"workdir": "$PWD/workdir",
+	"kernel_obj": "$KERNEL_X86_64",
+	"image": "$IMAGE_X86_64/stretch.img",
+	"sshkey": "$IMAGE_X86_64/stretch.id_rsa",
+	"syzkaller": "$GOPATH/src/github.com/google/syzkaller",
+	"reproduce": false,
+	"procs": 1,
+	"type": "qemu",
+	"vm": {
+		"count": $NR_VMS,
+		"kernel": "$KERNEL_X86_64/arch/x86/boot/bzImage",
+		"cmdline": "selinux=0",
+		"cpu": 4,
+		"mem": 4096
+	},
+	"disable_syscalls": ["execveat",  "clone", "exit", "execve"]
+}

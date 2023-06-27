@@ -11,14 +11,14 @@ _download() {
 
 _build() {
 	__make_dir_and_exec_cmd "$CMAKE_BUILD" \
-							"$CMAKE_PATH/bootstrap --generator=Ninja --prefix=$CMAKE_INSTALL" \
-							"ninja"
+							"$CMAKE_PATH/bootstrap --generator=\"Unix Makefiles\" --prefix=$CMAKE_INSTALL" \
+							"make -j`nproc`"
 }
 
 _install() {
 	__make_dir_and_exec_cmd "$CMAKE_BUILD" \
 							"mkdir -p $CMAKE_INSTALL" \
-							"ninja install"
+							"make install"
 }
 
 _target="cmake-$CMAKE_VERSION"

@@ -5,9 +5,10 @@ config:
  - SECURITY_SELINUX: n
  - SECURITY_SMACK: n
  - SECURITY_APPARMOR
+ - SECURITY_APPARMOR_INTROSPECT_POLICY: [v5.19]
  - SECURITY_APPARMOR_HASH
  - SECURITY_APPARMOR_HASH_DEFAULT
  - SECURITY_APPARMOR_DEBUG
  - SECURITY_APPARMOR_DEBUG_ASSERTS
  - DEFAULT_SECURITY_APPARMOR
- - LSM: "lockdown,yama,safesetid,integrity,tomoyo,apparmor,bpf"
+ - LSM: "landlock,lockdown,yama,safesetid,integrity,tomoyo,apparmor,bpf"

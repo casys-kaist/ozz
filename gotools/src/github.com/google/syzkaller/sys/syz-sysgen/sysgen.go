@@ -35,6 +35,11 @@ type SyscallData struct {
 	Attrs    []uint64
 }
 
+type Define struct {
+	Name  string
+	Value string
+}
+
 type ArchData struct {
 	Revision   string
 	ForkServer int
@@ -44,6 +49,7 @@ type ArchData struct {
 	NumPages   uint64
 	DataOffset uint64
 	Calls      []SyscallData
+	Defines    []Define
 }
 
 type OSData struct {
@@ -51,9 +57,15 @@ type OSData struct {
 	Archs []ArchData
 }
 
+type CallPropDescription struct {
+	Type string
+	Name string
+}
+
 type ExecutorData struct {
 	OSes      []OSData
 	CallAttrs []string
+	CallProps []CallPropDescription
 }
 
 var srcDir = flag.String("src", "", "path to root of syzkaller source dir")
@@ -86,17 +98,11 @@ func main() {
 		}
 		sort.Strings(archs)
 
-		type Job struct {
-			Target      *targets.Target
-			OK          bool
-			Errors      []string
-			Unsupported map[string]bool
-			ArchData    ArchData
-		}
 		var jobs []*Job
 		for _, arch := range archs {
 			jobs = append(jobs, &Job{
-				Target: targets.List[OS][arch],
+				Target:      targets.List[OS][arch],
+				Unsupported: make(map[string]bool),
 			})
 		}
 		sort.Slice(jobs, func(i, j int) bool {
@@ -109,46 +115,9 @@ func main() {
 			job := job
 			go func() {
 				defer wg.Done()
-				eh := func(pos ast.Pos, msg string) {
-					job.Errors = append(job.Errors, fmt.Sprintf("%v: %v\n", pos, msg))
-				}
-				consts := constFile.Arch(job.Target.Arch)
-				top := descriptions
-				if OS == targets.Linux && (job.Target.Arch == targets.ARM || job.Target.Arch == targets.RiscV64) {
-					// Hack: KVM is not supported on ARM anymore. On riscv64 it
-					// is not supported yet but might be in the future.
-					// Note: syz-extract also ignores this file for arm and
-					// riscv64.
-					top = descriptions.Filter(func(n ast.Node) bool {
-						pos, _, _ := n.Info()
-						return !strings.HasSuffix(pos.File, "_kvm.txt")
-					})
-				}
-				if OS == targets.TestOS {
-					constInfo := compiler.ExtractConsts(top, job.Target, eh)
-					compiler.FabricateSyscallConsts(job.Target, constInfo, consts)
-				}
-				prog := compiler.Compile(top, consts, job.Target, eh)
-				if prog == nil {
-					return
-				}
-				job.Unsupported = prog.Unsupported
-
-				sysFile := filepath.Join(*outDir, "sys", OS, "gen", job.Target.Arch+".go")
-				out := new(bytes.Buffer)
-				generate(job.Target, prog, consts, out)
-				rev := hash.String(out.Bytes())
-				fmt.Fprintf(out, "const revision_%v = %q\n", job.Target.Arch, rev)
-				writeSource(sysFile, out.Bytes())
-
-				job.ArchData = generateExecutorSyscalls(job.Target, prog.Syscalls, rev)
-
-				// Don't print warnings, they are printed in syz-check.
-				job.Errors = nil
-				job.OK = true
+				processJob(job, descriptions, constFile)
 			}()
 		}
-		writeEmpty(OS)
 		wg.Wait()
 
 		var syscallArchs []ArchData
@@ -183,7 +152,54 @@ func main() {
 		data.CallAttrs = append(data.CallAttrs, prog.CppName(attrs.Field(i).Name))
 	}
 
+	props := prog.CallProps{}
+	props.ForeachProp(func(name, _ string, value reflect.Value) {
+		data.CallProps = append(data.CallProps, CallPropDescription{
+			Type: value.Kind().String(),
+			Name: prog.CppName(name),
+		})
+	})
+
 	writeExecutorSyscalls(data)
+}
+
+type Job struct {
+	Target      *targets.Target
+	OK          bool
+	Errors      []string
+	Unsupported map[string]bool
+	ArchData    ArchData
+}
+
+func processJob(job *Job, descriptions *ast.Description, constFile *compiler.ConstFile) {
+	eh := func(pos ast.Pos, msg string) {
+		job.Errors = append(job.Errors, fmt.Sprintf("%v: %v\n", pos, msg))
+	}
+	consts := constFile.Arch(job.Target.Arch)
+	if job.Target.OS == targets.TestOS {
+		constInfo := compiler.ExtractConsts(descriptions, job.Target, eh)
+		compiler.FabricateSyscallConsts(job.Target, constInfo, consts)
+	}
+	prog := compiler.Compile(descriptions, consts, job.Target, eh)
+	if prog == nil {
+		return
+	}
+	for what := range prog.Unsupported {
+		job.Unsupported[what] = true
+	}
+
+	sysFile := filepath.Join(*outDir, "sys", job.Target.OS, "gen", job.Target.Arch+".go")
+	out := new(bytes.Buffer)
+	generate(job.Target, prog, consts, out)
+	rev := hash.String(out.Bytes())
+	fmt.Fprintf(out, "const revision_%v = %q\n", job.Target.Arch, rev)
+	writeSource(sysFile, out.Bytes())
+
+	job.ArchData = generateExecutorSyscalls(job.Target, prog.Syscalls, rev)
+
+	// Don't print warnings, they are printed in syz-check.
+	job.Errors = nil
+	job.OK = true
 }
 
 func generate(target *targets.Target, prg *compiler.Prog, consts map[string]uint64, out io.Writer) {
@@ -200,13 +216,13 @@ func generate(target *targets.Target, prg *compiler.Prog, consts map[string]uint
 
 	fmt.Fprintf(out, "func init() {\n")
 	fmt.Fprintf(out, "\tRegisterTarget(&Target{"+
-		"OS: %q, Arch: %q, Revision: revision_%v, PtrSize: %v, "+
-		"PageSize: %v, NumPages: %v, DataOffset: %v, LittleEndian: %v, Syscalls: syscalls_%v, "+
-		"Resources: resources_%v, Consts: consts_%v}, "+
+		"OS: %q, Arch: %q, Revision: revision_%v, PtrSize: %v, PageSize: %v, "+
+		"NumPages: %v, DataOffset: %v, LittleEndian: %v, ExecutorUsesShmem: %v, "+
+		"Syscalls: syscalls_%v, Resources: resources_%v, Consts: consts_%v}, "+
 		"types_%v, InitTarget)\n}\n\n",
-		target.OS, target.Arch, target.Arch, target.PtrSize,
-		target.PageSize, target.NumPages, target.DataOffset,
-		target.LittleEndian, target.Arch, target.Arch, target.Arch, target.Arch)
+		target.OS, target.Arch, target.Arch, target.PtrSize, target.PageSize,
+		target.NumPages, target.DataOffset, target.LittleEndian, target.ExecutorUsesShmem,
+		target.Arch, target.Arch, target.Arch, target.Arch)
 
 	fmt.Fprintf(out, "var resources_%v = ", target.Arch)
 	serializer.Write(out, prg.Resources)
@@ -232,14 +248,6 @@ func generate(target *targets.Target, prg *compiler.Prog, consts map[string]uint
 	fmt.Fprintf(out, "\n\n")
 }
 
-func writeEmpty(OS string) {
-	const data = `// AUTOGENERATED FILE
-// This file is needed if OS is completely excluded by build tags.
-package gen
-`
-	writeSource(filepath.Join(*outDir, "sys", OS, "gen", "empty.go"), []byte(data))
-}
-
 func generateExecutorSyscalls(target *targets.Target, syscalls []*prog.Syscall, rev string) ArchData {
 	data := ArchData{
 		Revision:   rev,
@@ -254,6 +262,7 @@ func generateExecutorSyscalls(target *targets.Target, syscalls []*prog.Syscall, 
 	if target.ExecutorUsesShmem {
 		data.Shmem = 1
 	}
+	defines := make(map[string]string)
 	for _, c := range syscalls {
 		var attrVals []uint64
 		attrs := reflect.ValueOf(c.Attrs)
@@ -277,10 +286,25 @@ func generateExecutorSyscalls(target *targets.Target, syscalls []*prog.Syscall, 
 			}
 		}
 		data.Calls = append(data.Calls, newSyscallData(target, c, attrVals[:last+1]))
+		// Some syscalls might not be present on the compiling machine, so we
+		// generate definitions for them.
+		if target.SyscallNumbers && !strings.HasPrefix(c.CallName, "syz_") &&
+			target.NeedSyscallDefine(c.NR) {
+			defines[target.SyscallPrefix+c.CallName] = fmt.Sprintf("%d", c.NR)
+		}
 	}
 	sort.Slice(data.Calls, func(i, j int) bool {
 		return data.Calls[i].Name < data.Calls[j].Name
 	})
+	// Get a sorted list of definitions.
+	defineNames := []string{}
+	for key := range defines {
+		defineNames = append(defineNames, key)
+	}
+	sort.Strings(defineNames)
+	for _, key := range defineNames {
+		data.Defines = append(data.Defines, Define{key, defines[key]})
+	}
 	return data
 }
 
@@ -336,6 +360,15 @@ var defsTempl = template.Must(template.New("").Parse(`// AUTOGENERATED FILE
 struct call_attrs_t { {{range $attr := $.CallAttrs}}
 	uint64_t {{$attr}};{{end}}
 };
+
+struct call_props_t { {{range $attr := $.CallProps}}
+	{{$attr.Type}} {{$attr.Name}};{{end}}
+};
+
+#define read_call_props_t(var, reader) { \{{range $attr := $.CallProps}}
+	(var).{{$attr.Name}} = ({{$attr.Type}})(reader); \{{end}}
+}
+
 {{range $os := $.OSes}}
 #if GOOS_{{$os.GOOS}}
 #define GOOS "{{$os.GOOS}}"
@@ -348,7 +381,10 @@ struct call_attrs_t { {{range $attr := $.CallAttrs}}
 #define SYZ_PAGE_SIZE {{.PageSize}}
 #define SYZ_NUM_PAGES {{.NumPages}}
 #define SYZ_DATA_OFFSET {{.DataOffset}}
+{{range $c := $arch.Defines}}#ifndef {{$c.Name}}
+#define {{$c.Name}} {{$c.Value}}
 #endif
+{{end}}#endif
 {{end}}
 #endif
 {{end}}

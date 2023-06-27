@@ -16,7 +16,7 @@ import (
 
 type freebsd struct{}
 
-func (ctx freebsd) build(params *Params) error {
+func (ctx freebsd) build(params Params) (ImageDetails, error) {
 	confDir := fmt.Sprintf("%v/sys/%v/conf/", params.KernelDir, params.TargetArch)
 	confFile := "SYZKALLER"
 
@@ -28,8 +28,8 @@ include "./GENERIC"
 ident		SYZKALLER
 options 	COVERAGE
 options 	KCOV
+options 	KASAN
 
-options 	KERN_TLS
 options 	TCPHPTS
 options 	RATELIMIT
 
@@ -38,16 +38,24 @@ options 	DIAGNOSTIC
 `)
 	}
 	if err := osutil.WriteFile(filepath.Join(confDir, confFile), config); err != nil {
-		return err
+		return ImageDetails{}, err
 	}
 
-	objPrefix := filepath.Join(params.KernelDir, "obj")
-	if err := ctx.make(params.KernelDir, objPrefix, "kernel-toolchain", "-DNO_CLEAN"); err != nil {
-		return err
+	if _, err := osutil.RunCmd(10*time.Minute, params.KernelDir, "rm", "-rf", "obj"); err != nil {
+		return ImageDetails{}, err
 	}
-	if err := ctx.make(params.KernelDir, objPrefix, "buildkernel", "WITH_EXTRA_TCP_STACKS=",
+	objPrefix := filepath.Join(params.KernelDir, "obj")
+	output, err := ctx.make(params.KernelDir, objPrefix, "kernel-toolchain")
+	if err != nil {
+		return ImageDetails{}, err
+	}
+	if _, err := ctx.make(params.KernelDir, objPrefix, "buildkernel", "WITH_EXTRA_TCP_STACKS=",
 		fmt.Sprintf("KERNCONF=%v", confFile)); err != nil {
-		return err
+		// The kernel-toolchain make target has to be built separately
+		// because FreeBSD's build doesn't correctly order the two
+		// targets. Its output is useful for debugging though, so
+		// include it here.
+		return ImageDetails{}, osutil.PrependContext(string(output), err)
 	}
 
 	kernelObjDir := filepath.Join(objPrefix, params.KernelDir,
@@ -60,7 +68,7 @@ options 	DIAGNOSTIC
 		fullSrc := filepath.Join(s.dir, s.src)
 		fullDst := filepath.Join(params.OutputDir, s.dst)
 		if err := osutil.CopyFile(fullSrc, fullDst); err != nil {
-			return fmt.Errorf("failed to copy %v -> %v: %v", fullSrc, fullDst, err)
+			return ImageDetails{}, fmt.Errorf("failed to copy %v -> %v: %v", fullSrc, fullDst, err)
 		}
 	}
 
@@ -81,6 +89,24 @@ tcp_bbr_load="YES"
 tcp_rack_load="YES"
 sem_load="YES"
 mqueuefs_load="YES"
+cryptodev_load="YES"
+cc_cdg_load="YES"
+cc_chd_load="YES"
+cc_cubic_load="YES"
+cc_dctcp_load="YES"
+cc_hd_load="YES"
+cc_htcp_load="YES"
+cc_vegas_load="YES"
+filemon_load="YES"
+
+kern.ipc.tls.enable="1"
+vm.panic_on_oom="1"
+__EOF__
+
+cat | sudo tee -a ${tmpdir}/etc/sysctl.conf <<__EOF__
+net.inet.sctp.udp_tunneling_port=9899
+net.inet.tcp.udp_tunneling_port=9811
+vm.redzone.panic=1
 __EOF__
 
 sudo umount $tmpdir
@@ -88,23 +114,24 @@ sudo mdconfig -d -u ${md#md}
 `, objPrefix, params.KernelDir, confFile)
 
 	if debugOut, err := osutil.RunCmd(10*time.Minute, params.OutputDir, "/bin/sh", "-c", script); err != nil {
-		return fmt.Errorf("error copying kernel: %v\n%v", err, debugOut)
+		return ImageDetails{}, fmt.Errorf("error copying kernel: %v\n%v", err, debugOut)
 	}
-	return nil
+	return ImageDetails{}, nil
 }
 
 func (ctx freebsd) clean(kernelDir, targetArch string) error {
 	objPrefix := filepath.Join(kernelDir, "obj")
-	return ctx.make(kernelDir, objPrefix, "cleanworld")
+	_, err := ctx.make(kernelDir, objPrefix, "cleanworld")
+	return err
 }
 
-func (ctx freebsd) make(kernelDir, objPrefix string, makeArgs ...string) error {
+func (ctx freebsd) make(kernelDir, objPrefix string, makeArgs ...string) ([]byte, error) {
 	args := append([]string{
 		fmt.Sprintf("MAKEOBJDIRPREFIX=%v", objPrefix),
 		"make",
 		"-C", kernelDir,
 		"-j", strconv.Itoa(runtime.NumCPU()),
 	}, makeArgs...)
-	_, err := osutil.RunCmd(3*time.Hour, kernelDir, "sh", "-c", strings.Join(args, " "))
-	return err
+	output, err := osutil.RunCmd(3*time.Hour, kernelDir, "sh", "-c", strings.Join(args, " "))
+	return output, err
 }

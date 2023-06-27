@@ -71,6 +71,14 @@ func isSupportedSyscall(c *prog.Syscall, target *prog.Target) (bool, string) {
 	return isSupportedTrial(c)
 }
 
+func isSupportedSyscallName(name string, target *prog.Target) (bool, string) {
+	syscall := target.SyscallMap[name]
+	if syscall == nil {
+		return false, fmt.Sprintf("sys_%v is not present in the target", name)
+	}
+	return isSupportedSyscall(syscall, target)
+}
+
 func parseKallsyms(kallsyms []byte, arch string) map[string]bool {
 	set := make(map[string]bool)
 	var re *regexp.Regexp
@@ -104,7 +112,7 @@ func isSupportedKallsyms(c *prog.Syscall) (bool, string) {
 		name = newname
 	}
 	if !kallsymsSyscallSet[name] {
-		return false, fmt.Sprintf("sys_%v is not present in /proc/kallsyms", name)
+		return false, fmt.Sprintf("sys_%v is not enabled in the kernel (not present in /proc/kallsyms)", name)
 	}
 	return true, ""
 }
@@ -115,17 +123,18 @@ func isSupportedTrial(c *prog.Syscall) (bool, string) {
 	case "exit", "pause":
 		return true, ""
 	}
+	reason := fmt.Sprintf("sys_%v is not enabled in the kernel (returns ENOSYS)", c.CallName)
 	trialMu.Lock()
 	defer trialMu.Unlock()
 	if res, ok := trialSupported[c.NR]; ok {
-		return res, "ENOSYS"
+		return res, reason
 	}
 	cmd := osutil.Command(os.Args[0])
 	cmd.Env = []string{fmt.Sprintf("SYZ_TRIAL_TEST=%v", c.NR)}
 	_, err := osutil.Run(10*time.Second, cmd)
 	res := err != nil
 	trialSupported[c.NR] = res
-	return res, "ENOSYS"
+	return res, reason
 }
 
 func init() {
@@ -200,7 +209,7 @@ func isSyzKvmSetupCPUSupported(c *prog.Syscall, target *prog.Target, sandbox str
 			return true, ""
 		}
 	case "syz_kvm_setup_cpu$ppc64":
-		if runtime.GOARCH == "ppc64le" || runtime.GOARCH == "ppc64" {
+		if runtime.GOARCH == targets.PPC64LE {
 			return true, ""
 		}
 	}
@@ -244,12 +253,15 @@ func isSyzReadPartTableSupported(c *prog.Syscall, target *prog.Target, sandbox s
 }
 
 func isSyzIoUringSupported(c *prog.Syscall, target *prog.Target, sandbox string) (bool, string) {
-	ioUringSyscallName := "io_uring_setup"
-	ioUringSyscall := target.SyscallMap[ioUringSyscallName]
-	if ioUringSyscall == nil {
-		return false, fmt.Sprintf("sys_%v is not present in the target", ioUringSyscallName)
+	return isSupportedSyscallName("io_uring_setup", target)
+}
+
+func isSyzMemcpySupported(c *prog.Syscall, target *prog.Target, sandbox string) (bool, string) {
+	ret, msg := isSyzIoUringSupported(c, target, sandbox)
+	if ret {
+		return ret, msg
 	}
-	return isSupportedSyscall(ioUringSyscall, target)
+	return isSyzKvmSetupCPUSupported(c, target, sandbox)
 }
 
 func isBtfVmlinuxSupported(c *prog.Syscall, target *prog.Target, sandbox string) (bool, string) {
@@ -298,17 +310,31 @@ var syzkallSupport = map[string]func(*prog.Syscall, *prog.Target, string) (bool,
 	"syz_io_uring_submit":         isSyzIoUringSupported,
 	"syz_io_uring_complete":       isSyzIoUringSupported,
 	"syz_io_uring_setup":          isSyzIoUringSupported,
-	// syz_memcpy_off is only used for io_uring descriptions, thus, enable it
-	// only if io_uring syscalls are enabled.
-	"syz_memcpy_off":         isSyzIoUringSupported,
-	"syz_btf_id_by_name":     isBtfVmlinuxSupported,
-	"syz_fuse_handle_req":    isSyzFuseSupported,
-	"syz_80211_inject_frame": isWifiEmulationSupported,
-	"syz_80211_join_ibss":    isWifiEmulationSupported,
-	"syz_usbip_server_init":  isSyzUsbIPSupported,
+	"syz_memcpy_off":              isSyzMemcpySupported,
+	"syz_btf_id_by_name":          isBtfVmlinuxSupported,
+	"syz_fuse_handle_req":         isSyzFuseSupported,
+	"syz_80211_inject_frame":      isWifiEmulationSupported,
+	"syz_80211_join_ibss":         isWifiEmulationSupported,
+	"syz_usbip_server_init":       isSyzUsbIPSupported,
+	"syz_clone":                   alwaysSupported,
+	"syz_clone3":                  alwaysSupported,
 }
 
 func isSupportedSyzkall(c *prog.Syscall, target *prog.Target, sandbox string) (bool, string) {
+	sysTarget := targets.Get(target.OS, target.Arch)
+	for _, depCall := range sysTarget.PseudoSyscallDeps[c.CallName] {
+		if ok, reason := isSupportedSyscallName(depCall, target); !ok {
+			return ok, reason
+		}
+	}
+	if strings.HasPrefix(c.CallName, "syz_ext_") {
+		// Non-mainline pseudo-syscalls in executor/common_ext.h can't have the checking function
+		// and are assumed to be unconditionally supported.
+		if syzkallSupport[c.CallName] != nil {
+			panic("syz_ext_ prefix is reserved for non-mainline pseudo-syscalls")
+		}
+		return true, ""
+	}
 	if isSupported, ok := syzkallSupport[c.CallName]; ok {
 		return isSupported(c, target, sandbox)
 	}
@@ -459,7 +485,7 @@ func isSupportedOpenFile(c *prog.Syscall, filenameArg int, modes []int) (bool, s
 		return true, ""
 	}
 	if len(modes) == 0 {
-		modes = []int{syscall.O_RDONLY, syscall.O_WRONLY, syscall.O_RDWR}
+		modes = []int{syscall.O_RDONLY, syscall.O_WRONLY, syscall.O_RDWR, syscall.O_RDONLY | syscall.O_NONBLOCK}
 	}
 	var err error
 	for _, mode := range modes {

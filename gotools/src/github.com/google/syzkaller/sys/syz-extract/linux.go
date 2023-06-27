@@ -13,15 +13,11 @@ import (
 	"github.com/google/syzkaller/pkg/build"
 	"github.com/google/syzkaller/pkg/compiler"
 	"github.com/google/syzkaller/pkg/osutil"
-	"github.com/google/syzkaller/sys/targets"
 )
 
 type linux struct{}
 
 func (*linux) prepare(sourcedir string, build bool, arches []*Arch) error {
-	if sourcedir == "" {
-		return fmt.Errorf("provide path to kernel checkout via -sourcedir flag (or make extract SOURCEDIR)")
-	}
 	if build {
 		// Run 'make mrproper', otherwise out-of-tree build fails.
 		// However, it takes unreasonable amount of time,
@@ -65,9 +61,11 @@ func (*linux) prepareArch(arch *Arch) error {
 #define va_copy __builtin_va_copy
 #define __va_copy __builtin_va_copy
 `,
-		"asm/a.out.h": "",
-		"asm/prctl.h": "",
-		"asm/mce.h":   "",
+		"asm/a.out.h":    "",
+		"asm/prctl.h":    "",
+		"asm/mce.h":      "",
+		"asm/msr.h":      "",
+		"uapi/asm/msr.h": "",
 	} {
 		fullPath := filepath.Join(arch.buildDir, "syzkaller", hdr)
 		if err := osutil.MkdirAll(filepath.Dir(fullPath)); err != nil {
@@ -81,7 +79,7 @@ func (*linux) prepareArch(arch *Arch) error {
 		return nil
 	}
 	kernelDir := arch.sourceDir
-	makeArgs := build.LinuxMakeArgs(arch.target, "", "", arch.buildDir)
+	makeArgs := build.LinuxMakeArgs(arch.target, "", "", "", arch.buildDir)
 	out, err := osutil.RunCmd(time.Hour, kernelDir, "make", append(makeArgs, "defconfig")...)
 	if err != nil {
 		return fmt.Errorf("make defconfig failed: %v\n%s", err, out)
@@ -90,6 +88,8 @@ func (*linux) prepareArch(arch *Arch) error {
 		// powerpc arch is configured to be big-endian by default, but we want little-endian powerpc.
 		// Since all of our archs are little-endian for now, we just blindly switch it.
 		"-d", "CPU_BIG_ENDIAN", "-e", "CPU_LITTLE_ENDIAN",
+		// s390 enables BTF in defconfig, but our packaged toolchains can't build it.
+		"-d", "DEBUG_INFO_BTF",
 		// Without CONFIG_NETFILTER kernel does not build.
 		"-e", "NETFILTER",
 		// include/net/mptcp.h is the only header in kernel that guards some
@@ -116,14 +116,6 @@ func (*linux) prepareArch(arch *Arch) error {
 }
 
 func (*linux) processFile(arch *Arch, info *compiler.ConstInfo) (map[string]uint64, map[string]bool, error) {
-	if strings.HasSuffix(info.File, "_kvm.txt") &&
-		(arch.target.Arch == targets.ARM || arch.target.Arch == targets.RiscV64) {
-		// Hack: KVM is not supported on ARM anymore. We may want some more official support
-		// for marking descriptions arch-specific, but so far this combination is the only
-		// one. For riscv64, KVM is not supported yet but might be in the future.
-		// Note: syz-sysgen also ignores this file for arm and riscv64.
-		return nil, nil, nil
-	}
 	headerArch := arch.target.KernelHeaderArch
 	sourceDir := arch.sourceDir
 	buildDir := arch.buildDir

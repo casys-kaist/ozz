@@ -11,6 +11,13 @@ var commonHeader = `
 
 #if GOOS_freebsd || GOOS_test && HOSTGOOS_freebsd
 #include <sys/endian.h>
+#elif GOOS_darwin
+#include <libkern/OSByteOrder.h>
+#define htobe16(x) OSSwapHostToBigInt16(x)
+#define htobe32(x) OSSwapHostToBigInt32(x)
+#define htobe64(x) OSSwapHostToBigInt64(x)
+#define le16toh(x) OSSwapLittleToHostInt16(x)
+#define htole16(x) OSSwapHostToLittleInt16(x)
 #elif GOOS_windows
 #define htobe16 _byteswap_ushort
 #define htobe32 _byteswap_ulong
@@ -30,6 +37,10 @@ typedef signed int ssize_t;
 #include <errno.h>
 #endif
 
+#if !SYZ_EXECUTOR
+/*{{{SYSCALL_DEFINES}}}*/
+#endif
+
 #if SYZ_EXECUTOR && !GOOS_linux
 #if !GOOS_windows
 #include <unistd.h>
@@ -40,12 +51,18 @@ NORETURN void doexit(int status)
 	for (;;) {
 	}
 }
+#if !GOOS_fuchsia
+NORETURN void doexit_thread(int status)
+{
+	doexit(status);
+}
+#endif
 #endif
 
 #if SYZ_EXECUTOR || SYZ_MULTI_PROC || SYZ_REPEAT && SYZ_CGROUPS ||         \
     SYZ_NET_DEVICES || __NR_syz_mount_image || __NR_syz_read_part_table || \
     __NR_syz_usb_connect || __NR_syz_usb_connect_ath9k ||                  \
-    (GOOS_freebsd || GOOS_openbsd || GOOS_netbsd) && SYZ_NET_INJECTION
+    (GOOS_freebsd || GOOS_darwin || GOOS_openbsd || GOOS_netbsd) && SYZ_NET_INJECTION
 static unsigned long long procid;
 #endif
 
@@ -59,6 +76,7 @@ static unsigned long long procid;
 #include <sys/syscall.h>
 #endif
 
+static __thread int clone_ongoing;
 static __thread int skip_segv;
 static __thread jmp_buf segv_env;
 
@@ -72,15 +90,19 @@ static void recover(void)
 
 static void segv_handler(int sig, siginfo_t* info, void* ctx)
 {
+
+	if (__atomic_load_n(&clone_ongoing, __ATOMIC_RELAXED) != 0) {
+		doexit_thread(sig);
+	}
+
 	uintptr_t addr = (uintptr_t)info->si_addr;
 	const uintptr_t prog_start = 1 << 20;
 	const uintptr_t prog_end = 100 << 20;
 	int skip = __atomic_load_n(&skip_segv, __ATOMIC_RELAXED) != 0;
 	int valid = addr < prog_start || addr > prog_end;
 #if GOOS_freebsd || (GOOS_test && HOSTGOOS_freebsd)
-	if (sig == SIGBUS) {
+	if (sig == SIGBUS)
 		valid = 1;
-	}
 #endif
 	if (skip && valid) {
 		debug("SIGSEGV on %p, skipping\n", (void*)addr);
@@ -188,7 +210,7 @@ static void use_temporary_dir(void)
 #endif
 #endif
 
-#if GOOS_akaros || GOOS_netbsd || GOOS_freebsd || GOOS_openbsd || GOOS_test
+#if GOOS_akaros || GOOS_netbsd || GOOS_freebsd || GOOS_darwin || GOOS_openbsd || GOOS_test
 #if (SYZ_EXECUTOR || SYZ_REPEAT) && SYZ_EXECUTOR_USES_FORK_SERVER && (SYZ_EXECUTOR || SYZ_USE_TMP_DIR)
 #include <dirent.h>
 #include <errno.h>
@@ -196,6 +218,18 @@ static void use_temporary_dir(void)
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+
+#if GOOS_freebsd
+static void reset_flags(const char* filename)
+{
+	struct stat st;
+	if (lstat(filename, &st))
+		exitf("lstat(%s) failed", filename);
+	st.st_flags &= ~(SF_NOUNLINK | UF_NOUNLINK | SF_IMMUTABLE | UF_IMMUTABLE | SF_APPEND | UF_APPEND);
+	if (lchflags(filename, st.st_flags))
+		exitf("lchflags(%s) failed", filename);
+}
+#endif
 static void __attribute__((noinline)) remove_dir(const char* dir)
 {
 	DIR* dp = opendir(dir);
@@ -220,21 +254,44 @@ static void __attribute__((noinline)) remove_dir(const char* dir)
 			remove_dir(filename);
 			continue;
 		}
-		if (unlink(filename))
+		if (unlink(filename)) {
+#if GOOS_freebsd
+			if (errno == EPERM) {
+				reset_flags(filename);
+				reset_flags(dir);
+				if (unlink(filename) == 0)
+					continue;
+			}
+#endif
 			exitf("unlink(%s) failed", filename);
+		}
 	}
 	closedir(dp);
-	if (rmdir(dir))
+	while (rmdir(dir)) {
+#if GOOS_freebsd
+		if (errno == EPERM) {
+			reset_flags(dir);
+			if (rmdir(dir) == 0)
+				break;
+		}
+#endif
 		exitf("rmdir(%s) failed", dir);
+	}
 }
 #endif
 #endif
 
 #if !GOOS_linux && !GOOS_netbsd
-#if SYZ_EXECUTOR
+#if SYZ_EXECUTOR || SYZ_FAULT
 static int inject_fault(int nth)
 {
 	return 0;
+}
+#endif
+
+#if SYZ_FAULT
+static void setup_fault()
+{
 }
 #endif
 
@@ -275,7 +332,7 @@ static void thread_start(void* (*fn)(void*), void* arg)
 #endif
 #endif
 
-#if GOOS_freebsd || GOOS_netbsd || GOOS_openbsd || GOOS_akaros || GOOS_test
+#if GOOS_freebsd || GOOS_darwin || GOOS_netbsd || GOOS_openbsd || GOOS_akaros || GOOS_test
 #if SYZ_EXECUTOR || SYZ_THREADED
 
 #include <pthread.h>
@@ -423,7 +480,7 @@ void child()
 }
 #endif
 
-#elif GOOS_freebsd || GOOS_netbsd || GOOS_openbsd
+#elif GOOS_freebsd || GOOS_darwin || GOOS_netbsd || GOOS_openbsd
 
 #include <unistd.h>
 
@@ -680,9 +737,8 @@ static struct usb_device_index* add_usb_index(int fd, const char* dev, size_t de
 static struct usb_device_index* lookup_usb_index(int fd)
 {
 	for (int i = 0; i < USB_MAX_FDS; i++) {
-		if (__atomic_load_n(&usb_devices[i].fd, __ATOMIC_ACQUIRE) == fd) {
+		if (__atomic_load_n(&usb_devices[i].fd, __ATOMIC_ACQUIRE) == fd)
 			return &usb_devices[i].index;
-		}
 	}
 	return NULL;
 }
@@ -1124,6 +1180,7 @@ static const char default_lang_id[] = {
 
 static bool lookup_connect_response_in(int fd, const struct vusb_connect_descriptors* descs,
 				       const struct usb_ctrlrequest* ctrl,
+				       struct usb_qualifier_descriptor* qual,
 				       char** response_data, uint32* response_length)
 {
 	struct usb_device_index* index = lookup_usb_index(fd);
@@ -1166,8 +1223,6 @@ static bool lookup_connect_response_in(int fd, const struct vusb_connect_descrip
 				return true;
 			case USB_DT_DEVICE_QUALIFIER:
 				if (!descs->qual) {
-					struct usb_qualifier_descriptor* qual =
-					    (struct usb_qualifier_descriptor*)response_data;
 					qual->bLength = sizeof(*qual);
 					qual->bDescriptorType = USB_DT_DEVICE_QUALIFIER;
 					qual->bcdUSB = index->dev->bcdUSB;
@@ -1177,6 +1232,7 @@ static bool lookup_connect_response_in(int fd, const struct vusb_connect_descrip
 					qual->bMaxPacketSize0 = index->dev->bMaxPacketSize0;
 					qual->bNumConfigurations = index->dev->bNumConfigurations;
 					qual->bRESERVED = 0;
+					*response_data = (char*)qual;
 					*response_length = sizeof(*qual);
 					return true;
 				}
@@ -1452,10 +1508,11 @@ static volatile long syz_usb_connect_impl(int fd, uint64 speed, uint64 dev_len,
 
 		char* response_data = NULL;
 		uint32 response_length = 0;
+		struct usb_qualifier_descriptor qual;
 		char data[4096];
 
 		if (req.u.ctrl.bmRequestType & UE_DIR_IN) {
-			if (!lookup_connect_response_in(fd, descs, (const struct usb_ctrlrequest*)&req.u.ctrl, &response_data, &response_length)) {
+			if (!lookup_connect_response_in(fd, descs, (const struct usb_ctrlrequest*)&req.u.ctrl, &qual, &response_data, &response_length)) {
 				debug("syz_usb_connect: unknown control IN request\n");
 				return -1;
 			}
@@ -1576,6 +1633,7 @@ static void setup_usb(void)
 #if SYZ_EXECUTOR || SYZ_FAULT
 #include <fcntl.h>
 #include <sys/fault.h>
+#include <sys/stat.h>
 static void setup_fault(void)
 {
 	if (chmod("/dev/fault", 0666))
@@ -1592,7 +1650,7 @@ static int inject_fault(int nth)
 
 	en.scope = FAULT_SCOPE_LWP;
 	en.mode = 0;
-	en.nth = nth + 2;
+	en.nth = nth + 1;
 	if (ioctl(fd, FAULT_IOC_ENABLE, &en) != 0)
 		failmsg("FAULT_IOC_ENABLE failed", "nth=%d", nth);
 
@@ -1606,6 +1664,7 @@ static int fault_injected(int fd)
 	struct fault_ioc_disable dis;
 	int res;
 
+	info.scope = FAULT_SCOPE_LWP;
 	if (ioctl(fd, FAULT_IOC_GETINFO, &info) != 0)
 		fail("FAULT_IOC_GETINFO failed");
 	res = (info.nfaults > 0);
@@ -1622,12 +1681,11 @@ static int fault_injected(int fd)
 
 #endif
 
-#if GOOS_openbsd
-
+#if GOOS_openbsd || GOOS_darwin
 #define __syscall syscall
+#endif
 
-#if SYZ_EXECUTOR || __NR_syz_open_pts
-
+#if GOOS_openbsd && (SYZ_EXECUTOR || __NR_syz_open_pts)
 #include <termios.h>
 #include <util.h>
 
@@ -1641,34 +1699,42 @@ static uintptr_t syz_open_pts(void)
 		close(master);
 	return slave;
 }
-
-#endif
-
 #endif
 
 #if SYZ_EXECUTOR || SYZ_NET_INJECTION
 
 #include <fcntl.h>
+#if !GOOS_darwin
 #include <net/if_tun.h>
+#endif
 #include <sys/types.h>
 
 static int tunfd = -1;
 
 #if GOOS_netbsd
 #define MAX_TUN 64
-
+#elif GOOS_freebsd
+#define MAX_TUN 256
+#elif GOOS_openbsd
+#define MAX_TUN 8
 #else
 #define MAX_TUN 4
 #endif
 #define TUN_IFACE "tap%d"
+#define MAX_TUN_IFACE_SIZE sizeof("tap2147483647")
 #define TUN_DEVICE "/dev/tap%d"
+#define MAX_TUN_DEVICE_SIZE sizeof("/dev/tap2147483647")
 
 #define LOCAL_MAC "aa:aa:aa:aa:aa:aa"
 #define REMOTE_MAC "aa:aa:aa:aa:aa:bb"
 #define LOCAL_IPV4 "172.20.%d.170"
+#define MAX_LOCAL_IPV4_SIZE sizeof("172.20.255.170")
 #define REMOTE_IPV4 "172.20.%d.187"
-#define LOCAL_IPV6 "fe80::%02hxaa"
-#define REMOTE_IPV6 "fe80::%02hxbb"
+#define MAX_REMOTE_IPV4_SIZE sizeof("172.20.255.187")
+#define LOCAL_IPV6 "fe80::%02xaa"
+#define MAX_LOCAL_IPV6_SIZE sizeof("fe80::ffaa")
+#define REMOTE_IPV6 "fe80::%02xbb"
+#define MAX_REMOTE_IPV6_SIZE sizeof("fe80::ffbb")
 
 static void vsnprintf_check(char* str, size_t size, const char* format, va_list args)
 {
@@ -1718,17 +1784,17 @@ static void initialize_tun(int tun_id)
 	if (tun_id < 0 || tun_id >= MAX_TUN)
 		failmsg("tun_id out of range", "tun_id=%d", tun_id);
 
-	char tun_device[sizeof(TUN_DEVICE)];
+	char tun_device[MAX_TUN_DEVICE_SIZE];
 	snprintf_check(tun_device, sizeof(tun_device), TUN_DEVICE, tun_id);
 
-	char tun_iface[sizeof(TUN_IFACE)];
+	char tun_iface[MAX_TUN_IFACE_SIZE];
 	snprintf_check(tun_iface, sizeof(tun_iface), TUN_IFACE, tun_id);
 
 #if GOOS_netbsd
 	execute_command(0, "ifconfig %s destroy", tun_iface);
 	execute_command(0, "ifconfig %s create", tun_iface);
 #else
-	execute_command(0, "ifconfig %s destroy", tun_device);
+	execute_command(0, "ifconfig %s destroy", tun_iface);
 #endif
 
 	tunfd = open(tun_device, O_RDWR | O_NONBLOCK);
@@ -1746,7 +1812,7 @@ static void initialize_tun(int tun_id)
 		return;
 #endif
 	}
-	const int kTunFd = 240;
+	const int kTunFd = 200;
 	if (dup2(tunfd, kTunFd) < 0)
 		fail("dup2(tunfd, kTunFd) failed");
 	close(tunfd);
@@ -1761,25 +1827,25 @@ static void initialize_tun(int tun_id)
 #else
 	execute_command(1, "ifconfig %s ether %s", tun_iface, local_mac);
 #endif
-	char local_ipv4[sizeof(LOCAL_IPV4)];
+	char local_ipv4[MAX_LOCAL_IPV4_SIZE];
 	snprintf_check(local_ipv4, sizeof(local_ipv4), LOCAL_IPV4, tun_id);
 	execute_command(1, "ifconfig %s inet %s netmask 255.255.255.0", tun_iface, local_ipv4);
 	char remote_mac[sizeof(REMOTE_MAC)];
-	char remote_ipv4[sizeof(REMOTE_IPV4)];
+	char remote_ipv4[MAX_REMOTE_IPV4_SIZE];
 	snprintf_check(remote_mac, sizeof(remote_mac), REMOTE_MAC);
 	snprintf_check(remote_ipv4, sizeof(remote_ipv4), REMOTE_IPV4, tun_id);
 	execute_command(0, "arp -s %s %s", remote_ipv4, remote_mac);
-	char local_ipv6[sizeof(LOCAL_IPV6)];
+	char local_ipv6[MAX_LOCAL_IPV6_SIZE];
 	snprintf_check(local_ipv6, sizeof(local_ipv6), LOCAL_IPV6, tun_id);
 	execute_command(1, "ifconfig %s inet6 %s", tun_iface, local_ipv6);
-	char remote_ipv6[sizeof(REMOTE_IPV6)];
+	char remote_ipv6[MAX_REMOTE_IPV6_SIZE];
 	snprintf_check(remote_ipv6, sizeof(remote_ipv6), REMOTE_IPV6, tun_id);
 	execute_command(0, "ndp -s %s%%%s %s", remote_ipv6, tun_iface, remote_mac);
 }
 
 #endif
 
-#if SYZ_EXECUTOR || __NR_syz_emit_ethernet && SYZ_NET_INJECTION
+#if !GOOS_darwin && SYZ_EXECUTOR || __NR_syz_emit_ethernet && SYZ_NET_INJECTION
 #include <stdbool.h>
 #include <sys/uio.h>
 
@@ -1796,7 +1862,7 @@ static long syz_emit_ethernet(volatile long a0, volatile long a1)
 }
 #endif
 
-#if SYZ_EXECUTOR || SYZ_NET_INJECTION && (__NR_syz_extract_tcp_res || SYZ_REPEAT)
+#if !GOOS_darwin && SYZ_EXECUTOR || SYZ_NET_INJECTION && (__NR_syz_extract_tcp_res || SYZ_REPEAT)
 #include <errno.h>
 
 static int read_tun(char* data, int size)
@@ -1814,14 +1880,14 @@ static int read_tun(char* data, int size)
 }
 #endif
 
-#if SYZ_EXECUTOR || __NR_syz_extract_tcp_res && SYZ_NET_INJECTION
+#if !GOOS_darwin && SYZ_EXECUTOR || __NR_syz_extract_tcp_res && SYZ_NET_INJECTION
 
 struct tcp_resources {
 	uint32 seq;
 	uint32 ack;
 };
 
-#if GOOS_freebsd
+#if GOOS_freebsd || GOOS_darwin
 #include <net/ethernet.h>
 #else
 #include <net/ethertypes.h>
@@ -1999,7 +2065,7 @@ static int do_sandbox_setuid(void)
 #include <zircon/syscalls.h>
 
 #if SYZ_EXECUTOR || __NR_get_root_resource
-#include <ddk/driver.h>
+#include <lib/ddk/driver.h>
 #endif
 
 #if SYZ_EXECUTOR || SYZ_HANDLE_SEGV
@@ -2233,7 +2299,7 @@ static long syz_future_time(volatile long when)
 		break;
 	}
 	zx_time_t now = 0;
-	zx_clock_get(ZX_CLOCK_MONOTONIC, &now);
+	zx_clock_read(ZX_CLOCK_MONOTONIC, &now);
 	return now + delta_ms * 1000 * 1000;
 }
 #endif
@@ -2356,7 +2422,7 @@ static bool write_file(const char* file, const char* what, ...)
 #endif
 
 #if SYZ_EXECUTOR || SYZ_NET_DEVICES || SYZ_NET_INJECTION || SYZ_DEVLINK_PCI || SYZ_WIFI || SYZ_802154 || \
-    __NR_syz_genetlink_get_family_id || __NR_syz_80211_inject_frame || __NR_syz_80211_join_ibss
+    __NR_syz_genetlink_get_family_id || __NR_syz_80211_inject_frame || __NR_syz_80211_join_ibss || SYZ_NIC_VF
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <netinet/in.h>
@@ -2418,6 +2484,87 @@ static void netlink_done(struct nlmsg* nlmsg)
 	struct nlattr* attr = nlmsg->nested[--nlmsg->nesting];
 	attr->nla_len = nlmsg->pos - (char*)attr;
 }
+
+#if SYZ_EXECUTOR || SYZ_NIC_VF
+#include <ifaddrs.h>
+#include <linux/ethtool.h>
+#include <linux/sockios.h>
+#include <sys/ioctl.h>
+
+struct vf_intf {
+	char pass_thru_intf[IFNAMSIZ];
+	int ppid;
+};
+
+static struct vf_intf vf_intf;
+
+static void find_vf_interface(void)
+{
+#if SYZ_EXECUTOR
+	if (!flag_nic_vf)
+		return;
+#endif
+	struct ifaddrs* addresses = NULL;
+	int pid = getpid();
+	int ret = 0;
+
+	memset(&vf_intf, 0, sizeof(struct vf_intf));
+
+	debug("Checking for VF pass-thru interface.\n");
+	if (getifaddrs(&addresses) == -1) {
+		debug("%s: getifaddrs() failed.\n", __func__);
+		return;
+	}
+
+	int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+
+	if (fd < 0) {
+		debug("%s: socket() failed.\n", __func__);
+		return;
+	}
+	struct ifreq ifr;
+	struct ethtool_drvinfo drvinfo;
+	struct ifaddrs* address = addresses;
+
+	while (address) {
+		debug("ifa_name: %s\n", address->ifa_name);
+		memset(&ifr, 0, sizeof(struct ifreq));
+		strcpy(ifr.ifr_name, address->ifa_name);
+		memset(&drvinfo, 0, sizeof(struct ethtool_drvinfo));
+		drvinfo.cmd = ETHTOOL_GDRVINFO;
+		ifr.ifr_data = (caddr_t)&drvinfo;
+		ret = ioctl(fd, SIOCETHTOOL, &ifr);
+
+		if (ret < 0) {
+			debug("%s: ioctl() failed.\n", __func__);
+		} else if (strlen(drvinfo.bus_info)) {
+			debug("bus_info: %s, strlen(drvinfo.bus_info)=%zu\n",
+			      drvinfo.bus_info, strlen(drvinfo.bus_info));
+			if (strcmp(drvinfo.bus_info, "0000:00:11.0") == 0) {
+				if (strlen(address->ifa_name) < IFNAMSIZ) {
+					strncpy(vf_intf.pass_thru_intf,
+						address->ifa_name, IFNAMSIZ);
+					vf_intf.ppid = pid;
+				} else {
+					debug("%s: %d strlen(%s) >= IFNAMSIZ.\n",
+					      __func__, pid, address->ifa_name);
+				}
+				break;
+			}
+		}
+		address = address->ifa_next;
+	}
+	freeifaddrs(addresses);
+	if (!vf_intf.ppid) {
+		memset(&vf_intf, 0, sizeof(struct vf_intf));
+		debug("%s: %d could not find VF pass-thru interface.\n", __func__, pid);
+		return;
+	}
+	debug("%s: %d found VF pass-thru interface %s\n",
+	      __func__, pid, vf_intf.pass_thru_intf);
+}
+#endif
+
 #endif
 
 static int netlink_send_ext(struct nlmsg* nlmsg, int sock,
@@ -2530,10 +2677,12 @@ static int netlink_next_msg(struct nlmsg* nlmsg, unsigned int offset,
 
 #if SYZ_EXECUTOR || SYZ_NET_DEVICES || SYZ_802154
 static void netlink_add_device_impl(struct nlmsg* nlmsg, const char* type,
-				    const char* name)
+				    const char* name, bool up)
 {
 	struct ifinfomsg hdr;
 	memset(&hdr, 0, sizeof(hdr));
+	if (up)
+		hdr.ifi_flags = hdr.ifi_change = IFF_UP;
 	netlink_init(nlmsg, RTM_NEWLINK, NLM_F_EXCL | NLM_F_CREATE, &hdr, sizeof(hdr));
 	if (name)
 		netlink_attr(nlmsg, IFLA_IFNAME, name, strlen(name));
@@ -2546,7 +2695,7 @@ static void netlink_add_device_impl(struct nlmsg* nlmsg, const char* type,
 static void netlink_add_device(struct nlmsg* nlmsg, int sock, const char* type,
 			       const char* name)
 {
-	netlink_add_device_impl(nlmsg, type, name);
+	netlink_add_device_impl(nlmsg, type, name, false);
 	netlink_done(nlmsg);
 	int err = netlink_send(nlmsg, sock);
 	if (err < 0) {
@@ -2557,7 +2706,7 @@ static void netlink_add_device(struct nlmsg* nlmsg, int sock, const char* type,
 static void netlink_add_veth(struct nlmsg* nlmsg, int sock, const char* name,
 			     const char* peer)
 {
-	netlink_add_device_impl(nlmsg, "veth", name);
+	netlink_add_device_impl(nlmsg, "veth", name, false);
 	netlink_nest(nlmsg, IFLA_INFO_DATA);
 	netlink_nest(nlmsg, VETH_INFO_PEER);
 	nlmsg->pos += sizeof(struct ifinfomsg);
@@ -2571,10 +2720,24 @@ static void netlink_add_veth(struct nlmsg* nlmsg, int sock, const char* name,
 	}
 }
 
+static void netlink_add_xfrm(struct nlmsg* nlmsg, int sock, const char* name)
+{
+	netlink_add_device_impl(nlmsg, "xfrm", name, true);
+	netlink_nest(nlmsg, IFLA_INFO_DATA);
+	int if_id = 1;
+	netlink_attr(nlmsg, 2, &if_id, sizeof(if_id));
+	netlink_done(nlmsg);
+	netlink_done(nlmsg);
+	int err = netlink_send(nlmsg, sock);
+	if (err < 0) {
+		debug("netlink: adding device %s type xfrm if_id %d: %s\n", name, if_id, strerror(errno));
+	}
+}
+
 static void netlink_add_hsr(struct nlmsg* nlmsg, int sock, const char* name,
 			    const char* slave1, const char* slave2)
 {
-	netlink_add_device_impl(nlmsg, "hsr", name);
+	netlink_add_device_impl(nlmsg, "hsr", name, false);
 	netlink_nest(nlmsg, IFLA_INFO_DATA);
 	int ifindex1 = if_nametoindex(slave1);
 	netlink_attr(nlmsg, IFLA_HSR_SLAVE1, &ifindex1, sizeof(ifindex1));
@@ -2584,13 +2747,13 @@ static void netlink_add_hsr(struct nlmsg* nlmsg, int sock, const char* name,
 	netlink_done(nlmsg);
 	int err = netlink_send(nlmsg, sock);
 	if (err < 0) {
-		debug("netlink: adding device %s type hsr slave1 %s slave2 %s: %s\n", name, slave1, slave2, strerror(err));
+		debug("netlink: adding device %s type hsr slave1 %s slave2 %s: %s\n", name, slave1, slave2, strerror(errno));
 	}
 }
 
 static void netlink_add_linked(struct nlmsg* nlmsg, int sock, const char* type, const char* name, const char* link)
 {
-	netlink_add_device_impl(nlmsg, type, name);
+	netlink_add_device_impl(nlmsg, type, name, false);
 	netlink_done(nlmsg);
 	int ifindex = if_nametoindex(link);
 	netlink_attr(nlmsg, IFLA_LINK, &ifindex, sizeof(ifindex));
@@ -2602,7 +2765,7 @@ static void netlink_add_linked(struct nlmsg* nlmsg, int sock, const char* type, 
 
 static void netlink_add_vlan(struct nlmsg* nlmsg, int sock, const char* name, const char* link, uint16 id, uint16 proto)
 {
-	netlink_add_device_impl(nlmsg, "vlan", name);
+	netlink_add_device_impl(nlmsg, "vlan", name, false);
 	netlink_nest(nlmsg, IFLA_INFO_DATA);
 	netlink_attr(nlmsg, IFLA_VLAN_ID, &id, sizeof(id));
 	netlink_attr(nlmsg, IFLA_VLAN_PROTOCOL, &proto, sizeof(proto));
@@ -2618,7 +2781,7 @@ static void netlink_add_vlan(struct nlmsg* nlmsg, int sock, const char* name, co
 
 static void netlink_add_macvlan(struct nlmsg* nlmsg, int sock, const char* name, const char* link)
 {
-	netlink_add_device_impl(nlmsg, "macvlan", name);
+	netlink_add_device_impl(nlmsg, "macvlan", name, false);
 	netlink_nest(nlmsg, IFLA_INFO_DATA);
 	uint32 mode = MACVLAN_MODE_BRIDGE;
 	netlink_attr(nlmsg, IFLA_MACVLAN_MODE, &mode, sizeof(mode));
@@ -2634,7 +2797,7 @@ static void netlink_add_macvlan(struct nlmsg* nlmsg, int sock, const char* name,
 
 static void netlink_add_geneve(struct nlmsg* nlmsg, int sock, const char* name, uint32 vni, struct in_addr* addr4, struct in6_addr* addr6)
 {
-	netlink_add_device_impl(nlmsg, "geneve", name);
+	netlink_add_device_impl(nlmsg, "geneve", name, false);
 	netlink_nest(nlmsg, IFLA_INFO_DATA);
 	netlink_attr(nlmsg, IFLA_GENEVE_ID, &vni, sizeof(vni));
 	if (addr4)
@@ -2656,7 +2819,7 @@ static void netlink_add_geneve(struct nlmsg* nlmsg, int sock, const char* name, 
 
 static void netlink_add_ipvlan(struct nlmsg* nlmsg, int sock, const char* name, const char* link, uint16 mode, uint16 flags)
 {
-	netlink_add_device_impl(nlmsg, "ipvlan", name);
+	netlink_add_device_impl(nlmsg, "ipvlan", name, false);
 	netlink_nest(nlmsg, IFLA_INFO_DATA);
 	netlink_attr(nlmsg, IFLA_IPVLAN_MODE, &mode, sizeof(mode));
 	netlink_attr(nlmsg, IFLA_IPVLAN_FLAGS, &flags, sizeof(flags));
@@ -2812,7 +2975,7 @@ static void initialize_tun(void)
 		return;
 #endif
 	}
-	const int kTunFd = 240;
+	const int kTunFd = 200;
 	if (dup2(tunfd, kTunFd) < 0)
 		fail("dup2(tunfd, kTunFd) failed");
 	close(tunfd);
@@ -2864,7 +3027,7 @@ static void initialize_tun(void)
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_init_net_socket || SYZ_DEVLINK_PCI
-const int kInitNetNsFd = 239;
+const int kInitNetNsFd = 201;
 #endif
 
 #if SYZ_EXECUTOR || SYZ_DEVLINK_PCI || SYZ_NET_DEVICES
@@ -3287,10 +3450,9 @@ static void initialize_wifi_devices(void)
 
 static void netdevsim_add(unsigned int addr, unsigned int port_count)
 {
-	char buf[16];
-
-	sprintf(buf, "%u %u", addr, port_count);
-	if (write_file("/sys/bus/netdevsim/new_device", buf)) {
+	write_file("/sys/bus/netdevsim/del_device", "%u", addr);
+	if (write_file("/sys/bus/netdevsim/new_device", "%u %u", addr, port_count)) {
+		char buf[32];
 		snprintf(buf, sizeof(buf), "netdevsim%d", addr);
 		initialize_devlink_ports("netdevsim", buf, "netdevsim");
 	}
@@ -3525,6 +3687,52 @@ static void netlink_wireguard_setup(void)
 error:
 	close(sock);
 }
+
+#if SYZ_EXECUTOR || SYZ_NIC_VF
+static int runcmdline(char* cmdline)
+{
+	debug("%s\n", cmdline);
+	int ret = system(cmdline);
+	if (ret) {
+		debug("FAIL: %s\n", cmdline);
+	}
+	return ret;
+}
+
+static void netlink_nicvf_setup(void)
+{
+	char cmdline[256];
+
+#if SYZ_EXECUTOR
+	if (!flag_nic_vf)
+		return;
+#endif
+	if (!vf_intf.ppid)
+		return;
+
+	debug("ppid = %d, vf_intf.pass_thru_intf: %s\n",
+	      vf_intf.ppid, vf_intf.pass_thru_intf);
+
+	sprintf(cmdline, "nsenter -t 1 -n ip link set %s netns %d",
+		vf_intf.pass_thru_intf, getpid());
+	if (runcmdline(cmdline))
+		return;
+
+	sprintf(cmdline, "ip a s %s", vf_intf.pass_thru_intf);
+	if (runcmdline(cmdline))
+		return;
+
+	sprintf(cmdline, "ip link set %s down", vf_intf.pass_thru_intf);
+	if (runcmdline(cmdline))
+		return;
+
+	sprintf(cmdline, "ip link set %s name nicvf0", vf_intf.pass_thru_intf);
+	if (runcmdline(cmdline))
+		return;
+
+	debug("nicvf0 VF pass-through setup complete.\n");
+}
+#endif
 static void initialize_netdevices(void)
 {
 #if SYZ_EXECUTOR
@@ -3537,22 +3745,23 @@ static void initialize_netdevices(void)
 		const char* type;
 		const char* dev;
 	} devtypes[] = {
-	    {"ip6gretap", "ip6gretap0"},
-	    {"bridge", "bridge0"},
-	    {"vcan", "vcan0"},
-	    {"bond", "bond0"},
-	    {"team", "team0"},
-	    {"dummy", "dummy0"},
-	    {"nlmon", "nlmon0"},
-	    {"caif", "caif0"},
-	    {"batadv", "batadv0"},
-	    {"vxcan", "vxcan1"},
-	    {"netdevsim", netdevsim},
-	    {"veth", 0},
-	    {"xfrm", "xfrm0"},
-	    {"wireguard", "wg0"},
-	    {"wireguard", "wg1"},
-	    {"wireguard", "wg2"},
+		{"ip6gretap", "ip6gretap0"},
+		{"bridge", "bridge0"},
+		{"vcan", "vcan0"},
+		{"bond", "bond0"},
+		{"team", "team0"},
+		{"dummy", "dummy0"},
+#if SYZ_EXECUTOR || SYZ_NIC_VF
+		{"nicvf", "nicvf0"},
+#endif
+		{"nlmon", "nlmon0"},
+		{"caif", "caif0"},
+		{"batadv", "batadv0"},
+		{"vxcan", "vxcan1"},
+		{"veth", 0},
+		{"wireguard", "wg0"},
+		{"wireguard", "wg1"},
+		{"wireguard", "wg2"},
 	};
 	const char* devmasters[] = {"bridge", "bond", "team", "batadv"};
 	struct {
@@ -3560,64 +3769,67 @@ static void initialize_netdevices(void)
 		int macsize;
 		bool noipv6;
 	} devices[] = {
-	    {"lo", ETH_ALEN},
-	    {"sit0", 0},
-	    {"bridge0", ETH_ALEN},
-	    {"vcan0", 0, true},
-	    {"tunl0", 0},
-	    {"gre0", 0},
-	    {"gretap0", ETH_ALEN},
-	    {"ip_vti0", 0},
-	    {"ip6_vti0", 0},
-	    {"ip6tnl0", 0},
-	    {"ip6gre0", 0},
-	    {"ip6gretap0", ETH_ALEN},
-	    {"erspan0", ETH_ALEN},
-	    {"bond0", ETH_ALEN},
-	    {"veth0", ETH_ALEN},
-	    {"veth1", ETH_ALEN},
-	    {"team0", ETH_ALEN},
-	    {"veth0_to_bridge", ETH_ALEN},
-	    {"veth1_to_bridge", ETH_ALEN},
-	    {"veth0_to_bond", ETH_ALEN},
-	    {"veth1_to_bond", ETH_ALEN},
-	    {"veth0_to_team", ETH_ALEN},
-	    {"veth1_to_team", ETH_ALEN},
-	    {"veth0_to_hsr", ETH_ALEN},
-	    {"veth1_to_hsr", ETH_ALEN},
-	    {"hsr0", 0},
-	    {"dummy0", ETH_ALEN},
-	    {"nlmon0", 0},
-	    {"vxcan0", 0, true},
-	    {"vxcan1", 0, true},
-	    {"caif0", ETH_ALEN},
-	    {"batadv0", ETH_ALEN},
-	    {netdevsim, ETH_ALEN},
-	    {"xfrm0", ETH_ALEN},
-	    {"veth0_virt_wifi", ETH_ALEN},
-	    {"veth1_virt_wifi", ETH_ALEN},
-	    {"virt_wifi0", ETH_ALEN},
-	    {"veth0_vlan", ETH_ALEN},
-	    {"veth1_vlan", ETH_ALEN},
-	    {"vlan0", ETH_ALEN},
-	    {"vlan1", ETH_ALEN},
-	    {"macvlan0", ETH_ALEN},
-	    {"macvlan1", ETH_ALEN},
-	    {"ipvlan0", ETH_ALEN},
-	    {"ipvlan1", ETH_ALEN},
-	    {"veth0_macvtap", ETH_ALEN},
-	    {"veth1_macvtap", ETH_ALEN},
-	    {"macvtap0", ETH_ALEN},
-	    {"macsec0", ETH_ALEN},
-	    {"veth0_to_batadv", ETH_ALEN},
-	    {"veth1_to_batadv", ETH_ALEN},
-	    {"batadv_slave_0", ETH_ALEN},
-	    {"batadv_slave_1", ETH_ALEN},
-	    {"geneve0", ETH_ALEN},
-	    {"geneve1", ETH_ALEN},
-	    {"wg0", 0},
-	    {"wg1", 0},
-	    {"wg2", 0},
+		{"lo", ETH_ALEN},
+		{"sit0", 0},
+		{"bridge0", ETH_ALEN},
+		{"vcan0", 0, true},
+		{"tunl0", 0},
+		{"gre0", 0},
+		{"gretap0", ETH_ALEN},
+		{"ip_vti0", 0},
+		{"ip6_vti0", 0},
+		{"ip6tnl0", 0},
+		{"ip6gre0", 0},
+		{"ip6gretap0", ETH_ALEN},
+		{"erspan0", ETH_ALEN},
+		{"bond0", ETH_ALEN},
+		{"veth0", ETH_ALEN},
+		{"veth1", ETH_ALEN},
+		{"team0", ETH_ALEN},
+		{"veth0_to_bridge", ETH_ALEN},
+		{"veth1_to_bridge", ETH_ALEN},
+		{"veth0_to_bond", ETH_ALEN},
+		{"veth1_to_bond", ETH_ALEN},
+		{"veth0_to_team", ETH_ALEN},
+		{"veth1_to_team", ETH_ALEN},
+		{"veth0_to_hsr", ETH_ALEN},
+		{"veth1_to_hsr", ETH_ALEN},
+		{"hsr0", 0},
+		{"dummy0", ETH_ALEN},
+#if SYZ_EXECUTOR || SYZ_NIC_VF
+		{"nicvf0", 0, true},
+#endif
+		{"nlmon0", 0},
+		{"vxcan0", 0, true},
+		{"vxcan1", 0, true},
+		{"caif0", ETH_ALEN},
+		{"batadv0", ETH_ALEN},
+		{netdevsim, ETH_ALEN},
+		{"xfrm0", ETH_ALEN},
+		{"veth0_virt_wifi", ETH_ALEN},
+		{"veth1_virt_wifi", ETH_ALEN},
+		{"virt_wifi0", ETH_ALEN},
+		{"veth0_vlan", ETH_ALEN},
+		{"veth1_vlan", ETH_ALEN},
+		{"vlan0", ETH_ALEN},
+		{"vlan1", ETH_ALEN},
+		{"macvlan0", ETH_ALEN},
+		{"macvlan1", ETH_ALEN},
+		{"ipvlan0", ETH_ALEN},
+		{"ipvlan1", ETH_ALEN},
+		{"veth0_macvtap", ETH_ALEN},
+		{"veth1_macvtap", ETH_ALEN},
+		{"macvtap0", ETH_ALEN},
+		{"macsec0", ETH_ALEN},
+		{"veth0_to_batadv", ETH_ALEN},
+		{"veth1_to_batadv", ETH_ALEN},
+		{"batadv_slave_0", ETH_ALEN},
+		{"batadv_slave_1", ETH_ALEN},
+		{"geneve0", ETH_ALEN},
+		{"geneve1", ETH_ALEN},
+		{"wg0", 0},
+		{"wg1", 0},
+		{"wg2", 0},
 	};
 	int sock = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
 	if (sock == -1)
@@ -3637,6 +3849,7 @@ static void initialize_netdevices(void)
 		netlink_device_change(&nlmsg, sock, slave0, false, master, 0, 0, NULL);
 		netlink_device_change(&nlmsg, sock, slave1, false, master, 0, 0, NULL);
 	}
+	netlink_add_xfrm(&nlmsg, sock, "xfrm0");
 	netlink_device_change(&nlmsg, sock, "bridge_slave_0", true, 0, 0, 0, NULL);
 	netlink_device_change(&nlmsg, sock, "bridge_slave_1", true, 0, 0, 0, NULL);
 	netlink_add_veth(&nlmsg, sock, "hsr_slave_0", "veth0_to_hsr");
@@ -3674,6 +3887,10 @@ static void initialize_netdevices(void)
 	netdevsim_add((int)procid, 4);
 
 	netlink_wireguard_setup();
+
+#if SYZ_EXECUTOR || SYZ_NIC_VF
+	netlink_nicvf_setup();
+#endif
 
 	for (i = 0; i < sizeof(devices) / (sizeof(devices[0])); i++) {
 		char addr[32];
@@ -3722,6 +3939,10 @@ static void initialize_netdevices_init(void)
 		netlink_device_change(&nlmsg, sock, dev, !devtypes[i].noup, 0, &macaddr, macsize, NULL);
 	}
 	close(sock);
+
+#if SYZ_EXECUTOR || SYZ_NIC_VF
+	find_vf_interface();
+#endif
 }
 #endif
 
@@ -3884,12 +4105,6 @@ struct io_uring_params {
 
 #include <sys/mman.h>
 #include <unistd.h>
-
-#if GOARCH_mips64le
-#define sys_io_uring_setup 5425
-#else
-#define sys_io_uring_setup 425
-#endif
 static long syz_io_uring_setup(volatile long a0, volatile long a1, volatile long a2, volatile long a3, volatile long a4, volatile long a5)
 {
 	uint32 entries = (uint32)a0;
@@ -3899,7 +4114,7 @@ static long syz_io_uring_setup(volatile long a0, volatile long a1, volatile long
 	void** ring_ptr_out = (void**)a4;
 	void** sqes_ptr_out = (void**)a5;
 
-	uint32 fd_io_uring = syscall(sys_io_uring_setup, entries, setup_params);
+	uint32 fd_io_uring = syscall(__NR_io_uring_setup, entries, setup_params);
 	uint32 sq_ring_sz = setup_params->sq_off.array + setup_params->sq_entries * sizeof(uint32);
 	uint32 cq_ring_sz = setup_params->cq_off.cqes + setup_params->cq_entries * SIZEOF_IO_URING_CQE;
 	uint32 ring_sz = sq_ring_sz > cq_ring_sz ? sq_ring_sz : cq_ring_sz;
@@ -4163,7 +4378,7 @@ static long syz_memcpy_off(volatile long a0, volatile long a1, volatile long a2,
 }
 #endif
 
-#if SYZ_EXECUTOR || SYZ_REPEAT && SYZ_NET_INJECTION
+#if (SYZ_EXECUTOR || SYZ_REPEAT && SYZ_NET_INJECTION) && SYZ_EXECUTOR_USES_FORK_SERVER
 static void flush_tun()
 {
 #if SYZ_EXECUTOR
@@ -4362,9 +4577,8 @@ static struct usb_device_index* add_usb_index(int fd, const char* dev, size_t de
 static struct usb_device_index* lookup_usb_index(int fd)
 {
 	for (int i = 0; i < USB_MAX_FDS; i++) {
-		if (__atomic_load_n(&usb_devices[i].fd, __ATOMIC_ACQUIRE) == fd) {
+		if (__atomic_load_n(&usb_devices[i].fd, __ATOMIC_ACQUIRE) == fd)
 			return &usb_devices[i].index;
-		}
 	}
 	return NULL;
 }
@@ -4806,6 +5020,7 @@ static const char default_lang_id[] = {
 
 static bool lookup_connect_response_in(int fd, const struct vusb_connect_descriptors* descs,
 				       const struct usb_ctrlrequest* ctrl,
+				       struct usb_qualifier_descriptor* qual,
 				       char** response_data, uint32* response_length)
 {
 	struct usb_device_index* index = lookup_usb_index(fd);
@@ -4848,8 +5063,6 @@ static bool lookup_connect_response_in(int fd, const struct vusb_connect_descrip
 				return true;
 			case USB_DT_DEVICE_QUALIFIER:
 				if (!descs->qual) {
-					struct usb_qualifier_descriptor* qual =
-					    (struct usb_qualifier_descriptor*)response_data;
 					qual->bLength = sizeof(*qual);
 					qual->bDescriptorType = USB_DT_DEVICE_QUALIFIER;
 					qual->bcdUSB = index->dev->bcdUSB;
@@ -4859,6 +5072,7 @@ static bool lookup_connect_response_in(int fd, const struct vusb_connect_descrip
 					qual->bMaxPacketSize0 = index->dev->bMaxPacketSize0;
 					qual->bNumConfigurations = index->dev->bNumConfigurations;
 					qual->bRESERVED = 0;
+					*response_data = (char*)qual;
 					*response_length = sizeof(*qual);
 					return true;
 				}
@@ -5356,9 +5570,10 @@ static volatile long syz_usb_connect_impl(uint64 speed, uint64 dev_len, const ch
 
 		char* response_data = NULL;
 		uint32 response_length = 0;
+		struct usb_qualifier_descriptor qual;
 
 		if (event.ctrl.bRequestType & USB_DIR_IN) {
-			if (!lookup_connect_response_in(fd, descs, &event.ctrl, &response_data, &response_length)) {
+			if (!lookup_connect_response_in(fd, descs, &event.ctrl, &qual, &response_data, &response_length)) {
 				debug("syz_usb_connect: unknown request, stalling\n");
 				usb_raw_ep0_stall(fd);
 				continue;
@@ -5819,11 +6034,21 @@ struct hci_dev_req {
 	uint32 dev_opt;
 };
 
-struct vhci_vendor_pkt {
+struct vhci_vendor_pkt_request {
 	uint8 type;
 	uint8 opcode;
-	uint16 id;
-};
+} __attribute__((packed));
+
+struct vhci_pkt {
+	uint8 type;
+	union {
+		struct {
+			uint8 opcode;
+			uint16 id;
+		} __attribute__((packed)) vendor_pkt;
+		struct hci_command_hdr command_hdr;
+	};
+} __attribute__((packed));
 
 #define HCIDEVUP _IOW('H', 201, int)
 #define HCISETSCAN _IOW('H', 221, int)
@@ -5898,9 +6123,8 @@ static bool process_command_pkt(int fd, char* buf, ssize_t buf_size)
 {
 	struct hci_command_hdr* hdr = (struct hci_command_hdr*)buf;
 	if (buf_size < (ssize_t)sizeof(struct hci_command_hdr) ||
-	    hdr->plen != buf_size - sizeof(struct hci_command_hdr)) {
+	    hdr->plen != buf_size - sizeof(struct hci_command_hdr))
 		failmsg("process_command_pkt: invalid size", "suze=%zx", buf_size);
-	}
 
 	switch (hdr->opcode) {
 	case HCI_OP_WRITE_SCAN_ENABLE: {
@@ -5950,6 +6174,9 @@ static void* event_thread(void* arg)
 #define HCI_HANDLE_1 200
 #define HCI_HANDLE_2 201
 
+#define HCI_PRIMARY 0
+#define HCI_OP_RESET 0x0c03
+
 static void initialize_vhci()
 {
 #if SYZ_EXECUTOR
@@ -5964,36 +6191,49 @@ static void initialize_vhci()
 	vhci_fd = open("/dev/vhci", O_RDWR);
 	if (vhci_fd == -1)
 		fail("open /dev/vhci failed");
-	const int kVhciFd = 241;
+	const int kVhciFd = 202;
 	if (dup2(vhci_fd, kVhciFd) < 0)
 		fail("dup2(vhci_fd, kVhciFd) failed");
 	close(vhci_fd);
 	vhci_fd = kVhciFd;
 
-	struct vhci_vendor_pkt vendor_pkt;
-	if (read(vhci_fd, &vendor_pkt, sizeof(vendor_pkt)) != sizeof(vendor_pkt))
-		fail("read failed");
+	struct vhci_vendor_pkt_request vendor_pkt_req = {HCI_VENDOR_PKT, HCI_PRIMARY};
+	if (write(vhci_fd, &vendor_pkt_req, sizeof(vendor_pkt_req)) != sizeof(vendor_pkt_req))
+		fail("vendor_pkt_req write failed");
 
-	if (vendor_pkt.type != HCI_VENDOR_PKT)
+	struct vhci_pkt vhci_pkt;
+	if (read(vhci_fd, &vhci_pkt, sizeof(vhci_pkt)) != sizeof(vhci_pkt))
+		fail("vhci_pkt read failed");
+
+	if (vhci_pkt.type == HCI_COMMAND_PKT && vhci_pkt.command_hdr.opcode == HCI_OP_RESET) {
+		char response[1] = {0};
+		hci_send_event_cmd_complete(vhci_fd, HCI_OP_RESET, response, sizeof(response));
+
+		if (read(vhci_fd, &vhci_pkt, sizeof(vhci_pkt)) != sizeof(vhci_pkt))
+			fail("vhci_pkt read failed");
+	}
+
+	if (vhci_pkt.type != HCI_VENDOR_PKT)
 		fail("wrong response packet");
 
-	debug("hci dev id: %x\n", vendor_pkt.id);
+	int dev_id = vhci_pkt.vendor_pkt.id;
+	debug("hci dev id: %x\n", dev_id);
 
 	pthread_t th;
 	if (pthread_create(&th, NULL, event_thread, NULL))
 		fail("pthread_create failed");
-	int ret = ioctl(hci_sock, HCIDEVUP, vendor_pkt.id);
+	int ret = ioctl(hci_sock, HCIDEVUP, dev_id);
 	if (ret) {
 		if (errno == ERFKILL) {
 			rfkill_unblock_all();
-			ret = ioctl(hci_sock, HCIDEVUP, vendor_pkt.id);
+			ret = ioctl(hci_sock, HCIDEVUP, dev_id);
 		}
 
 		if (ret && errno != EALREADY)
 			fail("ioctl(HCIDEVUP) failed");
 	}
 	struct hci_dev_req dr = {0};
-	dr.dev_id = vendor_pkt.id;
+	dr.dev_id = dev_id;
 	dr.dev_opt = SCAN_PAGE;
 	if (ioctl(hci_sock, HCISETSCAN, &dr))
 		fail("ioctl(HCISETSCAN) failed");
@@ -6056,10 +6296,8 @@ static long syz_emit_vhci(volatile long a0, volatile long a1)
 static long syz_genetlink_get_family_id(volatile long name, volatile long sock_arg)
 {
 	debug("syz_genetlink_get_family_id(%s, %d)\n", (char*)name, (int)sock_arg);
-	bool dofail = false;
 	int fd = sock_arg;
 	if (fd < 0) {
-		dofail = true;
 		fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_GENERIC);
 		if (fd == -1) {
 			debug("syz_genetlink_get_family_id: socket failed: %d\n", errno);
@@ -6067,7 +6305,7 @@ static long syz_genetlink_get_family_id(volatile long name, volatile long sock_a
 		}
 	}
 	struct nlmsg nlmsg_tmp;
-	int ret = netlink_query_family_id(&nlmsg_tmp, fd, (char*)name, dofail);
+	int ret = netlink_query_family_id(&nlmsg_tmp, fd, (char*)name, false);
 	if ((int)sock_arg < 0)
 		close(fd);
 	if (ret < 0) {
@@ -6080,75 +6318,369 @@ static long syz_genetlink_get_family_id(volatile long name, volatile long sock_a
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_mount_image || __NR_syz_read_part_table
+
+//% This code is derived from puff.{c,h}, found in the zlib development. The
+//% original files come with the following copyright notice:
+
+//% Copyright (C) 2002-2013 Mark Adler, all rights reserved
+//% version 2.3, 21 Jan 2013
+//% This software is provided 'as-is', without any express or implied
+//% warranty.  In no event will the author be held liable for any damages
+//% arising from the use of this software.
+//% Permission is granted to anyone to use this software for any purpose,
+//% including commercial applications, and to alter it and redistribute it
+//% freely, subject to the following restrictions:
+//% 1. The origin of this software must not be misrepresented; you must not
+//%    claim that you wrote the original software. If you use this software
+//%    in a product, an acknowledgment in the product documentation would be
+//%    appreciated but is not required.
+//% 2. Altered source versions must be plainly marked as such, and must not be
+//%    misrepresented as being the original software.
+//% 3. This notice may not be removed or altered from any source distribution.
+//% Mark Adler    madler@alumni.caltech.edu
+
+//% BEGIN CODE DERIVED FROM puff.{c,h}
+
+#include <setjmp.h>
+#define MAXBITS 15
+#define MAXLCODES 286
+#define MAXDCODES 30
+#define MAXCODES (MAXLCODES + MAXDCODES)
+#define FIXLCODES 288
+
+struct puff_state {
+	unsigned char* out;
+	unsigned long outlen;
+	unsigned long outcnt;
+	const unsigned char* in;
+	unsigned long inlen;
+	unsigned long incnt;
+	int bitbuf;
+	int bitcnt;
+	jmp_buf env;
+};
+static int puff_bits(struct puff_state* s, int need)
+{
+	long val = s->bitbuf;
+	while (s->bitcnt < need) {
+		if (s->incnt == s->inlen)
+			longjmp(s->env, 1);
+		val |= (long)(s->in[s->incnt++]) << s->bitcnt;
+		s->bitcnt += 8;
+	}
+	s->bitbuf = (int)(val >> need);
+	s->bitcnt -= need;
+	return (int)(val & ((1L << need) - 1));
+}
+static int puff_stored(struct puff_state* s)
+{
+	s->bitbuf = 0;
+	s->bitcnt = 0;
+	if (s->incnt + 4 > s->inlen)
+		return 2;
+	unsigned len = s->in[s->incnt++];
+	len |= s->in[s->incnt++] << 8;
+	if (s->in[s->incnt++] != (~len & 0xff) ||
+	    s->in[s->incnt++] != ((~len >> 8) & 0xff))
+		return -2;
+	if (s->incnt + len > s->inlen)
+		return 2;
+	if (s->outcnt + len > s->outlen)
+		return 1;
+	for (; len--; s->outcnt++, s->incnt++) {
+		if (s->in[s->incnt])
+			s->out[s->outcnt] = s->in[s->incnt];
+	}
+	return 0;
+}
+struct puff_huffman {
+	short* count;
+	short* symbol;
+};
+static int puff_decode(struct puff_state* s, const struct puff_huffman* h)
+{
+	int first = 0;
+	int index = 0;
+	int bitbuf = s->bitbuf;
+	int left = s->bitcnt;
+	int code = first = index = 0;
+	int len = 1;
+	short* next = h->count + 1;
+	while (1) {
+		while (left--) {
+			code |= bitbuf & 1;
+			bitbuf >>= 1;
+			int count = *next++;
+			if (code - count < first) {
+				s->bitbuf = bitbuf;
+				s->bitcnt = (s->bitcnt - len) & 7;
+				return h->symbol[index + (code - first)];
+			}
+			index += count;
+			first += count;
+			first <<= 1;
+			code <<= 1;
+			len++;
+		}
+		left = (MAXBITS + 1) - len;
+		if (left == 0)
+			break;
+		if (s->incnt == s->inlen)
+			longjmp(s->env, 1);
+		bitbuf = s->in[s->incnt++];
+		if (left > 8)
+			left = 8;
+	}
+	return -10;
+}
+static int puff_construct(struct puff_huffman* h, const short* length, int n)
+{
+	int len;
+	for (len = 0; len <= MAXBITS; len++)
+		h->count[len] = 0;
+	int symbol;
+	for (symbol = 0; symbol < n; symbol++)
+		(h->count[length[symbol]])++;
+	if (h->count[0] == n)
+		return 0;
+	int left = 1;
+	for (len = 1; len <= MAXBITS; len++) {
+		left <<= 1;
+		left -= h->count[len];
+		if (left < 0)
+			return left;
+	}
+	short offs[MAXBITS + 1];
+	offs[1] = 0;
+	for (len = 1; len < MAXBITS; len++)
+		offs[len + 1] = offs[len] + h->count[len];
+	for (symbol = 0; symbol < n; symbol++)
+		if (length[symbol] != 0)
+			h->symbol[offs[length[symbol]]++] = symbol;
+	return left;
+}
+static int puff_codes(struct puff_state* s,
+		      const struct puff_huffman* lencode,
+		      const struct puff_huffman* distcode)
+{
+	static const short lens[29] = {
+				       3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31,
+				       35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258};
+	static const short lext[29] = {
+				       0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2,
+				       3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0};
+	static const short dists[30] = {
+					1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193,
+					257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145,
+					8193, 12289, 16385, 24577};
+	static const short dext[30] = {
+				       0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6,
+				       7, 7, 8, 8, 9, 9, 10, 10, 11, 11,
+				       12, 12, 13, 13};
+	int symbol;
+	do {
+		symbol = puff_decode(s, lencode);
+		if (symbol < 0)
+			return symbol;
+		if (symbol < 256) {
+			if (s->outcnt == s->outlen)
+				return 1;
+			if (symbol)
+				s->out[s->outcnt] = symbol;
+			s->outcnt++;
+		} else if (symbol > 256) {
+			symbol -= 257;
+			if (symbol >= 29)
+				return -10;
+			int len = lens[symbol] + puff_bits(s, lext[symbol]);
+			symbol = puff_decode(s, distcode);
+			if (symbol < 0)
+				return symbol;
+			unsigned dist = dists[symbol] + puff_bits(s, dext[symbol]);
+			if (dist > s->outcnt)
+				return -11;
+			if (s->outcnt + len > s->outlen)
+				return 1;
+			while (len--) {
+				if (dist <= s->outcnt && s->out[s->outcnt - dist])
+					s->out[s->outcnt] = s->out[s->outcnt - dist];
+				s->outcnt++;
+			}
+		}
+	} while (symbol != 256);
+	return 0;
+}
+static int puff_fixed(struct puff_state* s)
+{
+	static int virgin = 1;
+	static short lencnt[MAXBITS + 1], lensym[FIXLCODES];
+	static short distcnt[MAXBITS + 1], distsym[MAXDCODES];
+	static struct puff_huffman lencode, distcode;
+	if (virgin) {
+		lencode.count = lencnt;
+		lencode.symbol = lensym;
+		distcode.count = distcnt;
+		distcode.symbol = distsym;
+		short lengths[FIXLCODES];
+		int symbol;
+		for (symbol = 0; symbol < 144; symbol++)
+			lengths[symbol] = 8;
+		for (; symbol < 256; symbol++)
+			lengths[symbol] = 9;
+		for (; symbol < 280; symbol++)
+			lengths[symbol] = 7;
+		for (; symbol < FIXLCODES; symbol++)
+			lengths[symbol] = 8;
+		puff_construct(&lencode, lengths, FIXLCODES);
+		for (symbol = 0; symbol < MAXDCODES; symbol++)
+			lengths[symbol] = 5;
+		puff_construct(&distcode, lengths, MAXDCODES);
+		virgin = 0;
+	}
+	return puff_codes(s, &lencode, &distcode);
+}
+static int puff_dynamic(struct puff_state* s)
+{
+	static const short order[19] =
+	    {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
+	int nlen = puff_bits(s, 5) + 257;
+	int ndist = puff_bits(s, 5) + 1;
+	int ncode = puff_bits(s, 4) + 4;
+	if (nlen > MAXLCODES || ndist > MAXDCODES)
+		return -3;
+	short lengths[MAXCODES];
+	int index;
+	for (index = 0; index < ncode; index++)
+		lengths[order[index]] = puff_bits(s, 3);
+	for (; index < 19; index++)
+		lengths[order[index]] = 0;
+	short lencnt[MAXBITS + 1], lensym[MAXLCODES];
+	struct puff_huffman lencode = {lencnt, lensym};
+	int err = puff_construct(&lencode, lengths, 19);
+	if (err != 0)
+		return -4;
+	index = 0;
+	while (index < nlen + ndist) {
+		int symbol;
+		int len;
+
+		symbol = puff_decode(s, &lencode);
+		if (symbol < 0)
+			return symbol;
+		if (symbol < 16)
+			lengths[index++] = symbol;
+		else {
+			len = 0;
+			if (symbol == 16) {
+				if (index == 0)
+					return -5;
+				len = lengths[index - 1];
+				symbol = 3 + puff_bits(s, 2);
+			} else if (symbol == 17)
+				symbol = 3 + puff_bits(s, 3);
+			else
+				symbol = 11 + puff_bits(s, 7);
+			if (index + symbol > nlen + ndist)
+				return -6;
+			while (symbol--)
+				lengths[index++] = len;
+		}
+	}
+	if (lengths[256] == 0)
+		return -9;
+	err = puff_construct(&lencode, lengths, nlen);
+	if (err && (err < 0 || nlen != lencode.count[0] + lencode.count[1]))
+		return -7;
+	short distcnt[MAXBITS + 1], distsym[MAXDCODES];
+	struct puff_huffman distcode = {distcnt, distsym};
+	err = puff_construct(&distcode, lengths + nlen, ndist);
+	if (err && (err < 0 || ndist != distcode.count[0] + distcode.count[1]))
+		return -8;
+	return puff_codes(s, &lencode, &distcode);
+}
+static int puff(
+    unsigned char* dest,
+    unsigned long* destlen,
+    const unsigned char* source,
+    unsigned long sourcelen)
+{
+	struct puff_state s = {
+	    .out = dest,
+	    .outlen = *destlen,
+	    .outcnt = 0,
+	    .in = source,
+	    .inlen = sourcelen,
+	    .incnt = 0,
+	    .bitbuf = 0,
+	    .bitcnt = 0,
+	};
+	int err;
+	if (setjmp(s.env) != 0)
+		err = 2;
+	else {
+		int last;
+		do {
+			last = puff_bits(&s, 1);
+			int type = puff_bits(&s, 2);
+			err = type == 0 ? puff_stored(&s) : (type == 1 ? puff_fixed(&s) : (type == 2 ? puff_dynamic(&s) : -1));
+			if (err != 0)
+				break;
+		} while (!last);
+	}
+
+	*destlen = s.outcnt;
+	return err;
+}
+
+//% END CODE DERIVED FROM puff.{c,h}
+
+#include <errno.h>
+#include <sys/mman.h>
+#define ZLIB_HEADER_WIDTH 2
+
+static int puff_zlib_to_file(const unsigned char* source, unsigned long sourcelen, int dest_fd)
+{
+	if (sourcelen < ZLIB_HEADER_WIDTH)
+		return 0;
+	source += ZLIB_HEADER_WIDTH;
+	sourcelen -= ZLIB_HEADER_WIDTH;
+	const unsigned long max_destlen = 132 << 20;
+	void* ret = mmap(0, max_destlen, PROT_WRITE | PROT_READ, MAP_PRIVATE | MAP_ANON, -1, 0);
+	if (ret == MAP_FAILED)
+		return -1;
+	unsigned char* dest = (unsigned char*)ret;
+	unsigned long destlen = max_destlen;
+	int err = puff(dest, &destlen, source, sourcelen);
+	if (err) {
+		munmap(dest, max_destlen);
+		errno = -err;
+		return -1;
+	}
+	if (write(dest_fd, dest, destlen) != (ssize_t)destlen) {
+		munmap(dest, max_destlen);
+		return -1;
+	}
+	return munmap(dest, destlen);
+}
+
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/loop.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-
-struct fs_image_segment {
-	void* data;
-	uintptr_t size;
-	uintptr_t offset;
-};
-
-#define IMAGE_MAX_SEGMENTS 4096
-#define IMAGE_MAX_SIZE (129 << 20)
-
-#if GOARCH_386
-#define sys_memfd_create 356
-#elif GOARCH_amd64
-#define sys_memfd_create 319
-#elif GOARCH_arm
-#define sys_memfd_create 385
-#elif GOARCH_arm64
-#define sys_memfd_create 279
-#elif GOARCH_ppc64le
-#define sys_memfd_create 360
-#elif GOARCH_mips64le
-#define sys_memfd_create 314
-#elif GOARCH_s390x
-#define sys_memfd_create 350
-#elif GOARCH_riscv64
-#define sys_memfd_create 279
-#endif
-
-static unsigned long fs_image_segment_check(unsigned long size, unsigned long nsegs, struct fs_image_segment* segs)
-{
-	if (nsegs > IMAGE_MAX_SEGMENTS)
-		nsegs = IMAGE_MAX_SEGMENTS;
-	for (size_t i = 0; i < nsegs; i++) {
-		if (segs[i].size > IMAGE_MAX_SIZE)
-			segs[i].size = IMAGE_MAX_SIZE;
-		segs[i].offset %= IMAGE_MAX_SIZE;
-		if (segs[i].offset > IMAGE_MAX_SIZE - segs[i].size)
-			segs[i].offset = IMAGE_MAX_SIZE - segs[i].size;
-		if (size < segs[i].offset + segs[i].offset)
-			size = segs[i].offset + segs[i].offset;
-	}
-	if (size > IMAGE_MAX_SIZE)
-		size = IMAGE_MAX_SIZE;
-	return size;
-}
-static int setup_loop_device(long unsigned size, long unsigned nsegs, struct fs_image_segment* segs, const char* loopname, int* memfd_p, int* loopfd_p)
+static int setup_loop_device(unsigned char* data, unsigned long size, const char* loopname, int* loopfd_p)
 {
 	int err = 0, loopfd = -1;
-
-	size = fs_image_segment_check(size, nsegs, segs);
-	int memfd = syscall(sys_memfd_create, "syzkaller", 0);
+	int memfd = syscall(__NR_memfd_create, "syzkaller", 0);
 	if (memfd == -1) {
 		err = errno;
 		goto error;
 	}
-	if (ftruncate(memfd, size)) {
+	if (puff_zlib_to_file(data, size, memfd)) {
 		err = errno;
+		debug("setup_loop_device: could not decompress data: %d\n", errno);
 		goto error_close_memfd;
-	}
-	for (size_t i = 0; i < nsegs; i++) {
-		if (pwrite(memfd, segs[i].data, segs[i].size, segs[i].offset) < 0) {
-			debug("setup_loop_device: pwrite[%zu] failed: %d\n", i, errno);
-		}
 	}
 
 	loopfd = open(loopname, O_RDWR);
@@ -6169,7 +6701,7 @@ static int setup_loop_device(long unsigned size, long unsigned nsegs, struct fs_
 		}
 	}
 
-	*memfd_p = memfd;
+	close(memfd);
 	*loopfd_p = loopfd;
 	return 0;
 
@@ -6184,14 +6716,14 @@ error:
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_read_part_table
-static long syz_read_part_table(volatile unsigned long size, volatile unsigned long nsegs, volatile long segments)
+static long syz_read_part_table(volatile unsigned long size, volatile long image)
 {
-	struct fs_image_segment* segs = (struct fs_image_segment*)segments;
-	int err = 0, res = -1, loopfd = -1, memfd = -1;
+	unsigned char* data = (unsigned char*)image;
+	int err = 0, res = -1, loopfd = -1;
 	char loopname[64];
 
 	snprintf(loopname, sizeof(loopname), "/dev/loop%llu", procid);
-	if (setup_loop_device(size, nsegs, segs, loopname, &memfd, &loopfd) == -1)
+	if (setup_loop_device(data, size, loopname, &loopfd) == -1)
 		return -1;
 
 	struct loop_info64 info;
@@ -6220,9 +6752,9 @@ static long syz_read_part_table(volatile unsigned long size, volatile unsigned l
 		}
 	}
 error_clear_loop:
-	ioctl(loopfd, LOOP_CLR_FD, 0);
+	if (res)
+		ioctl(loopfd, LOOP_CLR_FD, 0);
 	close(loopfd);
-	close(memfd);
 	errno = err;
 	return res;
 }
@@ -6232,10 +6764,17 @@ error_clear_loop:
 #include <stddef.h>
 #include <string.h>
 #include <sys/mount.h>
-static long syz_mount_image(volatile long fsarg, volatile long dir, volatile unsigned long size, volatile unsigned long nsegs, volatile long segments, volatile long flags, volatile long optsarg)
+static long syz_mount_image(
+    volatile long fsarg,
+    volatile long dir,
+    volatile long flags,
+    volatile long optsarg,
+    volatile long change_dir,
+    volatile unsigned long size,
+    volatile long image)
 {
-	struct fs_image_segment* segs = (struct fs_image_segment*)segments;
-	int res = -1, err = 0, loopfd = -1, memfd = -1, need_loop_device = !!segs;
+	unsigned char* data = (unsigned char*)image;
+	int res = -1, err = 0, loopfd = -1, need_loop_device = !!size;
 	char* mount_opts = (char*)optsarg;
 	char* target = (char*)dir;
 	char* fs = (char*)fsarg;
@@ -6245,7 +6784,7 @@ static long syz_mount_image(volatile long fsarg, volatile long dir, volatile uns
 	if (need_loop_device) {
 		memset(loopname, 0, sizeof(loopname));
 		snprintf(loopname, sizeof(loopname), "/dev/loop%llu", procid);
-		if (setup_loop_device(size, nsegs, segs, loopname, &memfd, &loopfd) == -1)
+		if (setup_loop_device(data, size, loopname, &loopfd) == -1)
 			return -1;
 		source = loopname;
 	}
@@ -6260,12 +6799,19 @@ static long syz_mount_image(volatile long fsarg, volatile long dir, volatile uns
 	if (strcmp(fs, "iso9660") == 0) {
 		flags |= MS_RDONLY;
 	} else if (strncmp(fs, "ext", 3) == 0) {
-		if (strstr(opts, "errors=panic") || strstr(opts, "errors=remount-ro") == 0)
+		bool has_remount_ro = false;
+		char* remount_ro_start = strstr(opts, "errors=remount-ro");
+		if (remount_ro_start != NULL) {
+			char after = *(remount_ro_start + strlen("errors=remount-ro"));
+			char before = remount_ro_start == opts ? '\0' : *(remount_ro_start - 1);
+			has_remount_ro = ((before == '\0' || before == ',') && (after == '\0' || after == ','));
+		}
+		if (strstr(opts, "errors=panic") || !has_remount_ro)
 			strcat(opts, ",errors=continue");
 	} else if (strcmp(fs, "xfs") == 0) {
 		strcat(opts, ",nouuid");
 	}
-	debug("syz_mount_image: size=%llu segs=%llu loop='%s' dir='%s' fs='%s' flags=%llu opts='%s'\n", (uint64)size, (uint64)nsegs, loopname, target, fs, (uint64)flags, opts);
+	debug("syz_mount_image: size=%llu loop='%s' dir='%s' fs='%s' flags=%llu opts='%s'\n", (uint64)size, loopname, target, fs, (uint64)flags, opts);
 #if SYZ_EXECUTOR
 	cover_reset(0);
 #endif
@@ -6279,13 +6825,20 @@ static long syz_mount_image(volatile long fsarg, volatile long dir, volatile uns
 	if (res == -1) {
 		debug("syz_mount_image > open error: %d\n", errno);
 		err = errno;
+		goto error_clear_loop;
+	}
+	if (change_dir) {
+		res = chdir(target);
+		if (res == -1) {
+			debug("syz_mount_image > chdir error: %d\n", errno);
+			err = errno;
+		}
 	}
 
 error_clear_loop:
 	if (need_loop_device) {
 		ioctl(loopfd, LOOP_CLR_FD, 0);
 		close(loopfd);
-		close(memfd);
 	}
 	errno = err;
 	return res;
@@ -6303,14 +6856,6 @@ error_clear_loop:
 #include <sys/stat.h>
 
 #if GOARCH_amd64
-const char kvm_asm16_cpl3[] = "\x0f\x20\xc0\x66\x83\xc8\x01\x0f\x22\xc0\xb8\xa0\x00\x0f\x00\xd8\xb8\x2b\x00\x8e\xd8\x8e\xc0\x8e\xe0\x8e\xe8\xbc\x00\x01\xc7\x06\x00\x01\x1d\xba\xc7\x06\x02\x01\x23\x00\xc7\x06\x04\x01\x00\x01\xc7\x06\x06\x01\x2b\x00\xcb";
-const char kvm_asm32_paged[] = "\x0f\x20\xc0\x0d\x00\x00\x00\x80\x0f\x22\xc0";
-const char kvm_asm32_vm86[] = "\x66\xb8\xb8\x00\x0f\x00\xd8\xea\x00\x00\x00\x00\xd0\x00";
-const char kvm_asm32_paged_vm86[] = "\x0f\x20\xc0\x0d\x00\x00\x00\x80\x0f\x22\xc0\x66\xb8\xb8\x00\x0f\x00\xd8\xea\x00\x00\x00\x00\xd0\x00";
-const char kvm_asm64_enable_long[] = "\x0f\x20\xc0\x0d\x00\x00\x00\x80\x0f\x22\xc0\xea\xde\xc0\xad\x0b\x50\x00\x48\xc7\xc0\xd8\x00\x00\x00\x0f\x00\xd8";
-const char kvm_asm64_init_vm[] = "\x0f\x20\xc0\x0d\x00\x00\x00\x80\x0f\x22\xc0\xea\xde\xc0\xad\x0b\x50\x00\x48\xc7\xc0\xd8\x00\x00\x00\x0f\x00\xd8\x48\xc7\xc1\x3a\x00\x00\x00\x0f\x32\x48\x83\xc8\x05\x0f\x30\x0f\x20\xe0\x48\x0d\x00\x20\x00\x00\x0f\x22\xe0\x48\xc7\xc1\x80\x04\x00\x00\x0f\x32\x48\xc7\xc2\x00\x60\x00\x00\x89\x02\x48\xc7\xc2\x00\x70\x00\x00\x89\x02\x48\xc7\xc0\x00\x5f\x00\x00\xf3\x0f\xc7\x30\x48\xc7\xc0\x08\x5f\x00\x00\x66\x0f\xc7\x30\x0f\xc7\x30\x48\xc7\xc1\x81\x04\x00\x00\x0f\x32\x48\x83\xc8\x3f\x48\x21\xd0\x48\xc7\xc2\x00\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x02\x40\x00\x00\x48\xb8\x84\x9e\x99\xf3\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x1e\x40\x00\x00\x48\xc7\xc0\x81\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc1\x83\x04\x00\x00\x0f\x32\x48\x0d\xff\x6f\x03\x00\x48\x21\xd0\x48\xc7\xc2\x0c\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc1\x84\x04\x00\x00\x0f\x32\x48\x0d\xff\x17\x00\x00\x48\x21\xd0\x48\xc7\xc2\x12\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x04\x2c\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x00\x28\x00\x00\x48\xc7\xc0\xff\xff\xff\xff\x0f\x79\xd0\x48\xc7\xc2\x02\x0c\x00\x00\x48\xc7\xc0\x50\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc0\x58\x00\x00\x00\x48\xc7\xc2\x00\x0c\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x04\x0c\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x06\x0c\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x08\x0c\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0a\x0c\x00\x00\x0f\x79\xd0\x48\xc7\xc0\xd8\x00\x00\x00\x48\xc7\xc2\x0c\x0c\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x02\x2c\x00\x00\x48\xc7\xc0\x00\x05\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x00\x4c\x00\x00\x48\xc7\xc0\x50\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x10\x6c\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x12\x6c\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x0f\x20\xc0\x48\xc7\xc2\x00\x6c\x00\x00\x48\x89\xc0\x0f\x79\xd0\x0f\x20\xd8\x48\xc7\xc2\x02\x6c\x00\x00\x48\x89\xc0\x0f\x79\xd0\x0f\x20\xe0\x48\xc7\xc2\x04\x6c\x00\x00\x48\x89\xc0\x0f\x79\xd0\x48\xc7\xc2\x06\x6c\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x08\x6c\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0a\x6c\x00\x00\x48\xc7\xc0\x00\x3a\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0c\x6c\x00\x00\x48\xc7\xc0\x00\x10\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0e\x6c\x00\x00\x48\xc7\xc0\x00\x38\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x14\x6c\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x16\x6c\x00\x00\x48\x8b\x04\x25\x10\x5f\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x00\x00\x00\x00\x48\xc7\xc0\x01\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x02\x00\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x00\x20\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x02\x20\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x04\x20\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x06\x20\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc1\x77\x02\x00\x00\x0f\x32\x48\xc1\xe2\x20\x48\x09\xd0\x48\xc7\xc2\x00\x2c\x00\x00\x48\x89\xc0\x0f\x79\xd0\x48\xc7\xc2\x04\x40\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0a\x40\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0e\x40\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x10\x40\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x16\x40\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x14\x40\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x00\x60\x00\x00\x48\xc7\xc0\xff\xff\xff\xff\x0f\x79\xd0\x48\xc7\xc2\x02\x60\x00\x00\x48\xc7\xc0\xff\xff\xff\xff\x0f\x79\xd0\x48\xc7\xc2\x1c\x20\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x1e\x20\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x20\x20\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x22\x20\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x00\x08\x00\x00\x48\xc7\xc0\x58\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x02\x08\x00\x00\x48\xc7\xc0\x50\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x04\x08\x00\x00\x48\xc7\xc0\x58\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x06\x08\x00\x00\x48\xc7\xc0\x58\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x08\x08\x00\x00\x48\xc7\xc0\x58\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0a\x08\x00\x00\x48\xc7\xc0\x58\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0c\x08\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0e\x08\x00\x00\x48\xc7\xc0\xd8\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x12\x68\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x14\x68\x00\x00\x48\xc7\xc0\x00\x3a\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x16\x68\x00\x00\x48\xc7\xc0\x00\x10\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x18\x68\x00\x00\x48\xc7\xc0\x00\x38\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x00\x48\x00\x00\x48\xc7\xc0\xff\xff\x0f\x00\x0f\x79\xd0\x48\xc7\xc2\x02\x48\x00\x00\x48\xc7\xc0\xff\xff\x0f\x00\x0f\x79\xd0\x48\xc7\xc2\x04\x48\x00\x00\x48\xc7\xc0\xff\xff\x0f\x00\x0f\x79\xd0\x48\xc7\xc2\x06\x48\x00\x00\x48\xc7\xc0\xff\xff\x0f\x00\x0f\x79\xd0\x48\xc7\xc2\x08\x48\x00\x00\x48\xc7\xc0\xff\xff\x0f\x00\x0f\x79\xd0\x48\xc7\xc2\x0a\x48\x00\x00\x48\xc7\xc0\xff\xff\x0f\x00\x0f\x79\xd0\x48\xc7\xc2\x0c\x48\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0e\x48\x00\x00\x48\xc7\xc0\xff\x1f\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x10\x48\x00\x00\x48\xc7\xc0\xff\x1f\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x12\x48\x00\x00\x48\xc7\xc0\xff\x1f\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x14\x48\x00\x00\x48\xc7\xc0\x93\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x16\x48\x00\x00\x48\xc7\xc0\x9b\x20\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x18\x48\x00\x00\x48\xc7\xc0\x93\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x1a\x48\x00\x00\x48\xc7\xc0\x93\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x1c\x48\x00\x00\x48\xc7\xc0\x93\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x1e\x48\x00\x00\x48\xc7\xc0\x93\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x20\x48\x00\x00\x48\xc7\xc0\x82\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x22\x48\x00\x00\x48\xc7\xc0\x8b\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x1c\x68\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x1e\x68\x00\x00\x48\xc7\xc0\x00\x91\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x20\x68\x00\x00\x48\xc7\xc0\x02\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x06\x28\x00\x00\x48\xc7\xc0\x00\x05\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0a\x28\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0c\x28\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0e\x28\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x10\x28\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x0f\x20\xc0\x48\xc7\xc2\x00\x68\x00\x00\x48\x89\xc0\x0f\x79\xd0\x0f\x20\xd8\x48\xc7\xc2\x02\x68\x00\x00\x48\x89\xc0\x0f\x79\xd0\x0f\x20\xe0\x48\xc7\xc2\x04\x68\x00\x00\x48\x89\xc0\x0f\x79\xd0\x48\xc7\xc0\x18\x5f\x00\x00\x48\x8b\x10\x48\xc7\xc0\x20\x5f\x00\x00\x48\x8b\x08\x48\x31\xc0\x0f\x78\xd0\x48\x31\xc8\x0f\x79\xd0\x0f\x01\xc2\x48\xc7\xc2\x00\x44\x00\x00\x0f\x78\xd0\xf4";
-const char kvm_asm64_vm_exit[] = "\x48\xc7\xc3\x00\x44\x00\x00\x0f\x78\xda\x48\xc7\xc3\x02\x44\x00\x00\x0f\x78\xd9\x48\xc7\xc0\x00\x64\x00\x00\x0f\x78\xc0\x48\xc7\xc3\x1e\x68\x00\x00\x0f\x78\xdb\xf4";
-const char kvm_asm64_cpl3[] = "\x0f\x20\xc0\x0d\x00\x00\x00\x80\x0f\x22\xc0\xea\xde\xc0\xad\x0b\x50\x00\x48\xc7\xc0\xd8\x00\x00\x00\x0f\x00\xd8\x48\xc7\xc0\x6b\x00\x00\x00\x8e\xd8\x8e\xc0\x8e\xe0\x8e\xe8\x48\xc7\xc4\x80\x0f\x00\x00\x48\xc7\x04\x24\x1d\xba\x00\x00\x48\xc7\x44\x24\x04\x63\x00\x00\x00\x48\xc7\x44\x24\x08\x80\x0f\x00\x00\x48\xc7\x44\x24\x0c\x6b\x00\x00\x00\xcb";
 
 #define ADDR_TEXT 0x0000
 #define ADDR_GDT 0x1000
@@ -6386,6 +6931,14 @@ const char kvm_asm64_cpl3[] = "\x0f\x20\xc0\x0d\x00\x00\x00\x80\x0f\x22\xc0\xea\
 
 #define NEXT_INSN $0xbadc0de
 #define PREFIX_SIZE 0xba1d
+const char kvm_asm16_cpl3[] = "\x0f\x20\xc0\x66\x83\xc8\x01\x0f\x22\xc0\xb8\xa0\x00\x0f\x00\xd8\xb8\x2b\x00\x8e\xd8\x8e\xc0\x8e\xe0\x8e\xe8\xbc\x00\x01\xc7\x06\x00\x01\x1d\xba\xc7\x06\x02\x01\x23\x00\xc7\x06\x04\x01\x00\x01\xc7\x06\x06\x01\x2b\x00\xcb";
+const char kvm_asm32_paged[] = "\x0f\x20\xc0\x0d\x00\x00\x00\x80\x0f\x22\xc0";
+const char kvm_asm32_vm86[] = "\x66\xb8\xb8\x00\x0f\x00\xd8\xea\x00\x00\x00\x00\xd0\x00";
+const char kvm_asm32_paged_vm86[] = "\x0f\x20\xc0\x0d\x00\x00\x00\x80\x0f\x22\xc0\x66\xb8\xb8\x00\x0f\x00\xd8\xea\x00\x00\x00\x00\xd0\x00";
+const char kvm_asm64_enable_long[] = "\x0f\x20\xc0\x0d\x00\x00\x00\x80\x0f\x22\xc0\xea\xde\xc0\xad\x0b\x50\x00\x48\xc7\xc0\xd8\x00\x00\x00\x0f\x00\xd8";
+const char kvm_asm64_init_vm[] = "\x0f\x20\xc0\x0d\x00\x00\x00\x80\x0f\x22\xc0\xea\xde\xc0\xad\x0b\x50\x00\x48\xc7\xc0\xd8\x00\x00\x00\x0f\x00\xd8\x48\xc7\xc1\x3a\x00\x00\x00\x0f\x32\x48\x83\xc8\x05\x0f\x30\x0f\x20\xe0\x48\x0d\x00\x20\x00\x00\x0f\x22\xe0\x48\xc7\xc1\x80\x04\x00\x00\x0f\x32\x48\xc7\xc2\x00\x60\x00\x00\x89\x02\x48\xc7\xc2\x00\x70\x00\x00\x89\x02\x48\xc7\xc0\x00\x5f\x00\x00\xf3\x0f\xc7\x30\x48\xc7\xc0\x08\x5f\x00\x00\x66\x0f\xc7\x30\x0f\xc7\x30\x48\xc7\xc1\x81\x04\x00\x00\x0f\x32\x48\x83\xc8\x00\x48\x21\xd0\x48\xc7\xc2\x00\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc1\x82\x04\x00\x00\x0f\x32\x48\x83\xc8\x00\x48\x21\xd0\x48\xc7\xc2\x02\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x1e\x40\x00\x00\x48\xc7\xc0\x81\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc1\x83\x04\x00\x00\x0f\x32\x48\x0d\xff\x6f\x03\x00\x48\x21\xd0\x48\xc7\xc2\x0c\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc1\x84\x04\x00\x00\x0f\x32\x48\x0d\xff\x17\x00\x00\x48\x21\xd0\x48\xc7\xc2\x12\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x04\x2c\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x00\x28\x00\x00\x48\xc7\xc0\xff\xff\xff\xff\x0f\x79\xd0\x48\xc7\xc2\x02\x0c\x00\x00\x48\xc7\xc0\x50\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc0\x58\x00\x00\x00\x48\xc7\xc2\x00\x0c\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x04\x0c\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x06\x0c\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x08\x0c\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0a\x0c\x00\x00\x0f\x79\xd0\x48\xc7\xc0\xd8\x00\x00\x00\x48\xc7\xc2\x0c\x0c\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x02\x2c\x00\x00\x48\xc7\xc0\x00\x05\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x00\x4c\x00\x00\x48\xc7\xc0\x50\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x10\x6c\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x12\x6c\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x0f\x20\xc0\x48\xc7\xc2\x00\x6c\x00\x00\x48\x89\xc0\x0f\x79\xd0\x0f\x20\xd8\x48\xc7\xc2\x02\x6c\x00\x00\x48\x89\xc0\x0f\x79\xd0\x0f\x20\xe0\x48\xc7\xc2\x04\x6c\x00\x00\x48\x89\xc0\x0f\x79\xd0\x48\xc7\xc2\x06\x6c\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x08\x6c\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0a\x6c\x00\x00\x48\xc7\xc0\x00\x3a\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0c\x6c\x00\x00\x48\xc7\xc0\x00\x10\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0e\x6c\x00\x00\x48\xc7\xc0\x00\x38\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x14\x6c\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x16\x6c\x00\x00\x48\x8b\x04\x25\x10\x5f\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x00\x00\x00\x00\x48\xc7\xc0\x01\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x02\x00\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x00\x20\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x02\x20\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x04\x20\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x06\x20\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc1\x77\x02\x00\x00\x0f\x32\x48\xc1\xe2\x20\x48\x09\xd0\x48\xc7\xc2\x00\x2c\x00\x00\x48\x89\xc0\x0f\x79\xd0\x48\xc7\xc2\x04\x40\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0a\x40\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0e\x40\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x10\x40\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x16\x40\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x14\x40\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x00\x60\x00\x00\x48\xc7\xc0\xff\xff\xff\xff\x0f\x79\xd0\x48\xc7\xc2\x02\x60\x00\x00\x48\xc7\xc0\xff\xff\xff\xff\x0f\x79\xd0\x48\xc7\xc2\x1c\x20\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x1e\x20\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x20\x20\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x22\x20\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x00\x08\x00\x00\x48\xc7\xc0\x58\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x02\x08\x00\x00\x48\xc7\xc0\x50\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x04\x08\x00\x00\x48\xc7\xc0\x58\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x06\x08\x00\x00\x48\xc7\xc0\x58\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x08\x08\x00\x00\x48\xc7\xc0\x58\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0a\x08\x00\x00\x48\xc7\xc0\x58\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0c\x08\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0e\x08\x00\x00\x48\xc7\xc0\xd8\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x12\x68\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x14\x68\x00\x00\x48\xc7\xc0\x00\x3a\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x16\x68\x00\x00\x48\xc7\xc0\x00\x10\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x18\x68\x00\x00\x48\xc7\xc0\x00\x38\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x00\x48\x00\x00\x48\xc7\xc0\xff\xff\x0f\x00\x0f\x79\xd0\x48\xc7\xc2\x02\x48\x00\x00\x48\xc7\xc0\xff\xff\x0f\x00\x0f\x79\xd0\x48\xc7\xc2\x04\x48\x00\x00\x48\xc7\xc0\xff\xff\x0f\x00\x0f\x79\xd0\x48\xc7\xc2\x06\x48\x00\x00\x48\xc7\xc0\xff\xff\x0f\x00\x0f\x79\xd0\x48\xc7\xc2\x08\x48\x00\x00\x48\xc7\xc0\xff\xff\x0f\x00\x0f\x79\xd0\x48\xc7\xc2\x0a\x48\x00\x00\x48\xc7\xc0\xff\xff\x0f\x00\x0f\x79\xd0\x48\xc7\xc2\x0c\x48\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0e\x48\x00\x00\x48\xc7\xc0\xff\x1f\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x10\x48\x00\x00\x48\xc7\xc0\xff\x1f\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x12\x48\x00\x00\x48\xc7\xc0\xff\x1f\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x14\x48\x00\x00\x48\xc7\xc0\x93\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x16\x48\x00\x00\x48\xc7\xc0\x9b\x20\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x18\x48\x00\x00\x48\xc7\xc0\x93\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x1a\x48\x00\x00\x48\xc7\xc0\x93\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x1c\x48\x00\x00\x48\xc7\xc0\x93\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x1e\x48\x00\x00\x48\xc7\xc0\x93\x40\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x20\x48\x00\x00\x48\xc7\xc0\x82\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x22\x48\x00\x00\x48\xc7\xc0\x8b\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x1c\x68\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x1e\x68\x00\x00\x48\xc7\xc0\x00\x91\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x20\x68\x00\x00\x48\xc7\xc0\x02\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x06\x28\x00\x00\x48\xc7\xc0\x00\x05\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0a\x28\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0c\x28\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x0e\x28\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x48\xc7\xc2\x10\x28\x00\x00\x48\xc7\xc0\x00\x00\x00\x00\x0f\x79\xd0\x0f\x20\xc0\x48\xc7\xc2\x00\x68\x00\x00\x48\x89\xc0\x0f\x79\xd0\x0f\x20\xd8\x48\xc7\xc2\x02\x68\x00\x00\x48\x89\xc0\x0f\x79\xd0\x0f\x20\xe0\x48\xc7\xc2\x04\x68\x00\x00\x48\x89\xc0\x0f\x79\xd0\x48\xc7\xc0\x18\x5f\x00\x00\x48\x8b\x10\x48\xc7\xc0\x20\x5f\x00\x00\x48\x8b\x08\x48\x31\xc0\x0f\x78\xd0\x48\x31\xc8\x0f\x79\xd0\x0f\x01\xc2\x48\xc7\xc2\x00\x44\x00\x00\x0f\x78\xd0\xf4";
+const char kvm_asm64_vm_exit[] = "\x48\xc7\xc3\x00\x44\x00\x00\x0f\x78\xda\x48\xc7\xc3\x02\x44\x00\x00\x0f\x78\xd9\x48\xc7\xc0\x00\x64\x00\x00\x0f\x78\xc0\x48\xc7\xc3\x1e\x68\x00\x00\x0f\x78\xdb\xf4";
+const char kvm_asm64_cpl3[] = "\x0f\x20\xc0\x0d\x00\x00\x00\x80\x0f\x22\xc0\xea\xde\xc0\xad\x0b\x50\x00\x48\xc7\xc0\xd8\x00\x00\x00\x0f\x00\xd8\x48\xc7\xc0\x6b\x00\x00\x00\x8e\xd8\x8e\xc0\x8e\xe0\x8e\xe8\x48\xc7\xc4\x80\x0f\x00\x00\x48\xc7\x04\x24\x1d\xba\x00\x00\x48\xc7\x44\x24\x04\x63\x00\x00\x00\x48\xc7\x44\x24\x08\x80\x0f\x00\x00\x48\xc7\x44\x24\x0c\x6b\x00\x00\x00\xcb";
 
 
 #ifndef KVM_SMI
@@ -6633,7 +7186,7 @@ struct kvm_opt {
 #define KVM_SETUP_VIRT86 (1 << 4)
 #define KVM_SETUP_SMM (1 << 5)
 #define KVM_SETUP_VM (1 << 6)
-static long syz_kvm_setup_cpu(volatile long a0, volatile long a1, volatile long a2, volatile long a3, volatile long a4, volatile long a5, volatile long a6, volatile long a7)
+static volatile long syz_kvm_setup_cpu(volatile long a0, volatile long a1, volatile long a2, volatile long a3, volatile long a4, volatile long a5, volatile long a6, volatile long a7)
 {
 	const int vmfd = a0;
 	const int cpufd = a1;
@@ -7175,7 +7728,7 @@ struct kvm_opt {
 	uint64 typ;
 	uint64 val;
 };
-static long syz_kvm_setup_cpu(volatile long a0, volatile long a1, volatile long a2, volatile long a3, volatile long a4, volatile long a5, volatile long a6, volatile long a7)
+static volatile long syz_kvm_setup_cpu(volatile long a0, volatile long a1, volatile long a2, volatile long a3, volatile long a4, volatile long a5, volatile long a6, volatile long a7)
 {
 	const int vmfd = a0;
 	const int cpufd = a1;
@@ -7236,114 +7789,192 @@ static long syz_kvm_setup_cpu(volatile long a0, volatile long a1, volatile long 
 }
 
 #elif GOARCH_ppc64 || GOARCH_ppc64le
+const char kvm_ppc64_mr[] = "\x00\x00\xa0\x3c\x00\x00\xa5\x60\xc6\x07\xa5\x78\xad\x0b\xa5\x64\xde\xc0\xa5\x60\x78\x2b\xa4\x7c\x78\x23\x83\x7c";
+const char kvm_ppc64_ld[] = "\x00\x00\xe0\x3d\x00\x00\xef\x61\xc6\x07\xef\x79\xad\x0b\xef\x65\xde\xc0\xef\x61\x00\x00\x20\x3f\x00\x00\x39\x63\xc6\x07\x39\x7b\x17\x00\x39\x67\xf8\xff\x39\x63\x00\x00\xf9\xf9\x00\x00\x79\xe8";
+const char kvm_ppc64_recharge_dec[] = "\x00\x00\x80\x3e\x00\x00\x94\x62\xc6\x07\x94\x7a\xff\x07\x94\x66\xff\xff\x94\x62\xa6\x03\x96\x7e\x24\x00\x00\x4c";
 
-#define ADDR_TEXT 0x0000
-#define ADDR_GDT 0x1000
-#define ADDR_LDT 0x1800
-#define ADDR_PML4 0x2000
-#define ADDR_PDP 0x3000
-#define ADDR_PD 0x4000
-#define ADDR_STACK0 0x0f80
-#define ADDR_VAR_HLT 0x2800
-#define ADDR_VAR_SYSRET 0x2808
-#define ADDR_VAR_SYSEXIT 0x2810
-#define ADDR_VAR_IDT 0x3800
-#define ADDR_VAR_TSS64 0x3a00
-#define ADDR_VAR_TSS64_CPL3 0x3c00
-#define ADDR_VAR_TSS16 0x3d00
-#define ADDR_VAR_TSS16_2 0x3e00
-#define ADDR_VAR_TSS16_CPL3 0x3f00
-#define ADDR_VAR_TSS32 0x4800
-#define ADDR_VAR_TSS32_2 0x4a00
-#define ADDR_VAR_TSS32_CPL3 0x4c00
-#define ADDR_VAR_TSS32_VM86 0x4e00
-#define ADDR_VAR_VMXON_PTR 0x5f00
-#define ADDR_VAR_VMCS_PTR 0x5f08
-#define ADDR_VAR_VMEXIT_PTR 0x5f10
-#define ADDR_VAR_VMWRITE_FLD 0x5f18
-#define ADDR_VAR_VMWRITE_VAL 0x5f20
-#define ADDR_VAR_VMXON 0x6000
-#define ADDR_VAR_VMCS 0x7000
-#define ADDR_VAR_VMEXIT_CODE 0x9000
-#define ADDR_VAR_USER_CODE 0x9100
-#define ADDR_VAR_USER_CODE2 0x9120
 
-#define SEL_LDT (1 << 3)
-#define SEL_CS16 (2 << 3)
-#define SEL_DS16 (3 << 3)
-#define SEL_CS16_CPL3 ((4 << 3) + 3)
-#define SEL_DS16_CPL3 ((5 << 3) + 3)
-#define SEL_CS32 (6 << 3)
-#define SEL_DS32 (7 << 3)
-#define SEL_CS32_CPL3 ((8 << 3) + 3)
-#define SEL_DS32_CPL3 ((9 << 3) + 3)
-#define SEL_CS64 (10 << 3)
-#define SEL_DS64 (11 << 3)
-#define SEL_CS64_CPL3 ((12 << 3) + 3)
-#define SEL_DS64_CPL3 ((13 << 3) + 3)
-#define SEL_CGATE16 (14 << 3)
-#define SEL_TGATE16 (15 << 3)
-#define SEL_CGATE32 (16 << 3)
-#define SEL_TGATE32 (17 << 3)
-#define SEL_CGATE64 (18 << 3)
-#define SEL_CGATE64_HI (19 << 3)
-#define SEL_TSS16 (20 << 3)
-#define SEL_TSS16_2 (21 << 3)
-#define SEL_TSS16_CPL3 ((22 << 3) + 3)
-#define SEL_TSS32 (23 << 3)
-#define SEL_TSS32_2 (24 << 3)
-#define SEL_TSS32_CPL3 ((25 << 3) + 3)
-#define SEL_TSS32_VM86 (26 << 3)
-#define SEL_TSS64 (27 << 3)
-#define SEL_TSS64_HI (28 << 3)
-#define SEL_TSS64_CPL3 ((29 << 3) + 3)
-#define SEL_TSS64_CPL3_HI (30 << 3)
+#define BOOK3S_INTERRUPT_SYSTEM_RESET 0x100
+#define BOOK3S_INTERRUPT_MACHINE_CHECK 0x200
+#define BOOK3S_INTERRUPT_DATA_STORAGE 0x300
+#define BOOK3S_INTERRUPT_DATA_SEGMENT 0x380
+#define BOOK3S_INTERRUPT_INST_STORAGE 0x400
+#define BOOK3S_INTERRUPT_INST_SEGMENT 0x480
+#define BOOK3S_INTERRUPT_EXTERNAL 0x500
+#define BOOK3S_INTERRUPT_EXTERNAL_HV 0x502
+#define BOOK3S_INTERRUPT_ALIGNMENT 0x600
+#define BOOK3S_INTERRUPT_PROGRAM 0x700
+#define BOOK3S_INTERRUPT_FP_UNAVAIL 0x800
+#define BOOK3S_INTERRUPT_DECREMENTER 0x900
+#define BOOK3S_INTERRUPT_HV_DECREMENTER 0x980
+#define BOOK3S_INTERRUPT_DOORBELL 0xa00
+#define BOOK3S_INTERRUPT_SYSCALL 0xc00
+#define BOOK3S_INTERRUPT_TRACE 0xd00
+#define BOOK3S_INTERRUPT_H_DATA_STORAGE 0xe00
+#define BOOK3S_INTERRUPT_H_INST_STORAGE 0xe20
+#define BOOK3S_INTERRUPT_H_EMUL_ASSIST 0xe40
+#define BOOK3S_INTERRUPT_HMI 0xe60
+#define BOOK3S_INTERRUPT_H_DOORBELL 0xe80
+#define BOOK3S_INTERRUPT_H_VIRT 0xea0
+#define BOOK3S_INTERRUPT_PERFMON 0xf00
+#define BOOK3S_INTERRUPT_ALTIVEC 0xf20
+#define BOOK3S_INTERRUPT_VSX 0xf40
+#define BOOK3S_INTERRUPT_FAC_UNAVAIL 0xf60
+#define BOOK3S_INTERRUPT_H_FAC_UNAVAIL 0xf80
 
-#define MSR_IA32_FEATURE_CONTROL 0x3a
-#define MSR_IA32_VMX_BASIC 0x480
-#define MSR_IA32_SMBASE 0x9e
-#define MSR_IA32_SYSENTER_CS 0x174
-#define MSR_IA32_SYSENTER_ESP 0x175
-#define MSR_IA32_SYSENTER_EIP 0x176
-#define MSR_IA32_STAR 0xC0000081
-#define MSR_IA32_LSTAR 0xC0000082
-#define MSR_IA32_VMX_PROCBASED_CTLS2 0x48B
+#define BITS_PER_LONG 64
+#define PPC_BITLSHIFT(be) (BITS_PER_LONG - 1 - (be))
+#define PPC_BIT(bit) (1ULL << PPC_BITLSHIFT(bit))
+#define PPC_BITMASK(bs, be) ((PPC_BIT(bs) - PPC_BIT(be)) | PPC_BIT(bs))
 
-#define NEXT_INSN $0xbadc0de
-#define PREFIX_SIZE 0xba1d
+#define RADIX_PTE_INDEX_SIZE 5
+#define RADIX_PMD_INDEX_SIZE 9
+#define RADIX_PUD_INDEX_SIZE 9
+#define RADIX_PGD_INDEX_SIZE 13
 
+#define cpu_to_be32(x) __builtin_bswap32(x)
+#define cpu_to_be64(x) __builtin_bswap64(x)
+#define be64_to_cpu(x) __builtin_bswap64(x)
+
+#define LPCR_ILE PPC_BIT(38)
+#define LPCR_UPRT PPC_BIT(41)
+#define LPCR_EVIRT PPC_BIT(42)
+#define LPCR_HR PPC_BIT(43)
+#ifndef KVM_REG_PPC_LPCR_64
+#define KVM_REG_PPC_LPCR_64 (KVM_REG_PPC | KVM_REG_SIZE_U64 | 0xb5)
+#endif
+
+#define PRTB_SIZE_SHIFT 12
+#define PATB_GR (1UL << 63)
+#define PATB_HR (1UL << 63)
+#define PRTB_MASK 0x0ffffffffffff000UL
+
+#define ALIGNUP(p, q) ((void*)(((unsigned long)(p) + (q)-1) & ~((q)-1)))
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
+
+#ifndef KVM_REG_PPC_DEC_EXPIRY
+#define KVM_REG_PPC_DEC_EXPIRY (KVM_REG_PPC | KVM_REG_SIZE_U64 | 0xbe)
+#endif
+
+#ifndef KVM_PPC_CONFIGURE_V3_MMU
+#define KVM_PPC_CONFIGURE_V3_MMU _IOW(KVMIO, 0xaf, struct kvm_ppc_mmuv3_cfg)
+struct kvm_ppc_mmuv3_cfg {
+	__u64 flags;
+	__u64 process_table;
+};
+#define KVM_PPC_MMUV3_RADIX 1
+#define KVM_PPC_MMUV3_GTSE 2
+#endif
+
+#ifndef KVM_CAP_PPC_NESTED_HV
+#define KVM_CAP_PPC_NESTED_HV 160
+#endif
 
 struct kvm_text {
 	uintptr_t typ;
 	const void* text;
 	uintptr_t size;
 };
-static long syz_kvm_setup_cpu(volatile long a0, volatile long a1, volatile long a2, volatile long a3, volatile long a4, volatile long a5, volatile long a6, volatile long a7)
+
+static int kvmppc_define_rtas_kernel_token(int vmfd, unsigned token, const char* func)
+{
+	struct kvm_rtas_token_args args;
+
+	args.token = token;
+	strncpy(args.name, func, sizeof(args.name) - 1);
+
+	return ioctl(vmfd, KVM_PPC_RTAS_DEFINE_TOKEN, &args);
+}
+
+static int kvmppc_get_one_reg(int cpufd, uint64 id, void* target)
+{
+	struct kvm_one_reg reg = {.id = id, .addr = (uintptr_t)target};
+
+	return ioctl(cpufd, KVM_GET_ONE_REG, &reg);
+}
+
+static int kvmppc_set_one_reg(int cpufd, uint64 id, void* target)
+{
+	struct kvm_one_reg reg = {.id = id, .addr = (uintptr_t)target};
+
+	return ioctl(cpufd, KVM_SET_ONE_REG, &reg);
+}
+
+static int kvm_vcpu_enable_cap(int cpufd, uint32 capability)
+{
+	struct kvm_enable_cap cap = {
+	    .cap = capability,
+	};
+	return ioctl(cpufd, KVM_ENABLE_CAP, &cap);
+}
+
+static int kvm_vm_enable_cap(int vmfd, uint32 capability, uint64 p1, uint64 p2)
+{
+	struct kvm_enable_cap cap = {
+	    .cap = capability,
+	    .flags = 0,
+	    .args = {p1, p2},
+	};
+	return ioctl(vmfd, KVM_ENABLE_CAP, &cap);
+}
+
+static void dump_text(const char* mem, unsigned start, unsigned cw, uint32 debug_inst_opcode)
+{
+#ifdef DEBUG
+	printf("Text @%x: ", start);
+
+	for (unsigned i = 0; i < cw; ++i) {
+		uint32 w = ((uint32*)(mem + start))[i];
+
+		printf(" %08x", w);
+		if (debug_inst_opcode && debug_inst_opcode == w)
+			break;
+	}
+
+	printf("\n");
+#endif
+}
+#define KVM_SETUP_PPC64_LE (1 << 0)
+#define KVM_SETUP_PPC64_IR (1 << 1)
+#define KVM_SETUP_PPC64_DR (1 << 2)
+#define KVM_SETUP_PPC64_PR (1 << 3)
+#define KVM_SETUP_PPC64_PID1 (1 << 4)
+static volatile long syz_kvm_setup_cpu(volatile long a0, volatile long a1, volatile long a2, volatile long a3, volatile long a4, volatile long a5, volatile long a6, volatile long a7)
 {
 	const int vmfd = a0;
 	const int cpufd = a1;
 	char* const host_mem = (char*)a2;
 	const struct kvm_text* const text_array_ptr = (struct kvm_text*)a3;
 	const uintptr_t text_count = a4;
-
-	const uintptr_t page_size = 16 << 10;
-	const uintptr_t guest_mem_size = 256 << 20;
-	const uintptr_t guest_mem = 0;
+	uintptr_t flags = a5;
+	const uintptr_t page_size = 0x10000;
+	const uintptr_t guest_mem_size = 24 * page_size;
+	unsigned long gpa_off = 0;
+	uint32 debug_inst_opcode = 0;
 
 	(void)text_count;
 	const void* text = 0;
 	uintptr_t text_size = 0;
+	uint64 pid = 0;
+	uint64 lpcr = 0;
 	NONFAILING(text = text_array_ptr[0].text);
 	NONFAILING(text_size = text_array_ptr[0].size);
+
+	if (kvm_vcpu_enable_cap(cpufd, KVM_CAP_PPC_PAPR))
+		return -1;
+
+	if (kvm_vm_enable_cap(vmfd, KVM_CAP_PPC_NESTED_HV, true, 0))
+		return -1;
 
 	for (uintptr_t i = 0; i < guest_mem_size / page_size; i++) {
 		struct kvm_userspace_memory_region memreg;
 		memreg.slot = i;
 		memreg.flags = 0;
-		memreg.guest_phys_addr = guest_mem + i * page_size;
+		memreg.guest_phys_addr = i * page_size;
 		memreg.memory_size = page_size;
 		memreg.userspace_addr = (uintptr_t)host_mem + i * page_size;
-		ioctl(vmfd, KVM_SET_USER_MEMORY_REGION, &memreg);
+		if (ioctl(vmfd, KVM_SET_USER_MEMORY_REGION, &memreg))
+			return -1;
 	}
 
 	struct kvm_regs regs;
@@ -7352,29 +7983,189 @@ static long syz_kvm_setup_cpu(volatile long a0, volatile long a1, volatile long 
 		return -1;
 	if (ioctl(cpufd, KVM_GET_REGS, &regs))
 		return -1;
-	regs.msr = 1ULL | (1ULL << 63);
 
-	memcpy(host_mem, text, text_size);
+	regs.msr = PPC_BIT(0);
+	if (flags & KVM_SETUP_PPC64_LE)
+		regs.msr |= PPC_BIT(63);
+	if (flags & KVM_SETUP_PPC64_PR) {
+		regs.msr |= PPC_BIT(49);
+		flags |= KVM_SETUP_PPC64_IR | KVM_SETUP_PPC64_DR | KVM_SETUP_PPC64_PID1;
+	}
+
+	if (flags & KVM_SETUP_PPC64_IR)
+		regs.msr |= PPC_BIT(58);
+	if (flags & KVM_SETUP_PPC64_DR)
+		regs.msr |= PPC_BIT(59);
+	if (flags & KVM_SETUP_PPC64_PID1)
+		pid = 1;
+	if (kvmppc_get_one_reg(cpufd, KVM_REG_PPC_DEBUG_INST, &debug_inst_opcode))
+		return -1;
+
+#define VEC(x) (*((uint32*)(host_mem + (x))))
+	VEC(BOOK3S_INTERRUPT_SYSTEM_RESET) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_MACHINE_CHECK) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_DATA_STORAGE) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_DATA_SEGMENT) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_INST_STORAGE) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_INST_SEGMENT) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_EXTERNAL) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_EXTERNAL_HV) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_ALIGNMENT) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_PROGRAM) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_FP_UNAVAIL) = debug_inst_opcode;
+	memcpy(host_mem + BOOK3S_INTERRUPT_DECREMENTER, kvm_ppc64_recharge_dec, sizeof(kvm_ppc64_recharge_dec) - 1);
+	VEC(BOOK3S_INTERRUPT_DECREMENTER + sizeof(kvm_ppc64_recharge_dec) - 1) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_HV_DECREMENTER) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_DOORBELL) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_SYSCALL) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_TRACE) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_H_DATA_STORAGE) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_H_INST_STORAGE) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_H_EMUL_ASSIST) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_HMI) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_H_DOORBELL) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_H_VIRT) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_PERFMON) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_ALTIVEC) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_VSX) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_FAC_UNAVAIL) = debug_inst_opcode;
+	VEC(BOOK3S_INTERRUPT_H_FAC_UNAVAIL) = debug_inst_opcode;
+
+	struct kvm_guest_debug dbg = {0};
+	dbg.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP;
+
+	if (ioctl(cpufd, KVM_SET_GUEST_DEBUG, &dbg))
+		return -1;
+	gpa_off = 128 << 10;
+	if (flags & (KVM_SETUP_PPC64_IR | KVM_SETUP_PPC64_DR)) {
+		uintptr_t process_tb_off = gpa_off;
+		unsigned long process_tb_size = 1UL << (PRTB_SIZE_SHIFT + 4);
+		struct prtb_entry {
+			__be64 prtb0;
+			__be64 prtb1;
+		}* process_tb = (struct prtb_entry*)(host_mem + gpa_off);
+
+		memset(process_tb, 0xcc, process_tb_size);
+		gpa_off += process_tb_size;
+
+		unsigned long *pgd, *pud, *pmd, *pte, i;
+		uintptr_t pgd_off = gpa_off;
+		pgd = (unsigned long*)(host_mem + pgd_off);
+		gpa_off += page_size;
+		uintptr_t pud_off = gpa_off;
+		pud = (unsigned long*)(host_mem + pud_off);
+		gpa_off += page_size;
+		uintptr_t pmd_off = gpa_off;
+		pmd = (unsigned long*)(host_mem + pmd_off);
+		gpa_off += page_size;
+		uintptr_t pte_off = gpa_off;
+		pte = (unsigned long*)(host_mem + pte_off);
+		gpa_off += page_size;
+
+		memset(pgd, 0, page_size);
+		memset(pud, 0, page_size);
+		memset(pmd, 0, page_size);
+		memset(pte, 0, page_size);
+		pgd[0] = cpu_to_be64(PPC_BIT(0) |
+				     (pud_off & PPC_BITMASK(4, 55)) |
+				     RADIX_PUD_INDEX_SIZE);
+		pud[0] = cpu_to_be64(PPC_BIT(0) |
+				     (pmd_off & PPC_BITMASK(4, 55)) |
+				     RADIX_PMD_INDEX_SIZE);
+		pmd[0] = cpu_to_be64(PPC_BIT(0) |
+				     (pte_off & PPC_BITMASK(4, 55)) |
+				     RADIX_PTE_INDEX_SIZE);
+		for (i = 0; i < 24; ++i)
+			pte[i] = cpu_to_be64(PPC_BIT(0) |
+					     PPC_BIT(1) |
+					     ((i * page_size) & PPC_BITMASK(7, 51)) |
+					     PPC_BIT(55) |
+					     PPC_BIT(56) |
+					     PPC_BIT(61) |
+					     PPC_BIT(62) |
+					     PPC_BIT(63));
+
+		const long max_shift = 52;
+		const unsigned long rts = (max_shift - 31) & 0x1f;
+		const unsigned long rts1 = (rts >> 3) << PPC_BITLSHIFT(2);
+		const unsigned long rts2 = (rts & 7) << PPC_BITLSHIFT(58);
+
+		process_tb[0].prtb0 = cpu_to_be64(PATB_HR | rts1 | pgd_off | rts2 | RADIX_PGD_INDEX_SIZE);
+		if (pid)
+			process_tb[pid].prtb0 = cpu_to_be64(PATB_HR | rts1 | pgd_off | rts2 | RADIX_PGD_INDEX_SIZE);
+		struct kvm_ppc_mmuv3_cfg cfg = {
+		    .flags = KVM_PPC_MMUV3_RADIX | KVM_PPC_MMUV3_GTSE,
+		    .process_table = (process_tb_off & PRTB_MASK) | (PRTB_SIZE_SHIFT - 12) | PATB_GR,
+		};
+		if (ioctl(vmfd, KVM_PPC_CONFIGURE_V3_MMU, &cfg))
+			return -1;
+
+		lpcr |= LPCR_UPRT | LPCR_HR;
+#ifdef DEBUG
+		printf("MMUv3: flags=%lx %016lx\n", cfg.flags, cfg.process_table);
+		printf("PTRB0=%016lx PGD0=%016lx PUD0=%016lx PMD0=%016lx\n",
+		       be64_to_cpu((unsigned long)process_tb[0].prtb0), be64_to_cpu((unsigned long)pgd[0]),
+		       be64_to_cpu((unsigned long)pud[0]), be64_to_cpu((unsigned long)pmd[0]));
+		printf("PTEs @%lx:\n  %016lx %016lx %016lx %016lx\n  %016lx %016lx %016lx %016lx\n",
+		       pte_off,
+		       be64_to_cpu((unsigned long)pte[0]), be64_to_cpu((unsigned long)pte[1]),
+		       be64_to_cpu((unsigned long)pte[2]), be64_to_cpu((unsigned long)pte[3]),
+		       be64_to_cpu((unsigned long)pte[4]), be64_to_cpu((unsigned long)pte[5]),
+		       be64_to_cpu((unsigned long)pte[6]), be64_to_cpu((unsigned long)pte[7]));
+#endif
+	}
+
+	memcpy(host_mem + gpa_off, text, text_size);
+	regs.pc = gpa_off;
+
+	uintptr_t end_of_text = gpa_off + ((text_size + 3) & ~3);
+	memcpy(host_mem + end_of_text, &debug_inst_opcode, sizeof(debug_inst_opcode));
+	if (!(flags & KVM_SETUP_PPC64_LE)) {
+		uint32* p = (uint32*)(host_mem + gpa_off);
+		for (unsigned long i = 0; i < text_size / sizeof(*p); ++i)
+			p[i] = cpu_to_be32(p[i]);
+
+		p = (uint32*)(host_mem + BOOK3S_INTERRUPT_DECREMENTER);
+		for (unsigned long i = 0; i < sizeof(kvm_ppc64_recharge_dec) / sizeof(*p); ++i)
+			p[i] = cpu_to_be32(p[i]);
+	} else {
+		lpcr |= LPCR_ILE;
+	}
 
 	if (ioctl(cpufd, KVM_SET_SREGS, &sregs))
 		return -1;
 	if (ioctl(cpufd, KVM_SET_REGS, &regs))
 		return -1;
+	if (kvmppc_set_one_reg(cpufd, KVM_REG_PPC_LPCR_64, &lpcr))
+		return -1;
+	if (kvmppc_set_one_reg(cpufd, KVM_REG_PPC_PID, &pid))
+		return -1;
 #define MAX_HCALL 0x450
-	for (unsigned hcall = 4; hcall < MAX_HCALL; hcall += 4) {
-		struct kvm_enable_cap cap = {
-		    .cap = KVM_CAP_PPC_ENABLE_HCALL,
-		    .flags = 0,
-		    .args = {hcall, 1},
-		};
-		ioctl(vmfd, KVM_ENABLE_CAP, &cap);
-	}
+	for (unsigned hcall = 4; hcall < MAX_HCALL; hcall += 4)
+		kvm_vm_enable_cap(vmfd, KVM_CAP_PPC_ENABLE_HCALL, hcall, 1);
+
+	for (unsigned hcall = 0xf000; hcall < 0xf810; hcall += 4)
+		kvm_vm_enable_cap(vmfd, KVM_CAP_PPC_ENABLE_HCALL, hcall, 1);
+
+	for (unsigned hcall = 0xef00; hcall < 0xef20; hcall += 4)
+		kvm_vm_enable_cap(vmfd, KVM_CAP_PPC_ENABLE_HCALL, hcall, 1);
+	kvmppc_define_rtas_kernel_token(vmfd, 1, "ibm,set-xive");
+	kvmppc_define_rtas_kernel_token(vmfd, 2, "ibm,get-xive");
+	kvmppc_define_rtas_kernel_token(vmfd, 3, "ibm,int-on");
+	kvmppc_define_rtas_kernel_token(vmfd, 4, "ibm,int-off");
+
+	dump_text(host_mem, regs.pc, 8, debug_inst_opcode);
+	dump_text(host_mem, BOOK3S_INTERRUPT_DECREMENTER, 16, debug_inst_opcode);
+
+	uint64 decr = 0x7fffffff;
+	if (kvmppc_set_one_reg(cpufd, KVM_REG_PPC_DEC_EXPIRY, &decr))
+		return -1;
 
 	return 0;
 }
 
 #elif !GOARCH_arm
-static long syz_kvm_setup_cpu(volatile long a0, volatile long a1, volatile long a2, volatile long a3, volatile long a4, volatile long a5, volatile long a6, volatile long a7)
+static volatile long syz_kvm_setup_cpu(volatile long a0, volatile long a1, volatile long a2, volatile long a3, volatile long a4, volatile long a5, volatile long a6, volatile long a7)
 {
 	return 0;
 }
@@ -7382,7 +8173,7 @@ static long syz_kvm_setup_cpu(volatile long a0, volatile long a1, volatile long 
 #endif
 #endif
 
-#if SYZ_EXECUTOR || SYZ_NET_RESET
+#if (SYZ_EXECUTOR || SYZ_NET_RESET) && SYZ_EXECUTOR_USES_FORK_SERVER
 #include <errno.h>
 #include <net/if.h>
 #include <netinet/in.h>
@@ -7849,52 +8640,86 @@ static void reset_net_namespace(void)
 
 #if SYZ_EXECUTOR || (SYZ_CGROUPS && (SYZ_SANDBOX_NONE || SYZ_SANDBOX_SETUID || SYZ_SANDBOX_NAMESPACE || SYZ_SANDBOX_ANDROID))
 #include <fcntl.h>
+#include <string.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
-static void setup_cgroups()
+static void mount_cgroups(const char* dir, const char** controllers, int count)
 {
-#if SYZ_EXECUTOR
-	if (!flag_cgroups)
+	if (mkdir(dir, 0777)) {
+		debug("mkdir(%s) failed: %d\n", dir, errno);
 		return;
-#endif
-	if (mkdir("/syzcgroup", 0777)) {
-		debug("mkdir(/syzcgroup) failed: %d\n", errno);
 	}
+	char enabled[128] = {0};
+	int i = 0;
+	for (; i < count; i++) {
+		if (mount("none", dir, "cgroup", 0, controllers[i])) {
+			debug("mount(%s, %s) failed: %d\n", dir, controllers[i], errno);
+			continue;
+		}
+		umount(dir);
+		strcat(enabled, ",");
+		strcat(enabled, controllers[i]);
+	}
+	if (enabled[0] == 0) {
+		if (rmdir(dir) && errno != EBUSY)
+			failmsg("rmdir failed", "dir=%s", dir);
+		return;
+	}
+	if (mount("none", dir, "cgroup", 0, enabled + 1)) {
+		debug("mount(%s, %s) failed: %d\n", dir, enabled + 1, errno);
+		if (rmdir(dir) && errno != EBUSY)
+			failmsg("rmdir failed", "dir=%s enabled=%s", dir, enabled);
+	}
+	if (chmod(dir, 0777)) {
+		debug("chmod(%s) failed: %d\n", dir, errno);
+	}
+}
+
+static void mount_cgroups2(const char** controllers, int count)
+{
 	if (mkdir("/syzcgroup/unified", 0777)) {
 		debug("mkdir(/syzcgroup/unified) failed: %d\n", errno);
+		return;
 	}
 	if (mount("none", "/syzcgroup/unified", "cgroup2", 0, NULL)) {
 		debug("mount(cgroup2) failed: %d\n", errno);
+		if (rmdir("/syzcgroup/unified") && errno != EBUSY)
+			fail("rmdir(/syzcgroup/unified) failed");
+		return;
 	}
 	if (chmod("/syzcgroup/unified", 0777)) {
 		debug("chmod(/syzcgroup/unified) failed: %d\n", errno);
 	}
-	write_file("/syzcgroup/unified/cgroup.subtree_control", "+cpu +memory +io +pids +rdma");
-	if (mkdir("/syzcgroup/cpu", 0777)) {
-		debug("mkdir(/syzcgroup/cpu) failed: %d\n", errno);
-	}
-	if (mount("none", "/syzcgroup/cpu", "cgroup", 0, "cpuset,cpuacct,perf_event,hugetlb")) {
-		debug("mount(cgroup cpu) failed: %d\n", errno);
-	}
-	write_file("/syzcgroup/cpu/cgroup.clone_children", "1");
-	write_file("/syzcgroup/cpu/cpuset.memory_pressure_enabled", "1");
-	if (chmod("/syzcgroup/cpu", 0777)) {
-		debug("chmod(/syzcgroup/cpu) failed: %d\n", errno);
-	}
-	if (mkdir("/syzcgroup/net", 0777)) {
-		debug("mkdir(/syzcgroup/net) failed: %d\n", errno);
-	}
-	if (mount("none", "/syzcgroup/net", "cgroup", 0, "net_cls,net_prio,devices,freezer")) {
-		debug("mount(cgroup net) failed: %d\n", errno);
-	}
-	if (chmod("/syzcgroup/net", 0777)) {
-		debug("chmod(/syzcgroup/net) failed: %d\n", errno);
-	}
+	int control = open("/syzcgroup/unified/cgroup.subtree_control", O_WRONLY);
+	if (control == -1)
+		return;
+	int i;
+	for (i = 0; i < count; i++)
+		if (write(control, controllers[i], strlen(controllers[i])) < 0) {
+			debug("write(cgroup.subtree_control, %s) failed: %d\n", controllers[i], errno);
+		}
+	close(control);
 }
 
-#if SYZ_EXECUTOR || SYZ_REPEAT
+static void setup_cgroups()
+{
+	const char* unified_controllers[] = {"+cpu", "+memory", "+io", "+pids"};
+	const char* net_controllers[] = {"net", "net_prio", "devices", "blkio", "freezer"};
+	const char* cpu_controllers[] = {"cpuset", "cpuacct", "hugetlb", "rlimit"};
+	if (mkdir("/syzcgroup", 0777)) {
+		debug("mkdir(/syzcgroup) failed: %d\n", errno);
+		return;
+	}
+	mount_cgroups2(unified_controllers, sizeof(unified_controllers) / sizeof(unified_controllers[0]));
+	mount_cgroups("/syzcgroup/net", net_controllers, sizeof(net_controllers) / sizeof(net_controllers[0]));
+	mount_cgroups("/syzcgroup/cpu", cpu_controllers, sizeof(cpu_controllers) / sizeof(cpu_controllers[0]));
+	write_file("/syzcgroup/cpu/cgroup.clone_children", "1");
+	write_file("/syzcgroup/cpu/cpuset.memory_pressure_enabled", "1");
+}
+
+#if (SYZ_EXECUTOR || SYZ_REPEAT) && SYZ_EXECUTOR_USES_FORK_SERVER
 static void setup_cgroups_loop()
 {
 #if SYZ_EXECUTOR
@@ -7986,14 +8811,29 @@ static void initialize_cgroups()
 #if SYZ_EXECUTOR || SYZ_SANDBOX_NONE || SYZ_SANDBOX_SETUID || SYZ_SANDBOX_NAMESPACE || SYZ_SANDBOX_ANDROID
 #include <errno.h>
 #include <sys/mount.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static void setup_common()
 {
 	if (mount(0, "/sys/fs/fuse/connections", "fusectl", 0, 0)) {
 		debug("mount(fusectl) failed: %d\n", errno);
 	}
-#if SYZ_EXECUTOR || SYZ_CGROUPS
-	setup_cgroups();
+}
+
+static void setup_binderfs()
+{
+	if (mkdir("/dev/binderfs", 0777)) {
+		debug("mkdir(/dev/binderfs) failed: %d\n", errno);
+	}
+
+	if (mount("binder", "/dev/binderfs", "binder", 0, NULL)) {
+		debug("mount of binder at /dev/binderfs failed: %d\n", errno);
+	}
+#if !SYZ_EXECUTOR && !SYZ_USE_TMP_DIR
+	if (symlink("/dev/binderfs", "./binderfs")) {
+		debug("symlink(/dev/binderfs, ./binderfs) failed: %d\n", errno);
+	}
 #endif
 }
 
@@ -8033,7 +8873,7 @@ static void sandbox_common()
 	setrlimit(RLIMIT_FSIZE, &rlim);
 	rlim.rlim_cur = rlim.rlim_max = 1 << 20;
 	setrlimit(RLIMIT_STACK, &rlim);
-	rlim.rlim_cur = rlim.rlim_max = 0;
+	rlim.rlim_cur = rlim.rlim_max = 128 << 20;
 	setrlimit(RLIMIT_CORE, &rlim);
 	rlim.rlim_cur = rlim.rlim_max = 256;
 	setrlimit(RLIMIT_NOFILE, &rlim);
@@ -8132,6 +8972,7 @@ static int do_sandbox_none(void)
 	if (unshare(CLONE_NEWNET)) {
 		debug("unshare(CLONE_NEWNET): %d\n", errno);
 	}
+	write_file("/proc/sys/net/ipv4/ping_group_range", "0 65535");
 #if SYZ_EXECUTOR || SYZ_DEVLINK_PCI
 	initialize_devlink_pci();
 #endif
@@ -8144,6 +8985,7 @@ static int do_sandbox_none(void)
 #if SYZ_EXECUTOR || SYZ_WIFI
 	initialize_wifi_devices();
 #endif
+	setup_binderfs();
 	loop();
 	doexit(1);
 }
@@ -8187,6 +9029,7 @@ static int do_sandbox_setuid(void)
 #if SYZ_EXECUTOR || SYZ_WIFI
 	initialize_wifi_devices();
 #endif
+	setup_binderfs();
 
 	const int nobody = 65534;
 	if (setgroups(0, NULL))
@@ -8226,6 +9069,7 @@ static int namespace_sandbox_proc(void* arg)
 #endif
 	if (unshare(CLONE_NEWNET))
 		fail("unshare(CLONE_NEWNET)");
+	write_file("/proc/sys/net/ipv4/ping_group_range", "0 65535");
 #if SYZ_EXECUTOR || SYZ_DEVLINK_PCI
 	initialize_devlink_pci();
 #endif
@@ -8287,6 +9131,7 @@ static int namespace_sandbox_proc(void* arg)
 		fail("chroot failed");
 	if (chdir("/"))
 		fail("chdir failed");
+	setup_binderfs();
 	drop_caps();
 
 	loop();
@@ -8324,60 +9169,74 @@ static int do_sandbox_namespace(void)
 #define PRIMARY_ARCH AUDIT_ARCH_AARCH64
 
 const struct sock_filter arm64_app_filter[] = {
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 0, 0, 54),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 160, 27, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 101, 13, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 52, 7, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 41, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 0, 0, 68),
+BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 98, 66, 0),
+BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 29, 65, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 163, 33, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 101, 17, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 52, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 41, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 30, 3, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 19, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 18, 48, 47),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 39, 47, 46),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 18, 59, 58),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 29, 58, 57),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 40, 57, 56),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 43, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 42, 45, 44),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 51, 44, 43),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 42, 55, 54),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 51, 54, 53),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 90, 3, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 59, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 58, 41, 40),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 89, 40, 39),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 100, 39, 38),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 58, 51, 50),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 89, 50, 49),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 99, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 98, 48, 47),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 100, 47, 46),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 147, 7, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 113, 3, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 107, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 104, 35, 34),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 112, 34, 33),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 104, 43, 42),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 112, 42, 41),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 117, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 116, 32, 31),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 142, 31, 30),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 116, 40, 39),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 142, 39, 38),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 153, 3, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 150, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 149, 28, 27),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 151, 27, 26),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 159, 26, 25),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 240, 13, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 203, 7, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 172, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 163, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 161, 21, 20),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 170, 20, 19),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 198, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 180, 18, 17),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 202, 17, 16),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 226, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 220, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 217, 14, 13),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 224, 13, 12),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 234, 12, 11),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 274, 5, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 267, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 149, 36, 35),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 151, 35, 34),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 160, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 159, 33, 32),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 161, 32, 31),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 267, 15, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 220, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 198, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 172, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 170, 27, 26),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 180, 26, 25),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 203, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 202, 24, 23),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 217, 23, 22),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 240, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 226, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 224, 20, 19),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 234, 19, 18),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 260, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 244, 8, 7),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 262, 7, 6),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 272, 6, 5),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 283, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 281, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 280, 3, 2),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 282, 2, 1),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 288, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 244, 17, 16),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 262, 16, 15),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 434, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 291, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 274, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 272, 12, 11),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 288, 11, 10),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 424, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 292, 9, 8),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 425, 8, 7),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 438, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 436, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 435, 5, 4),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 437, 4, 3),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 440, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 439, 2, 1),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 441, 1, 0),
 BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
 };
 
@@ -8385,37 +9244,642 @@ BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
 
 static const struct sock_filter* primary_app_filter = arm64_app_filter;
 static const size_t primary_app_filter_size = arm64_app_filter_size;
+
+const struct sock_filter arm64_system_filter[] = {
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 0, 0, 46),
+BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 98, 44, 0),
+BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 29, 43, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 226, 21, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 101, 11, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 43, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 30, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 19, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 18, 38, 37),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 29, 37, 36),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 42, 36, 35),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 99, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 59, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 58, 33, 32),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 98, 32, 31),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 100, 31, 30),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 203, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 198, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 105, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 104, 27, 26),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 180, 26, 25),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 202, 25, 24),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 220, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 217, 23, 22),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 224, 22, 21),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 424, 11, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 266, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 260, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 240, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 234, 17, 16),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 244, 16, 15),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 262, 15, 14),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 291, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 274, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 272, 12, 11),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 288, 11, 10),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 292, 10, 9),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 438, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 436, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 434, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 425, 6, 5),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 435, 5, 4),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 437, 4, 3),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 440, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 439, 2, 1),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 441, 1, 0),
+BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
+};
+
+#define arm64_system_filter_size (sizeof(arm64_system_filter) / sizeof(struct sock_filter))
+
+static const struct sock_filter* system_filter = arm64_system_filter;
+static const size_t system_filter_size = arm64_system_filter_size;
 #define kFilterMaxSize (arm64_app_filter_size + 3 + 1 + 4 + 2)
 
 #elif GOARCH_arm
 #define PRIMARY_ARCH AUDIT_ARCH_ARM
 
 const struct sock_filter arm_app_filter[] = {
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 0, 0, 136),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 190, 67, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 85, 33, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 0, 0, 146),
+BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 240, 144, 0),
+BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 54, 143, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 199, 71, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 85, 35, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 45, 17, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 26, 9, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 19, 5, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 10, 3, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 8, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 7, 128, 127),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 9, 127, 126),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 13, 126, 125),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 7, 136, 135),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 9, 135, 134),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 13, 134, 133),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 24, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 21, 124, 123),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 25, 123, 122),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 21, 132, 131),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 25, 131, 130),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 36, 3, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 33, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 27, 120, 119),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 34, 119, 118),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 27, 128, 127),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 34, 127, 126),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 41, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 40, 117, 116),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 44, 116, 115),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 63, 7, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 57, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 54, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 46, 112, 111),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 40, 125, 124),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 44, 124, 123),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 63, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 57, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 55, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 52, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 46, 119, 118),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 53, 118, 117),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 56, 117, 116),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 60, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 58, 115, 114),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 61, 114, 113),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 75, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 66, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 65, 111, 110),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 68, 110, 109),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 77, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 76, 108, 107),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 79, 107, 106),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 125, 17, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 114, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 96, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 94, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 91, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 86, 101, 100),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 93, 100, 99),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 95, 99, 98),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 104, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 98, 97, 96),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 107, 96, 95),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 118, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 116, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 115, 93, 92),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 117, 92, 91),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 122, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 121, 90, 89),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 123, 89, 88),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 168, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 140, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 136, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 131, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 126, 84, 83),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 134, 83, 82),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 137, 82, 81),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 150, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 149, 80, 79),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 164, 79, 78),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 183, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 172, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 169, 76, 75),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 182, 75, 74),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 190, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 188, 73, 72),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 198, 72, 71),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 327, 35, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 256, 17, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 219, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 211, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 207, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 205, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 203, 65, 64),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 206, 64, 63),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 210, 63, 62),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 217, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 212, 61, 60),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 218, 60, 59),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 241, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 224, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 222, 57, 56),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 240, 56, 55),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 250, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 249, 54, 53),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 254, 53, 52),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 290, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 280, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 270, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 263, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 262, 48, 47),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 269, 47, 46),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 271, 46, 45),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 286, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 285, 44, 43),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 289, 43, 42),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 316, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 292, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 291, 40, 39),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 298, 39, 38),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 322, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 319, 37, 36),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 326, 36, 35),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 403, 17, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 369, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 348, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 345, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 340, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 339, 30, 29),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 344, 29, 28),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 347, 28, 27),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 350, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 349, 26, 25),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 367, 25, 24),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 380, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 373, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 370, 22, 21),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 378, 21, 20),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 397, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 394, 19, 18),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 398, 18, 17),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 438, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 434, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 420, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 417, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 415, 13, 12),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 418, 12, 11),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 425, 11, 10),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 436, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 435, 9, 8),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 437, 8, 7),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 983042, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 440, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 439, 5, 4),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 441, 4, 3),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 983045, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 983043, 2, 1),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 983046, 1, 0),
+BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
+};
+
+#define arm_app_filter_size (sizeof(arm_app_filter) / sizeof(struct sock_filter))
+
+static const struct sock_filter* primary_app_filter = arm_app_filter;
+static const size_t primary_app_filter_size = arm_app_filter_size;
+
+const struct sock_filter arm_system_filter[] = {
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 0, 0, 142),
+BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 240, 140, 0),
+BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 54, 139, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 197, 69, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 91, 35, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 51, 17, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 36, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 19, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 11, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 3, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 2, 132, 131),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 7, 131, 130),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 13, 130, 129),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 26, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 22, 128, 127),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 27, 127, 126),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 43, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 41, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 38, 124, 123),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 42, 123, 122),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 45, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 44, 121, 120),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 46, 120, 119),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 74, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 64, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 60, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 57, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 53, 115, 114),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 58, 114, 113),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 62, 113, 112),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 66, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 65, 111, 110),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 68, 110, 109),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 85, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 77, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 76, 107, 106),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 80, 106, 105),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 88, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 86, 104, 103),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 89, 103, 102),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 131, 17, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 116, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 103, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 96, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 94, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 93, 97, 96),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 95, 96, 95),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 98, 95, 94),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 114, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 107, 93, 92),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 115, 92, 91),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 124, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 118, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 117, 89, 88),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 123, 88, 87),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 128, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 126, 86, 85),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 130, 85, 84),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 150, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 138, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 136, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 134, 81, 80),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 137, 80, 79),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 143, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 141, 78, 77),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 149, 77, 76),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 183, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 172, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 164, 74, 73),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 182, 73, 72),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 190, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 188, 71, 70),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 196, 70, 69),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 345, 35, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 270, 17, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 224, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 217, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 213, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 199, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 198, 63, 62),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 212, 62, 61),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 215, 61, 60),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 219, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 218, 59, 58),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 222, 58, 57),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 251, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 241, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 240, 55, 54),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 249, 54, 53),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 256, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 252, 52, 51),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 269, 51, 50),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 317, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 290, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 286, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 280, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 271, 46, 45),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 285, 45, 44),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 289, 44, 43),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 292, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 291, 42, 41),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 298, 41, 40),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 327, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 322, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 319, 38, 37),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 326, 37, 36),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 340, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 339, 35, 34),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 344, 34, 33),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 417, 17, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 372, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 352, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 350, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 348, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 347, 28, 27),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 349, 27, 26),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 351, 26, 25),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 369, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 367, 24, 23),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 370, 23, 22),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 397, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 380, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 378, 20, 19),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 394, 19, 18),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 403, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 398, 17, 16),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 415, 16, 15),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 438, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 434, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 420, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 418, 12, 11),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 425, 11, 10),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 436, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 435, 9, 8),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 437, 8, 7),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 983042, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 440, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 439, 5, 4),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 441, 4, 3),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 983045, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 983043, 2, 1),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 983046, 1, 0),
+BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
+};
+
+#define arm_system_filter_size (sizeof(arm_system_filter) / sizeof(struct sock_filter))
+
+static const struct sock_filter* system_filter = arm_system_filter;
+static const size_t system_filter_size = arm_system_filter_size;
+#define kFilterMaxSize (arm_app_filter_size + 3 + 1 + 4 + 2)
+
+#elif GOARCH_amd64
+#define PRIMARY_ARCH AUDIT_ARCH_X86_64
+
+const struct sock_filter x86_64_app_filter[] = {
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 0, 0, 114),
+BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 202, 112, 0),
+BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 16, 111, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 166, 55, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 104, 27, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 44, 13, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 32, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 17, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 8, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 6, 105, 104),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 16, 104, 103),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 24, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 21, 102, 101),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 29, 101, 100),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 38, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 35, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 33, 98, 97),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 37, 97, 96),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 43, 96, 95),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 91, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 72, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 58, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 57, 92, 91),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 64, 91, 90),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 89, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 82, 89, 88),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 90, 88, 87),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 95, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 93, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 92, 85, 84),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 94, 84, 83),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 103, 83, 82),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 135, 13, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 117, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 112, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 107, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 105, 78, 77),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 111, 77, 76),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 115, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 113, 75, 74),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 116, 74, 73),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 124, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 120, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 119, 71, 70),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 122, 70, 69),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 132, 69, 68),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 157, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 140, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 137, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 136, 65, 64),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 139, 64, 63),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 155, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 153, 62, 61),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 156, 61, 60),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 162, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 160, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 159, 58, 57),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 161, 57, 56),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 163, 56, 55),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 275, 27, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 228, 13, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 206, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 186, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 179, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 167, 50, 49),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 180, 49, 48),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 203, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 201, 47, 46),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 205, 46, 45),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 221, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 217, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 211, 43, 42),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 220, 42, 41),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 227, 41, 40),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 254, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 247, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 233, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 232, 37, 36),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 235, 36, 35),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 251, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 248, 34, 33),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 253, 33, 32),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 262, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 257, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 256, 30, 29),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 261, 29, 28),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 274, 28, 27),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 321, 13, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 302, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 283, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 280, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 279, 23, 22),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 282, 22, 21),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 285, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 284, 20, 19),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 300, 19, 18),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 314, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 306, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 303, 16, 15),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 312, 15, 14),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 320, 14, 13),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 436, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 424, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 332, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 329, 10, 9),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 333, 9, 8),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 434, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 425, 7, 6),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 435, 6, 5),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 440, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 438, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 437, 3, 2),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 439, 2, 1),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 441, 1, 0),
+BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
+};
+
+#define x86_64_app_filter_size (sizeof(x86_64_app_filter) / sizeof(struct sock_filter))
+
+static const struct sock_filter* primary_app_filter = x86_64_app_filter;
+static const size_t primary_app_filter_size = x86_64_app_filter_size;
+
+const struct sock_filter x86_64_system_filter[] = {
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 0, 0, 100),
+BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 202, 98, 0),
+BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 16, 97, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 203, 49, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 93, 25, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 44, 13, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 32, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 17, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 8, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 6, 91, 90),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 16, 90, 89),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 24, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 21, 88, 87),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 29, 87, 86),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 38, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 35, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 33, 84, 83),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 37, 83, 82),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 43, 82, 81),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 79, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 72, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 58, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 57, 78, 77),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 64, 77, 76),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 78, 76, 75),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 91, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 89, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 82, 73, 72),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 90, 72, 71),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 92, 71, 70),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 155, 11, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 135, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 112, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 95, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 94, 66, 65),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 111, 65, 64),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 132, 64, 63),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 140, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 137, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 136, 61, 60),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 139, 60, 59),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 153, 59, 58),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 175, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 169, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 157, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 156, 55, 54),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 167, 54, 53),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 172, 53, 52),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 186, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 179, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 177, 50, 49),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 180, 49, 48),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 201, 48, 47),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 283, 23, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 251, 11, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 221, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 217, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 206, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 205, 42, 41),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 211, 41, 40),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 220, 40, 39),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 247, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 233, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 232, 37, 36),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 235, 36, 35),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 248, 35, 34),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 262, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 257, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 254, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 253, 31, 30),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 256, 30, 29),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 261, 29, 28),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 280, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 275, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 274, 26, 25),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 279, 25, 24),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 282, 24, 23),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 332, 11, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 305, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 302, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 285, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 284, 19, 18),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 300, 18, 17),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 303, 17, 16),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 321, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 314, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 312, 14, 13),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 320, 13, 12),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 329, 12, 11),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 436, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 434, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 424, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 333, 8, 7),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 425, 7, 6),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 435, 6, 5),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 440, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 438, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 437, 3, 2),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 439, 2, 1),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 441, 1, 0),
+BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
+};
+
+#define x86_64_system_filter_size (sizeof(x86_64_system_filter) / sizeof(struct sock_filter))
+
+static const struct sock_filter* system_filter = x86_64_system_filter;
+static const size_t system_filter_size = x86_64_system_filter_size;
+#define kFilterMaxSize (x86_64_app_filter_size + 3 + 1 + 4 + 2)
+
+#elif GOARCH_386
+#define PRIMARY_ARCH AUDIT_ARCH_I386
+
+const struct sock_filter x86_app_filter[] = {
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 0, 0, 140),
+BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 240, 138, 0),
+BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 54, 137, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 183, 69, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 85, 35, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 45, 17, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 26, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 19, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 10, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 8, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 7, 130, 129),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 9, 129, 128),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 13, 128, 127),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 24, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 21, 126, 125),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 25, 125, 124),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 36, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 33, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 27, 122, 121),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 34, 121, 120),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 41, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 40, 119, 118),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 44, 118, 117),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 63, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 57, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 55, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 52, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 46, 113, 112),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 53, 112, 111),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 56, 111, 110),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 60, 1, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 58, 109, 108),
@@ -8427,352 +9891,106 @@ BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 68, 104, 103),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 77, 1, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 76, 102, 101),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 79, 101, 100),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 125, 17, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 114, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 122, 17, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 104, 9, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 96, 5, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 94, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 91, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 90, 1, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 86, 95, 94),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 93, 94, 93),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 95, 93, 92),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 104, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 102, 1, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 98, 91, 90),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 106, 90, 89),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 118, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 116, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 115, 87, 86),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 117, 86, 85),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 122, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 121, 84, 83),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 123, 83, 82),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 150, 7, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 136, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 131, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 126, 79, 78),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 134, 78, 77),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 140, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 137, 76, 75),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 149, 75, 74),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 172, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 168, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 164, 72, 71),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 169, 71, 70),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 183, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 182, 69, 68),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 188, 68, 67),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 322, 33, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 256, 17, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 217, 9, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 207, 5, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 205, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 199, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 198, 61, 60),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 203, 60, 59),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 206, 59, 58),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 211, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 210, 57, 56),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 212, 56, 55),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 224, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 219, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 218, 53, 52),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 222, 52, 51),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 250, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 249, 50, 49),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 254, 49, 48),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 286, 7, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 270, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 263, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 262, 45, 44),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 269, 44, 43),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 280, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 271, 42, 41),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 285, 41, 40),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 292, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 290, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 289, 38, 37),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 291, 37, 36),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 316, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 298, 35, 34),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 319, 34, 33),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 387, 17, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 350, 9, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 345, 5, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 340, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 327, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 326, 28, 27),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 338, 27, 26),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 344, 26, 25),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 348, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 347, 24, 23),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 349, 23, 22),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 373, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 369, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 367, 20, 19),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 370, 19, 18),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 380, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 378, 17, 16),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 386, 16, 15),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 417, 7, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 397, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 389, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 388, 12, 11),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 394, 11, 10),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 403, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 398, 9, 8),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 415, 8, 7),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 983042, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 420, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 418, 5, 4),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 424, 4, 3),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 983045, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 983043, 2, 1),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 983046, 1, 0),
-BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
-};
-
-#define arm_app_filter_size (sizeof(arm_app_filter) / sizeof(struct sock_filter))
-
-static const struct sock_filter* primary_app_filter = arm_app_filter;
-static const size_t primary_app_filter_size = arm_app_filter_size;
-#define kFilterMaxSize (arm_app_filter_size + 3 + 1 + 4 + 2)
-
-#elif GOARCH_amd64
-#define PRIMARY_ARCH AUDIT_ARCH_X86_64
-
-const struct sock_filter x86_64_app_filter[] = {
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 0, 0, 100),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 157, 49, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 95, 25, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 44, 13, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 32, 7, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 8, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 5, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 4, 93, 92),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 6, 92, 91),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 24, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 21, 90, 89),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 29, 89, 88),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 38, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 35, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 33, 86, 85),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 37, 85, 84),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 43, 84, 83),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 89, 5, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 72, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 58, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 57, 80, 79),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 64, 79, 78),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 82, 78, 77),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 93, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 91, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 90, 75, 74),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 92, 74, 73),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 94, 73, 72),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 120, 11, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 112, 5, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 107, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 104, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 103, 68, 67),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 105, 67, 66),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 111, 66, 65),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 117, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 115, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 113, 63, 62),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 116, 62, 61),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 119, 61, 60),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 137, 5, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 135, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 124, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 122, 57, 56),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 132, 56, 55),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 136, 55, 54),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 155, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 140, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 139, 52, 51),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 153, 51, 50),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 156, 50, 49),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 254, 25, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 217, 13, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 186, 7, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 162, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 160, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 159, 44, 43),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 161, 43, 42),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 179, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 163, 41, 40),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 180, 40, 39),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 206, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 202, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 201, 37, 36),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 205, 36, 35),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 211, 35, 34),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 233, 5, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 228, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 221, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 220, 31, 30),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 227, 30, 29),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 232, 29, 28),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 251, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 247, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 235, 26, 25),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 248, 25, 24),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 253, 24, 23),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 285, 11, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 275, 5, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 262, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 257, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 256, 19, 18),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 261, 18, 17),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 274, 17, 16),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 283, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 280, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 279, 14, 13),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 282, 13, 12),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 284, 12, 11),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 314, 5, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 306, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 302, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 300, 8, 7),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 303, 7, 6),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 312, 6, 5),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 324, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 322, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 320, 3, 2),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 323, 2, 1),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 329, 1, 0),
-BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
-};
-
-#define x86_64_app_filter_size (sizeof(x86_64_app_filter) / sizeof(struct sock_filter))
-
-static const struct sock_filter* primary_app_filter = x86_64_app_filter;
-static const size_t primary_app_filter_size = x86_64_app_filter_size;
-#define kFilterMaxSize (x86_64_app_filter_size + 3 + 1 + 4 + 2)
-
-#elif GOARCH_386
-#define PRIMARY_ARCH AUDIT_ARCH_I386
-
-const struct sock_filter x86_app_filter[] = {
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 0, 0, 120),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 140, 59, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 75, 29, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 41, 15, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 24, 7, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 10, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 8, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 7, 113, 112),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 9, 112, 111),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 19, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 13, 110, 109),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 21, 109, 108),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 33, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 26, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 25, 106, 105),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 27, 105, 104),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 36, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 34, 103, 102),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 40, 102, 101),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 60, 7, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 54, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 45, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 44, 98, 97),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 46, 97, 96),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 57, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 56, 95, 94),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 58, 94, 93),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 66, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 63, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 61, 91, 90),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 65, 90, 89),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 68, 89, 88),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 114, 15, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 94, 7, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 85, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 77, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 76, 84, 83),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 79, 83, 82),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 90, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 86, 81, 80),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 93, 80, 79),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 102, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 96, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 95, 77, 76),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 98, 76, 75),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 104, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 103, 74, 73),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 106, 73, 72),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 125, 7, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 118, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 116, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 115, 69, 68),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 117, 68, 67),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 122, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 121, 66, 65),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 123, 65, 64),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 136, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 131, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 126, 62, 61),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 134, 61, 60),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 137, 60, 59),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 265, 29, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 207, 15, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 183, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 103, 90, 89),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 116, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 114, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 107, 87, 86),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 115, 86, 85),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 118, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 117, 84, 83),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 121, 83, 82),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 140, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 131, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 125, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 123, 79, 78),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 126, 78, 77),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 136, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 134, 76, 75),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 137, 75, 74),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 168, 3, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 150, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 149, 54, 53),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 164, 53, 52),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 149, 72, 71),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 164, 71, 70),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 172, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 169, 51, 50),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 182, 50, 49),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 169, 69, 68),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 182, 68, 67),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 300, 33, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 245, 17, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 211, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 205, 5, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 199, 3, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 190, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 188, 47, 46),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 198, 46, 45),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 205, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 203, 44, 43),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 206, 43, 42),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 245, 7, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 218, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 211, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 210, 39, 38),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 212, 38, 37),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 224, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 222, 36, 35),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 244, 35, 34),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 188, 61, 60),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 198, 60, 59),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 203, 59, 58),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 207, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 206, 57, 56),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 210, 56, 55),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 224, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 218, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 212, 53, 52),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 222, 52, 51),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 241, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 240, 50, 49),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 244, 49, 48),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 272, 7, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 254, 3, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 252, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 250, 32, 31),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 253, 31, 30),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 264, 30, 29),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 322, 15, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 295, 7, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 284, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 272, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 271, 25, 24),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 273, 24, 23),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 291, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 285, 22, 21),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 294, 21, 20),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 313, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 300, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 299, 18, 17),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 312, 17, 16),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 318, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 317, 15, 14),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 321, 14, 13),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 351, 7, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 344, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 250, 45, 44),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 253, 44, 43),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 265, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 264, 42, 41),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 271, 41, 40),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 291, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 284, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 273, 38, 37),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 285, 37, 36),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 295, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 294, 35, 34),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 299, 34, 33),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 383, 17, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 344, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 322, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 318, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 313, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 312, 28, 27),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 317, 27, 26),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 321, 26, 25),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 340, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 337, 10, 9),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 341, 9, 8),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 337, 24, 23),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 341, 23, 22),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 351, 3, 0),
 BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 346, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 345, 7, 6),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 349, 6, 5),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 375, 3, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 358, 1, 0),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 357, 3, 2),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 359, 2, 1),
-BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 380, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 345, 20, 19),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 349, 19, 18),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 374, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 359, 17, 16),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 380, 16, 15),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 434, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 417, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 403, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 384, 12, 11),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 415, 11, 10),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 420, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 418, 9, 8),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 425, 8, 7),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 438, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 436, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 435, 5, 4),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 437, 4, 3),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 440, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 439, 2, 1),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 441, 1, 0),
 BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
 };
 
@@ -8780,6 +9998,151 @@ BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
 
 static const struct sock_filter* primary_app_filter = x86_app_filter;
 static const size_t primary_app_filter_size = x86_app_filter_size;
+
+const struct sock_filter x86_system_filter[] = {
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 0, 0, 136),
+BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 240, 134, 0),
+BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 54, 133, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 190, 67, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 88, 33, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 51, 17, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 36, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 19, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 11, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 3, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 2, 126, 125),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 7, 125, 124),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 13, 124, 123),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 26, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 22, 122, 121),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 27, 121, 120),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 43, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 41, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 38, 118, 117),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 42, 117, 116),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 45, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 44, 115, 114),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 46, 114, 113),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 66, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 60, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 57, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 53, 110, 109),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 58, 109, 108),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 64, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 62, 107, 106),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 65, 106, 105),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 77, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 74, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 68, 103, 102),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 76, 102, 101),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 85, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 80, 100, 99),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 86, 99, 98),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 128, 17, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 114, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 96, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 94, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 91, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 89, 93, 92),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 93, 92, 91),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 95, 91, 90),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 102, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 98, 89, 88),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 107, 88, 87),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 118, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 116, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 115, 85, 84),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 117, 84, 83),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 124, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 123, 82, 81),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 126, 81, 80),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 143, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 136, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 131, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 130, 77, 76),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 134, 76, 75),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 138, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 137, 74, 73),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 141, 73, 72),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 172, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 150, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 149, 70, 69),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 164, 69, 68),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 183, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 182, 67, 66),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 188, 66, 65),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 318, 33, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 255, 17, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 224, 9, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 213, 5, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 199, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 197, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 196, 59, 58),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 198, 58, 57),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 212, 57, 56),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 218, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 215, 55, 54),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 222, 54, 53),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 245, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 241, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 240, 51, 50),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 244, 50, 49),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 252, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 250, 48, 47),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 253, 47, 46),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 292, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 272, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 258, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 256, 43, 42),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 271, 42, 41),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 284, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 273, 40, 39),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 285, 39, 38),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 300, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 295, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 294, 36, 35),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 299, 35, 34),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 313, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 312, 33, 32),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 317, 32, 31),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 383, 15, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 343, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 324, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 322, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 321, 27, 26),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 323, 26, 25),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 340, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 337, 24, 23),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 341, 23, 22),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 351, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 346, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 345, 20, 19),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 349, 19, 18),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 374, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 359, 17, 16),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 380, 16, 15),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 434, 7, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 417, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 403, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 384, 12, 11),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 415, 11, 10),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 420, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 418, 9, 8),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 425, 8, 7),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 438, 3, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 436, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 435, 5, 4),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 437, 4, 3),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 440, 1, 0),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 439, 2, 1),
+BPF_JUMP(BPF_JMP|BPF_JGE|BPF_K, 441, 1, 0),
+BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
+};
+
+#define x86_system_filter_size (sizeof(x86_system_filter) / sizeof(struct sock_filter))
+
+static const struct sock_filter* system_filter = x86_system_filter;
+static const size_t system_filter_size = x86_system_filter_size;
 #define kFilterMaxSize (x86_app_filter_size + 3 + 1 + 4 + 2)
 
 #else
@@ -8830,21 +10193,50 @@ static void install_filter(const Filter* f)
 	if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) < 0)
 		failmsg("could not set seccomp filter", "size=%zu", f->count);
 }
-static void set_app_seccomp_filter()
+static void set_seccomp_filter(const struct sock_filter* filter, size_t size)
 {
-	const struct sock_filter* p = primary_app_filter;
-	size_t p_size = primary_app_filter_size;
-
 	Filter f;
 	f.count = 0;
 	ValidateArchitecture(&f);
 	ExamineSyscall(&f);
 
-	for (size_t i = 0; i < p_size; ++i)
-		push_back(&f, p[i]);
+	for (size_t i = 0; i < size; ++i)
+		push_back(&f, filter[i]);
 	Disallow(&f);
 	install_filter(&f);
 }
+
+enum {
+	SCFS_RestrictedApp,
+	SCFS_SystemAccount
+};
+
+static void set_app_seccomp_filter(int account)
+{
+	if (account == SCFS_SystemAccount) {
+		set_seccomp_filter(system_filter, system_filter_size);
+	} else {
+		set_seccomp_filter(primary_app_filter, primary_app_filter_size);
+	}
+}
+
+
+#if GOARCH_amd64 || GOARCH_386
+inline int mkdir(const char* path, mode_t mode)
+{
+	return mkdirat(AT_FDCWD, path, mode);
+}
+
+inline int rmdir(const char* path)
+{
+	return unlinkat(AT_FDCWD, path, AT_REMOVEDIR);
+}
+
+inline int symlink(const char* old_path, const char* new_path)
+{
+	return symlinkat(old_path, AT_FDCWD, new_path);
+}
+#endif
 
 #endif
 #include <fcntl.h>
@@ -8860,6 +10252,9 @@ static void set_app_seccomp_filter()
 #define UNTRUSTED_APP_UID (AID_APP + 999)
 #define UNTRUSTED_APP_GID (AID_APP + 999)
 
+#define SYSTEM_UID 1000
+#define SYSTEM_GID 1000
+
 const char* const SELINUX_CONTEXT_UNTRUSTED_APP = "u:r:untrusted_app:s0:c512,c768";
 const char* const SELINUX_LABEL_APP_DATA_FILE = "u:object_r:app_data_file:s0:c512,c768";
 const char* const SELINUX_CONTEXT_FILE = "/proc/thread-self/attr/current";
@@ -8867,6 +10262,9 @@ const char* const SELINUX_XATTR_NAME = "security.selinux";
 
 const gid_t UNTRUSTED_APP_GROUPS[] = {UNTRUSTED_APP_GID, AID_NET_BT_ADMIN, AID_NET_BT, AID_INET, AID_EVERYBODY};
 const size_t UNTRUSTED_APP_NUM_GROUPS = sizeof(UNTRUSTED_APP_GROUPS) / sizeof(UNTRUSTED_APP_GROUPS[0]);
+
+const gid_t SYSTEM_GROUPS[] = {SYSTEM_GID, AID_NET_BT_ADMIN, AID_NET_BT, AID_INET, AID_EVERYBODY};
+const size_t SYSTEM_NUM_GROUPS = sizeof(SYSTEM_GROUPS) / sizeof(SYSTEM_GROUPS[0]);
 static void getcon(char* context, size_t context_size)
 {
 	int fd = open(SELINUX_CONTEXT_FILE, O_RDONLY);
@@ -8913,7 +10311,8 @@ static void setfilecon(const char* path, const char* context)
 }
 
 #define SYZ_HAVE_SANDBOX_ANDROID 1
-static int do_sandbox_android(void)
+
+static int do_sandbox_android(uint64 sandbox_arg)
 {
 	setup_common();
 #if SYZ_EXECUTOR || SYZ_VHCI_INJECTION
@@ -8925,6 +10324,10 @@ static int do_sandbox_android(void)
 #if SYZ_EXECUTOR || SYZ_NET_DEVICES
 	initialize_netdevices_init();
 #endif
+	if (unshare(CLONE_NEWNET)) {
+		debug("unshare(CLONE_NEWNET): %d\n", errno);
+	}
+	write_file("/proc/sys/net/ipv4/ping_group_range", "0 65535");
 #if SYZ_EXECUTOR || SYZ_DEVLINK_PCI
 	initialize_devlink_pci();
 #endif
@@ -8934,26 +10337,44 @@ static int do_sandbox_android(void)
 #if SYZ_EXECUTOR || SYZ_NET_DEVICES
 	initialize_netdevices();
 #endif
+	uid_t uid = UNTRUSTED_APP_UID;
+	size_t num_groups = UNTRUSTED_APP_NUM_GROUPS;
+	const gid_t* groups = UNTRUSTED_APP_GROUPS;
+	gid_t gid = UNTRUSTED_APP_GID;
+	debug("executor received sandbox_arg=%llu\n", sandbox_arg);
+	if (sandbox_arg == 1) {
+		uid = SYSTEM_UID;
+		num_groups = SYSTEM_NUM_GROUPS;
+		groups = SYSTEM_GROUPS;
+		gid = SYSTEM_GID;
 
-	if (chown(".", UNTRUSTED_APP_UID, UNTRUSTED_APP_UID) != 0)
-		fail("do_sandbox_android: chmod failed");
+		debug("fuzzing under SYSTEM account\n");
+	}
+	if (chown(".", uid, uid) != 0)
+		failmsg("do_sandbox_android: chmod failed", "sandbox_arg=%llu", sandbox_arg);
 
-	if (setgroups(UNTRUSTED_APP_NUM_GROUPS, UNTRUSTED_APP_GROUPS) != 0)
-		fail("do_sandbox_android: setgroups failed");
+	if (setgroups(num_groups, groups) != 0)
+		failmsg("do_sandbox_android: setgroups failed", "sandbox_arg=%llu", sandbox_arg);
 
-	if (setresgid(UNTRUSTED_APP_GID, UNTRUSTED_APP_GID, UNTRUSTED_APP_GID) != 0)
-		fail("do_sandbox_android: setresgid failed");
+	if (setresgid(gid, gid, gid) != 0)
+		failmsg("do_sandbox_android: setresgid failed", "sandbox_arg=%llu", sandbox_arg);
+
+	setup_binderfs();
 
 #if GOARCH_arm || GOARCH_arm64 || GOARCH_386 || GOARCH_amd64
-	set_app_seccomp_filter();
+	int account = SCFS_RestrictedApp;
+	if (sandbox_arg == 1)
+		account = SCFS_SystemAccount;
+	set_app_seccomp_filter(account);
 #endif
 
-	if (setresuid(UNTRUSTED_APP_UID, UNTRUSTED_APP_UID, UNTRUSTED_APP_UID) != 0)
-		fail("do_sandbox_android: setresuid failed");
+	if (setresuid(uid, uid, uid) != 0)
+		failmsg("do_sandbox_android: setresuid failed", "sandbox_arg=%llu", sandbox_arg);
 	prctl(PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0);
 
 	setfilecon(".", SELINUX_LABEL_APP_DATA_FILE);
-	setcon(SELINUX_CONTEXT_UNTRUSTED_APP);
+	if (uid == UNTRUSTED_APP_UID)
+		setcon(SELINUX_CONTEXT_UNTRUSTED_APP);
 
 	loop();
 	doexit(1);
@@ -8977,7 +10398,7 @@ retry:
 #if SYZ_EXECUTOR
 	if (!flag_sandbox_android)
 #endif
-		while (umount2(dir, MNT_DETACH) == 0) {
+		while (umount2(dir, MNT_DETACH | UMOUNT_NOFOLLOW) == 0) {
 			debug("umount(%s)\n", dir);
 		}
 #endif
@@ -8998,7 +10419,7 @@ retry:
 #if SYZ_EXECUTOR
 		if (!flag_sandbox_android)
 #endif
-			while (umount2(filename, MNT_DETACH) == 0) {
+			while (umount2(filename, MNT_DETACH | UMOUNT_NOFOLLOW) == 0) {
 				debug("umount(%s)\n", filename);
 			}
 #endif
@@ -9035,7 +10456,7 @@ retry:
 			if (!flag_sandbox_android) {
 #endif
 				debug("umount(%s)\n", filename);
-				if (umount2(filename, MNT_DETACH))
+				if (umount2(filename, MNT_DETACH | UMOUNT_NOFOLLOW))
 					exitf("umount(%s) failed", filename);
 #if SYZ_EXECUTOR
 			}
@@ -9069,7 +10490,7 @@ retry:
 				if (!flag_sandbox_android) {
 #endif
 					debug("umount(%s)\n", dir);
-					if (umount2(dir, MNT_DETACH))
+					if (umount2(dir, MNT_DETACH | UMOUNT_NOFOLLOW))
 						exitf("umount(%s) failed", dir);
 #if SYZ_EXECUTOR
 				}
@@ -9102,7 +10523,7 @@ static int inject_fault(int nth)
 	if (fd == -1)
 		exitf("failed to open /proc/thread-self/fail-nth");
 	char buf[16];
-	sprintf(buf, "%d", nth + 1);
+	sprintf(buf, "%d", nth);
 	if (write(fd, buf, strlen(buf)) != (ssize_t)strlen(buf))
 		exitf("failed to write /proc/thread-self/fail-nth");
 	return fd;
@@ -9125,7 +10546,7 @@ static int fault_injected(int fail_fd)
 }
 #endif
 
-#if SYZ_EXECUTOR || SYZ_REPEAT
+#if (SYZ_EXECUTOR || SYZ_REPEAT) && SYZ_EXECUTOR_USES_FORK_SERVER
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -9175,7 +10596,7 @@ static void kill_and_wait(int pid, int* status)
 }
 #endif
 
-#if SYZ_EXECUTOR || SYZ_REPEAT && (SYZ_CGROUPS || SYZ_NET_RESET)
+#if (SYZ_EXECUTOR || SYZ_REPEAT && (SYZ_CGROUPS || SYZ_NET_RESET)) && SYZ_EXECUTOR_USES_FORK_SERVER
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -9194,7 +10615,7 @@ static void setup_loop()
 }
 #endif
 
-#if SYZ_EXECUTOR || SYZ_REPEAT && (SYZ_NET_RESET || __NR_syz_mount_image || __NR_syz_read_part_table)
+#if (SYZ_EXECUTOR || SYZ_REPEAT && (SYZ_NET_RESET || __NR_syz_mount_image || __NR_syz_read_part_table)) && SYZ_EXECUTOR_USES_FORK_SERVER
 #define SYZ_HAVE_RESET_LOOP 1
 static void reset_loop()
 {
@@ -9213,8 +10634,9 @@ static void reset_loop()
 }
 #endif
 
-#if SYZ_EXECUTOR || SYZ_REPEAT
+#if (SYZ_EXECUTOR || SYZ_REPEAT) && SYZ_EXECUTOR_USES_FORK_SERVER
 #include <sys/prctl.h>
+#include <unistd.h>
 
 #define SYZ_HAVE_SETUP_TEST 1
 static void setup_test()
@@ -9227,6 +10649,11 @@ static void setup_test()
 	write_file("/proc/self/oom_score_adj", "1000");
 #if SYZ_EXECUTOR || SYZ_NET_INJECTION
 	flush_tun();
+#endif
+#if SYZ_EXECUTOR || SYZ_USE_TMP_DIR
+	if (symlink("/dev/binderfs", "./binderfs")) {
+		debug("symlink(/dev/binderfs, ./binderfs) failed: %d", errno);
+	}
 #endif
 }
 #endif
@@ -9417,11 +10844,14 @@ static void setup_usb()
 
 #if SYZ_EXECUTOR || SYZ_SYSCTL
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
 
 static void setup_sysctl()
 {
-	static struct {
+	char mypid[32];
+	snprintf(mypid, sizeof(mypid), "%d", getpid());
+	struct {
 		const char* name;
 		const char* data;
 	} files[] = {
@@ -9437,10 +10867,10 @@ static void setup_sysctl()
 		{"/proc/sys/vm/oom_dump_tasks", "0"},
 		{"/proc/sys/debug/exception-trace", "0"},
 		{"/proc/sys/kernel/printk", "7 4 1 3"},
-		{"/proc/sys/net/ipv4/ping_group_range", "0 65535"},
 		{"/proc/sys/kernel/keys/gc_delay", "1"},
-		{"/proc/sys/vm/nr_overcommit_hugepages", "4"},
 		{"/proc/sys/vm/oom_kill_allocating_task", "1"},
+		{"/proc/sys/kernel/ctrl-alt-del", "0"},
+		{"/proc/sys/kernel/cad_pid", mypid},
 	};
 	for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
 		if (!write_file(files[i].name, files[i].data))
@@ -9486,7 +10916,7 @@ static void setup_802154()
 		}
 		netlink_device_change(&nlmsg, sock_route, devname, true, 0, &hwaddr, sizeof(hwaddr), 0);
 		if (i == 0) {
-			netlink_add_device_impl(&nlmsg, "lowpan", "lowpan0");
+			netlink_add_device_impl(&nlmsg, "lowpan", "lowpan0", false);
 			netlink_done(&nlmsg);
 			netlink_attr(&nlmsg, IFLA_LINK, &ifindex, sizeof(ifindex));
 			int err = netlink_send(&nlmsg, sock_route);
@@ -9890,6 +11320,64 @@ static long syz_80211_join_ibss(volatile long a0, volatile long a1, volatile lon
 
 #endif
 
+#if SYZ_EXECUTOR || __NR_syz_clone || __NR_syz_clone3
+#if SYZ_EXECUTOR
+#define USLEEP_FORKED_CHILD (3 * syscall_timeout_ms * 1000)
+#else
+#define USLEEP_FORKED_CHILD (3 * /*{{{BASE_CALL_TIMEOUT_MS}}}*/ *1000)
+#endif
+
+static long handle_clone_ret(long ret)
+{
+	if (ret != 0) {
+#if SYZ_EXECUTOR || SYZ_HANDLE_SEGV
+		__atomic_store_n(&clone_ongoing, 0, __ATOMIC_RELAXED);
+#endif
+		return ret;
+	}
+	usleep(USLEEP_FORKED_CHILD);
+	syscall(__NR_exit, 0);
+	while (1) {
+	}
+}
+#endif
+
+#if SYZ_EXECUTOR || __NR_syz_clone
+#include <sched.h>
+static long syz_clone(volatile long flags, volatile long stack, volatile long stack_len,
+		      volatile long ptid, volatile long ctid, volatile long tls)
+{
+	long sp = (stack + stack_len) & ~15;
+#if SYZ_EXECUTOR || SYZ_HANDLE_SEGV
+	__atomic_store_n(&clone_ongoing, 1, __ATOMIC_RELAXED);
+#endif
+	long ret = (long)syscall(__NR_clone, flags & ~CLONE_VM, sp, ptid, ctid, tls);
+	return handle_clone_ret(ret);
+}
+#endif
+
+#if SYZ_EXECUTOR || __NR_syz_clone3
+#include <linux/sched.h>
+#include <sched.h>
+
+#define MAX_CLONE_ARGS_BYTES 256
+static long syz_clone3(volatile long a0, volatile long a1)
+{
+	unsigned long copy_size = a1;
+	if (copy_size < sizeof(uint64) || copy_size > MAX_CLONE_ARGS_BYTES)
+		return -1;
+	char clone_args[MAX_CLONE_ARGS_BYTES];
+	memcpy(&clone_args, (void*)a0, copy_size);
+	uint64* flags = (uint64*)&clone_args;
+	*flags &= ~CLONE_VM;
+#if SYZ_EXECUTOR || SYZ_HANDLE_SEGV
+	__atomic_store_n(&clone_ongoing, 1, __ATOMIC_RELAXED);
+#endif
+	return handle_clone_ret((long)syscall(__NR_clone3, &clone_args, copy_size));
+}
+
+#endif
+
 #elif GOOS_test
 
 #include <stdlib.h>
@@ -9977,6 +11465,372 @@ static long syz_compare_int(volatile long n, ...)
 	if (n > 3 && v0 != v3)
 		return errno = EINVAL, -1;
 	return 0;
+}
+#endif
+
+#if SYZ_EXECUTOR || __NR_syz_compare_zlib
+
+//% This code is derived from puff.{c,h}, found in the zlib development. The
+//% original files come with the following copyright notice:
+
+//% Copyright (C) 2002-2013 Mark Adler, all rights reserved
+//% version 2.3, 21 Jan 2013
+//% This software is provided 'as-is', without any express or implied
+//% warranty.  In no event will the author be held liable for any damages
+//% arising from the use of this software.
+//% Permission is granted to anyone to use this software for any purpose,
+//% including commercial applications, and to alter it and redistribute it
+//% freely, subject to the following restrictions:
+//% 1. The origin of this software must not be misrepresented; you must not
+//%    claim that you wrote the original software. If you use this software
+//%    in a product, an acknowledgment in the product documentation would be
+//%    appreciated but is not required.
+//% 2. Altered source versions must be plainly marked as such, and must not be
+//%    misrepresented as being the original software.
+//% 3. This notice may not be removed or altered from any source distribution.
+//% Mark Adler    madler@alumni.caltech.edu
+
+//% BEGIN CODE DERIVED FROM puff.{c,h}
+
+#include <setjmp.h>
+#define MAXBITS 15
+#define MAXLCODES 286
+#define MAXDCODES 30
+#define MAXCODES (MAXLCODES + MAXDCODES)
+#define FIXLCODES 288
+
+struct puff_state {
+	unsigned char* out;
+	unsigned long outlen;
+	unsigned long outcnt;
+	const unsigned char* in;
+	unsigned long inlen;
+	unsigned long incnt;
+	int bitbuf;
+	int bitcnt;
+	jmp_buf env;
+};
+static int puff_bits(struct puff_state* s, int need)
+{
+	long val = s->bitbuf;
+	while (s->bitcnt < need) {
+		if (s->incnt == s->inlen)
+			longjmp(s->env, 1);
+		val |= (long)(s->in[s->incnt++]) << s->bitcnt;
+		s->bitcnt += 8;
+	}
+	s->bitbuf = (int)(val >> need);
+	s->bitcnt -= need;
+	return (int)(val & ((1L << need) - 1));
+}
+static int puff_stored(struct puff_state* s)
+{
+	s->bitbuf = 0;
+	s->bitcnt = 0;
+	if (s->incnt + 4 > s->inlen)
+		return 2;
+	unsigned len = s->in[s->incnt++];
+	len |= s->in[s->incnt++] << 8;
+	if (s->in[s->incnt++] != (~len & 0xff) ||
+	    s->in[s->incnt++] != ((~len >> 8) & 0xff))
+		return -2;
+	if (s->incnt + len > s->inlen)
+		return 2;
+	if (s->outcnt + len > s->outlen)
+		return 1;
+	for (; len--; s->outcnt++, s->incnt++) {
+		if (s->in[s->incnt])
+			s->out[s->outcnt] = s->in[s->incnt];
+	}
+	return 0;
+}
+struct puff_huffman {
+	short* count;
+	short* symbol;
+};
+static int puff_decode(struct puff_state* s, const struct puff_huffman* h)
+{
+	int first = 0;
+	int index = 0;
+	int bitbuf = s->bitbuf;
+	int left = s->bitcnt;
+	int code = first = index = 0;
+	int len = 1;
+	short* next = h->count + 1;
+	while (1) {
+		while (left--) {
+			code |= bitbuf & 1;
+			bitbuf >>= 1;
+			int count = *next++;
+			if (code - count < first) {
+				s->bitbuf = bitbuf;
+				s->bitcnt = (s->bitcnt - len) & 7;
+				return h->symbol[index + (code - first)];
+			}
+			index += count;
+			first += count;
+			first <<= 1;
+			code <<= 1;
+			len++;
+		}
+		left = (MAXBITS + 1) - len;
+		if (left == 0)
+			break;
+		if (s->incnt == s->inlen)
+			longjmp(s->env, 1);
+		bitbuf = s->in[s->incnt++];
+		if (left > 8)
+			left = 8;
+	}
+	return -10;
+}
+static int puff_construct(struct puff_huffman* h, const short* length, int n)
+{
+	int len;
+	for (len = 0; len <= MAXBITS; len++)
+		h->count[len] = 0;
+	int symbol;
+	for (symbol = 0; symbol < n; symbol++)
+		(h->count[length[symbol]])++;
+	if (h->count[0] == n)
+		return 0;
+	int left = 1;
+	for (len = 1; len <= MAXBITS; len++) {
+		left <<= 1;
+		left -= h->count[len];
+		if (left < 0)
+			return left;
+	}
+	short offs[MAXBITS + 1];
+	offs[1] = 0;
+	for (len = 1; len < MAXBITS; len++)
+		offs[len + 1] = offs[len] + h->count[len];
+	for (symbol = 0; symbol < n; symbol++)
+		if (length[symbol] != 0)
+			h->symbol[offs[length[symbol]]++] = symbol;
+	return left;
+}
+static int puff_codes(struct puff_state* s,
+		      const struct puff_huffman* lencode,
+		      const struct puff_huffman* distcode)
+{
+	static const short lens[29] = {
+				       3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31,
+				       35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258};
+	static const short lext[29] = {
+				       0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2,
+				       3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0};
+	static const short dists[30] = {
+					1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193,
+					257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145,
+					8193, 12289, 16385, 24577};
+	static const short dext[30] = {
+				       0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6,
+				       7, 7, 8, 8, 9, 9, 10, 10, 11, 11,
+				       12, 12, 13, 13};
+	int symbol;
+	do {
+		symbol = puff_decode(s, lencode);
+		if (symbol < 0)
+			return symbol;
+		if (symbol < 256) {
+			if (s->outcnt == s->outlen)
+				return 1;
+			if (symbol)
+				s->out[s->outcnt] = symbol;
+			s->outcnt++;
+		} else if (symbol > 256) {
+			symbol -= 257;
+			if (symbol >= 29)
+				return -10;
+			int len = lens[symbol] + puff_bits(s, lext[symbol]);
+			symbol = puff_decode(s, distcode);
+			if (symbol < 0)
+				return symbol;
+			unsigned dist = dists[symbol] + puff_bits(s, dext[symbol]);
+			if (dist > s->outcnt)
+				return -11;
+			if (s->outcnt + len > s->outlen)
+				return 1;
+			while (len--) {
+				if (dist <= s->outcnt && s->out[s->outcnt - dist])
+					s->out[s->outcnt] = s->out[s->outcnt - dist];
+				s->outcnt++;
+			}
+		}
+	} while (symbol != 256);
+	return 0;
+}
+static int puff_fixed(struct puff_state* s)
+{
+	static int virgin = 1;
+	static short lencnt[MAXBITS + 1], lensym[FIXLCODES];
+	static short distcnt[MAXBITS + 1], distsym[MAXDCODES];
+	static struct puff_huffman lencode, distcode;
+	if (virgin) {
+		lencode.count = lencnt;
+		lencode.symbol = lensym;
+		distcode.count = distcnt;
+		distcode.symbol = distsym;
+		short lengths[FIXLCODES];
+		int symbol;
+		for (symbol = 0; symbol < 144; symbol++)
+			lengths[symbol] = 8;
+		for (; symbol < 256; symbol++)
+			lengths[symbol] = 9;
+		for (; symbol < 280; symbol++)
+			lengths[symbol] = 7;
+		for (; symbol < FIXLCODES; symbol++)
+			lengths[symbol] = 8;
+		puff_construct(&lencode, lengths, FIXLCODES);
+		for (symbol = 0; symbol < MAXDCODES; symbol++)
+			lengths[symbol] = 5;
+		puff_construct(&distcode, lengths, MAXDCODES);
+		virgin = 0;
+	}
+	return puff_codes(s, &lencode, &distcode);
+}
+static int puff_dynamic(struct puff_state* s)
+{
+	static const short order[19] =
+	    {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
+	int nlen = puff_bits(s, 5) + 257;
+	int ndist = puff_bits(s, 5) + 1;
+	int ncode = puff_bits(s, 4) + 4;
+	if (nlen > MAXLCODES || ndist > MAXDCODES)
+		return -3;
+	short lengths[MAXCODES];
+	int index;
+	for (index = 0; index < ncode; index++)
+		lengths[order[index]] = puff_bits(s, 3);
+	for (; index < 19; index++)
+		lengths[order[index]] = 0;
+	short lencnt[MAXBITS + 1], lensym[MAXLCODES];
+	struct puff_huffman lencode = {lencnt, lensym};
+	int err = puff_construct(&lencode, lengths, 19);
+	if (err != 0)
+		return -4;
+	index = 0;
+	while (index < nlen + ndist) {
+		int symbol;
+		int len;
+
+		symbol = puff_decode(s, &lencode);
+		if (symbol < 0)
+			return symbol;
+		if (symbol < 16)
+			lengths[index++] = symbol;
+		else {
+			len = 0;
+			if (symbol == 16) {
+				if (index == 0)
+					return -5;
+				len = lengths[index - 1];
+				symbol = 3 + puff_bits(s, 2);
+			} else if (symbol == 17)
+				symbol = 3 + puff_bits(s, 3);
+			else
+				symbol = 11 + puff_bits(s, 7);
+			if (index + symbol > nlen + ndist)
+				return -6;
+			while (symbol--)
+				lengths[index++] = len;
+		}
+	}
+	if (lengths[256] == 0)
+		return -9;
+	err = puff_construct(&lencode, lengths, nlen);
+	if (err && (err < 0 || nlen != lencode.count[0] + lencode.count[1]))
+		return -7;
+	short distcnt[MAXBITS + 1], distsym[MAXDCODES];
+	struct puff_huffman distcode = {distcnt, distsym};
+	err = puff_construct(&distcode, lengths + nlen, ndist);
+	if (err && (err < 0 || ndist != distcode.count[0] + distcode.count[1]))
+		return -8;
+	return puff_codes(s, &lencode, &distcode);
+}
+static int puff(
+    unsigned char* dest,
+    unsigned long* destlen,
+    const unsigned char* source,
+    unsigned long sourcelen)
+{
+	struct puff_state s = {
+	    .out = dest,
+	    .outlen = *destlen,
+	    .outcnt = 0,
+	    .in = source,
+	    .inlen = sourcelen,
+	    .incnt = 0,
+	    .bitbuf = 0,
+	    .bitcnt = 0,
+	};
+	int err;
+	if (setjmp(s.env) != 0)
+		err = 2;
+	else {
+		int last;
+		do {
+			last = puff_bits(&s, 1);
+			int type = puff_bits(&s, 2);
+			err = type == 0 ? puff_stored(&s) : (type == 1 ? puff_fixed(&s) : (type == 2 ? puff_dynamic(&s) : -1));
+			if (err != 0)
+				break;
+		} while (!last);
+	}
+
+	*destlen = s.outcnt;
+	return err;
+}
+
+//% END CODE DERIVED FROM puff.{c,h}
+
+#include <errno.h>
+#include <sys/mman.h>
+#define ZLIB_HEADER_WIDTH 2
+
+static int puff_zlib_to_file(const unsigned char* source, unsigned long sourcelen, int dest_fd)
+{
+	if (sourcelen < ZLIB_HEADER_WIDTH)
+		return 0;
+	source += ZLIB_HEADER_WIDTH;
+	sourcelen -= ZLIB_HEADER_WIDTH;
+	const unsigned long max_destlen = 132 << 20;
+	void* ret = mmap(0, max_destlen, PROT_WRITE | PROT_READ, MAP_PRIVATE | MAP_ANON, -1, 0);
+	if (ret == MAP_FAILED)
+		return -1;
+	unsigned char* dest = (unsigned char*)ret;
+	unsigned long destlen = max_destlen;
+	int err = puff(dest, &destlen, source, sourcelen);
+	if (err) {
+		munmap(dest, max_destlen);
+		errno = -err;
+		return -1;
+	}
+	if (write(dest_fd, dest, destlen) != (ssize_t)destlen) {
+		munmap(dest, max_destlen);
+		return -1;
+	}
+	return munmap(dest, destlen);
+}
+
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+static long syz_compare_zlib(volatile long data, volatile long size, volatile long zdata, volatile long zsize)
+{
+	int fd = open("./uncompressed", O_RDWR | O_CREAT | O_EXCL, 0666);
+	if (fd == -1)
+		return -1;
+	if (puff_zlib_to_file((unsigned char*)zdata, zsize, fd))
+		return -1;
+	struct stat statbuf;
+	if (fstat(fd, &statbuf))
+		return -1;
+	void* uncompressed = mmap(0, statbuf.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+	if (uncompressed == MAP_FAILED)
+		return -1;
+	return syz_compare(data, size, (long)uncompressed, statbuf.st_size);
 }
 #endif
 
@@ -10110,6 +11964,12 @@ static void use_temporary_dir(void)
 #error "unknown OS"
 #endif
 
+#if SYZ_TEST_COMMON_EXT_EXAMPLE
+#include "common_ext_example.h"
+#else
+
+#endif
+
 #if SYZ_EXECUTOR || __NR_syz_execute_func
 static long syz_execute_func(volatile long text)
 {
@@ -10163,10 +12023,6 @@ static void loop(void)
 	fprintf(stderr, "### start\n");
 #endif
 	int i, call, thread;
-#if SYZ_COLLIDE
-	int collide = 0;
-again:
-#endif
 	for (call = 0; call < /*{{{NUM_CALLS}}}*/; call++) {
 		for (thread = 0; thread < (int)(sizeof(threads) / sizeof(threads[0])); thread++) {
 			struct thread_t* th = &threads[thread];
@@ -10183,8 +12039,8 @@ again:
 			th->call = call;
 			__atomic_fetch_add(&running, 1, __ATOMIC_RELAXED);
 			event_set(&th->ready);
-#if SYZ_COLLIDE
-			if (collide && (call % 2) == 0)
+#if SYZ_ASYNC
+			if (/*{{{ASYNC_CONDITIONS}}}*/)
 				break;
 #endif
 			event_timedwait(&th->done, /*{{{CALL_TIMEOUT_MS}}}*/);
@@ -10195,12 +12051,6 @@ again:
 		sleep_ms(1);
 #if SYZ_HAVE_CLOSE_FDS
 	close_fds();
-#endif
-#if SYZ_COLLIDE
-	if (!collide) {
-		collide = 1;
-		goto again;
-	}
 #endif
 }
 #endif
@@ -10264,6 +12114,9 @@ static void loop(void)
 #if SYZ_HAVE_SETUP_TEST
 			setup_test();
 #endif
+#if SYZ_HAVE_SETUP_EXT_TEST
+			setup_ext_test();
+#endif
 #if GOOS_akaros
 #if SYZ_EXECUTOR
 			dup2(child_pipe[0], kInPipeFd);
@@ -10301,7 +12154,8 @@ static void loop(void)
 			if (waitpid(-1, &status, WNOHANG | WAIT_FLAGS) == pid)
 				break;
 			sleep_ms(1);
-#if SYZ_EXECUTOR && SYZ_EXECUTOR_USES_SHMEM
+#if SYZ_EXECUTOR
+#if SYZ_EXECUTOR_USES_SHMEM
 			uint64 min_timeout_ms = program_timeout_ms * 3 / 5;
 			uint64 inactive_timeout_ms = syscall_timeout_ms * 20;
 			uint64 now = current_time_ms();
@@ -10313,13 +12167,13 @@ static void loop(void)
 			if ((now - start < program_timeout_ms) &&
 			    (now - start < min_timeout_ms || now - last_executed < inactive_timeout_ms))
 				continue;
-#elif SYZ_EXECUTOR
+#else
 			if (current_time_ms() - start < program_timeout_ms)
 				continue;
+#endif
 #else
-		if (current_time_ms() - start < /*{{{PROGRAM_TIMEOUT_MS}}}*/) {
-			continue;
-		}
+			if (current_time_ms() - start < /*{{{PROGRAM_TIMEOUT_MS}}}*/)
+				continue;
 #endif
 			debug("killing hanging pid %d\n", pid);
 			kill_and_wait(pid, &status);
@@ -10349,7 +12203,6 @@ static void loop(void)
 #endif
 
 #if !SYZ_EXECUTOR
-/*{{{SYSCALL_DEFINES}}}*/
 
 /*{{{RESULTS}}}*/
 
@@ -10384,8 +12237,14 @@ int main(void)
 	/*{{{MMAP_DATA}}}*/
 #endif
 
+#if SYZ_HAVE_SETUP_EXT
+	setup_ext();
+#endif
 #if SYZ_SYSCTL
 	setup_sysctl();
+#endif
+#if SYZ_CGROUPS
+	setup_cgroups();
 #endif
 #if SYZ_BINFMT_MISC
 	setup_binfmt_misc();

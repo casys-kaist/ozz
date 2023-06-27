@@ -1,0 +1,21 @@
+- c57a91fb1ccfa203ba3e31e5a389cb04de5b0561: (in commit 592fa002180a)
+  there is a smp_store_release() in io_commit_cqring() between
+  __io_cqring_fill_event() (storing a value to cached_cq_tail) and
+  io_cqring_ev_posted_iopoll() (calling waitqueue_active()). Thus, the
+  store buffer emulation cannot trigger the bug. This can be triggered
+  if we develop a mechanism to prefetch loads.
+
+- 45da9c1767ac31857df572f0a909fbe88fd5a7e9:
+  This happened in reality, but we cannot trigger the bug since it
+  happened in the async thread. By the design of Syzkaller, it is hard
+  to track the execution path of async threads.
+
+- 3d3a2e610ea5e7c6d4f9481ecce5d8e2d8317843
+  Seems like this causes real-world problems, but it is caused by
+  missing *load* barriers. As we do not have an ability to reorder
+  loads, this is not applicable for our project.
+
+- 26fbe9772b8c459687930511444ce443011f86bf
+  This caused a hang, but we cannot trigger the bug because reordering
+  happened in the async thread.
+  

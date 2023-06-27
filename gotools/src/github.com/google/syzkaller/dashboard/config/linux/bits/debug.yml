@@ -7,28 +7,18 @@ config:
  # Instances that use nonoise also ignore WARNINGs, so they don't want panic_on_warn.
  - CMDLINE: [append, "panic_on_warn=1"]
 
- - LOCKDEP
- - PROVE_LOCKING
- - DEBUG_ATOMIC_SLEEP
- - PROVE_RCU
- - RCU_EQS_DEBUG
- - DEBUG_LOCK_ALLOC
- - DEBUG_RT_MUTEXES
- - DEBUG_SPINLOCK
- - DEBUG_MUTEXES
- - DEBUG_WW_MUTEX_SLOWPATH
- - DEBUG_RWSEMS
- - DEBUG_IRQFLAGS: [v5.12]
-
  - DEBUG_VM
  - DEBUG_VM_RB
- - DEBUG_VM_VMACACHE
+ - DEBUG_VM_VMACACHE: [-v6.1]
  - DEBUG_VM_PGFLAGS
  - DEBUG_VM_PGTABLE: [v5.8, -arm]
+ - DEBUG_VM_MAPLE_TREE: [v6.1]
+ - DEBUG_MAPLE_TREE: [v6.1]
  - DEBUG_KMAP_LOCAL_FORCE_MAP: [x86_64, v5.11]
  - DEBUG_VIRTUAL: [-s390]
  - LOCKUP_DETECTOR: [-s390]
  - SOFTLOCKUP_DETECTOR: [-s390]
+ - CSD_LOCK_WAIT_DEBUG: [v5.19, -arm]
  - DETECT_HUNG_TASK
  - WQ_WATCHDOG
  - BOOTPARAM_HUNG_TASK_PANIC
@@ -46,9 +36,10 @@ config:
  - DEBUG_OBJECTS_TIMERS
  - DEBUG_OBJECTS_WORK
  - DEBUG_OBJECTS_SELFTEST: n
- - SND_DEBUG: [-riscv, -s390]
- - SND_PCM_XRUN_DEBUG: [-riscv, -s390]
- - SND_CTL_VALIDATION: [v5.6, -riscv, -s390]
+ # Some base configs may not enable sound at all.
+ - SND_DEBUG: [-riscv, -s390, optional]
+ - SND_PCM_XRUN_DEBUG: [-riscv, -s390, optional]
+ - SND_CTL_VALIDATION: [v5.6, -riscv, -s390, optional]
  - DYNAMIC_DEBUG
  - DEBUG_PER_CPU_MAPS
  - DEBUG_SG
@@ -60,3 +51,7 @@ config:
  - RING_BUFFER_VALIDATE_TIME_DELTAS: [x86_64, v5.11]
  # The check runs episodically, so won't be attributed to a test. And can happen on any memory corruption.
  - X86_CHECK_BIOS_CORRUPTION: n
+
+ # For context see: https://groups.google.com/g/syzkaller/c/SoydtBd-dYs/m/ns67L4ApAwAJ
+ - VIRT_CPU_ACCOUNTING_GEN
+ - CONTEXT_TRACKING_FORCE: [-v6.1]

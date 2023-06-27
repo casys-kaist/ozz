@@ -1,0 +1,18 @@
+{
+	"target": "linux/amd64",
+	"http": "127.0.0.1:56741",
+	"workdir": "$PWD/workdir-baseline",
+	"kernel_obj": "$KERNEL_X86_64_BASELINE",
+	"image": "$IMAGE_X86_64/stretch.img",
+	"sshkey": "$IMAGE_X86_64/stretch.id_rsa",
+	"syzkaller": "$GOPATH/src/github.com/google/syzkaller-baseline",
+	"reproduce": false,
+	"procs": 1,
+	"type": "qemu",
+	"vm": {
+		"count": $NR_VMS,
+		"kernel": "$KERNEL_X86_64_BASELINE/arch/x86/boot/bzImage",
+		"cpu": 4,
+		"mem": 4096
+	}
+}

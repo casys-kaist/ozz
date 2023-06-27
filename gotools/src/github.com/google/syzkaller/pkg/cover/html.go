@@ -4,6 +4,7 @@
 package cover
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/csv"
 	"fmt"
@@ -12,21 +13,59 @@ import (
 	"io"
 	"io/ioutil"
 	"math"
+	"net/http"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/google/syzkaller/pkg/cover/backend"
+	"github.com/google/syzkaller/pkg/mgrconfig"
+	"github.com/google/syzkaller/sys/targets"
 )
 
-func (rg *ReportGenerator) DoHTML(w io.Writer, progs []Prog) error {
+func fixUpPCs(target string, progs []Prog, coverFilter map[uint32]uint32) []Prog {
+	if coverFilter != nil {
+		for i, prog := range progs {
+			var nPCs []uint64
+			for _, pc := range prog.PCs {
+				if coverFilter[uint32(pc)] != 0 {
+					nPCs = append(nPCs, pc)
+				}
+			}
+			progs[i].PCs = nPCs
+		}
+	}
+
+	// On arm64 as PLT is enabled by default, .text section is loaded after .plt section,
+	// so there is 0x18 bytes offset from module load address for .text section
+	// we need to remove the 0x18 bytes offset in order to correct module symbol address
+	if target == targets.ARM64 {
+		for i, prog := range progs {
+			var nPCs []uint64
+			for _, pc := range prog.PCs {
+				// TODO: avoid to hardcode the address
+				// Fix up kernel PCs, but not the test (userspace) PCs.
+				if pc >= 0x8000000000000000 && pc < 0xffffffd010000000 {
+					pc -= 0x18
+				}
+				nPCs = append(nPCs, pc)
+			}
+			progs[i].PCs = nPCs
+		}
+	}
+	return progs
+}
+
+func (rg *ReportGenerator) DoHTML(w io.Writer, progs []Prog, coverFilter map[uint32]uint32) error {
+	progs = fixUpPCs(rg.target.Arch, progs, coverFilter)
 	files, err := rg.prepareFileMap(progs)
 	if err != nil {
 		return err
 	}
 	d := &templateData{
-		Root: new(templateDir),
+		Root:     new(templateDir),
+		RawCover: rg.rawCoverEnabled,
 	}
 	haveProgs := len(progs) > 1 || progs[0].Data != ""
 	fileOpenErr := fmt.Errorf("failed to open/locate any source file")
@@ -58,12 +97,19 @@ func (rg *ReportGenerator) DoHTML(w io.Writer, progs []Prog) error {
 			pos = pos.Dirs[dir]
 			fname = fname[sep+1:]
 		}
+		var TotalInCoveredFunc int
+		for _, function := range file.functions {
+			if function.covered > 0 {
+				TotalInCoveredFunc += function.pcs
+			}
+		}
 		f := &templateFile{
 			templateBase: templateBase{
-				Path:    path,
-				Name:    fname,
-				Total:   file.totalPCs,
-				Covered: file.coveredPCs,
+				Path:               path,
+				Name:               fname,
+				Total:              file.totalPCs,
+				TotalInCoveredFunc: TotalInCoveredFunc,
+				Covered:            file.coveredPCs,
 			},
 			HasFunctions: len(file.functions) != 0,
 		}
@@ -96,25 +142,109 @@ func (rg *ReportGenerator) DoHTML(w io.Writer, progs []Prog) error {
 		return fileOpenErr
 	}
 	for _, prog := range progs {
-		d.Progs = append(d.Progs, template.HTML(html.EscapeString(prog.Data)))
+		d.Progs = append(d.Progs, templateProg{
+			Sig:     prog.Sig,
+			Content: template.HTML(html.EscapeString(prog.Data)),
+		})
 	}
 
 	processDir(d.Root)
 	return coverTemplate.Execute(w, d)
 }
 
+func (rg *ReportGenerator) DoRawCoverFiles(w http.ResponseWriter, progs []Prog, coverFilter map[uint32]uint32) error {
+	progs = fixUpPCs(rg.target.Arch, progs, coverFilter)
+	if err := rg.lazySymbolize(progs); err != nil {
+		return err
+	}
+	sort.Slice(rg.Frames, func(i, j int) bool {
+		return rg.Frames[i].PC < rg.Frames[j].PC
+	})
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	buf := bufio.NewWriter(w)
+	fmt.Fprintf(buf, "PC,Module,Offset,Filename,StartLine,EndLine\n")
+	for _, frame := range rg.Frames {
+		offset := frame.PC - frame.Module.Addr
+		fmt.Fprintf(buf, "0x%x,%v,0x%x,%v,%v,%v\n",
+			frame.PC, frame.Module.Name, offset, frame.Name, frame.StartLine, frame.EndLine)
+	}
+	buf.Flush()
+	return nil
+}
+
+func (rg *ReportGenerator) DoRawCover(w http.ResponseWriter, progs []Prog, coverFilter map[uint32]uint32) {
+	progs = fixUpPCs(rg.target.Arch, progs, coverFilter)
+	var pcs []uint64
+	if len(progs) == 1 && rg.rawCoverEnabled {
+		pcs = append([]uint64{}, progs[0].PCs...)
+	} else {
+		uniquePCs := make(map[uint64]bool)
+		for _, prog := range progs {
+			for _, pc := range prog.PCs {
+				if uniquePCs[pc] {
+					continue
+				}
+				uniquePCs[pc] = true
+				pcs = append(pcs, pc)
+			}
+		}
+		sort.Slice(pcs, func(i, j int) bool {
+			return pcs[i] < pcs[j]
+		})
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	buf := bufio.NewWriter(w)
+	for _, pc := range pcs {
+		fmt.Fprintf(buf, "0x%x\n", pc)
+	}
+	buf.Flush()
+}
+
+func (rg *ReportGenerator) DoFilterPCs(w http.ResponseWriter, progs []Prog, coverFilter map[uint32]uint32) {
+	progs = fixUpPCs(rg.target.Arch, progs, coverFilter)
+	var pcs []uint64
+	uniquePCs := make(map[uint64]bool)
+	for _, prog := range progs {
+		for _, pc := range prog.PCs {
+			if uniquePCs[pc] {
+				continue
+			}
+			uniquePCs[pc] = true
+			if coverFilter[uint32(pc)] != 0 {
+				pcs = append(pcs, pc)
+			}
+		}
+	}
+	sort.Slice(pcs, func(i, j int) bool {
+		return pcs[i] < pcs[j]
+	})
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	buf := bufio.NewWriter(w)
+	for _, pc := range pcs {
+		fmt.Fprintf(buf, "0x%x\n", pc)
+	}
+	buf.Flush()
+}
+
 type fileStats struct {
-	Name                  string
-	CoveredLines          int
-	TotalLines            int
-	CoveredPCs            int
-	TotalPCs              int
-	TotalFunctions        int
-	CoveredPCsInFunctions int
-	TotalPCsInFunctions   int
+	Name                       string
+	Module                     string
+	CoveredLines               int
+	TotalLines                 int
+	CoveredPCs                 int
+	TotalPCs                   int
+	TotalFunctions             int
+	CoveredFunctions           int
+	CoveredPCsInFunctions      int
+	TotalPCsInCoveredFunctions int
+	TotalPCsInFunctions        int
 }
 
 var csvFilesHeader = []string{
+	"Module",
 	"Filename",
 	"CoveredLines",
 	"TotalLines",
@@ -123,6 +253,7 @@ var csvFilesHeader = []string{
 	"TotalFunctions",
 	"CoveredPCsInFunctions",
 	"TotalPCsInFunctions",
+	"TotalPCsInCoveredFunctions",
 }
 
 func (rg *ReportGenerator) convertToStats(progs []Prog) ([]fileStats, error) {
@@ -141,8 +272,14 @@ func (rg *ReportGenerator) convertToStats(progs []Prog) ([]fileStats, error) {
 		totalFuncs := len(file.functions)
 		var coveredInFunc int
 		var pcsInFunc int
+		var pcsInCoveredFunc int
+		var coveredFunc int
 		for _, function := range file.functions {
 			coveredInFunc += function.covered
+			if function.covered != 0 {
+				pcsInCoveredFunc += function.pcs
+				coveredFunc++
+			}
 			pcsInFunc += function.pcs
 		}
 		totalLines := len(lines)
@@ -153,21 +290,25 @@ func (rg *ReportGenerator) convertToStats(progs []Prog) ([]fileStats, error) {
 			}
 		}
 		data = append(data, fileStats{
-			Name:                  fname,
-			CoveredLines:          coveredLines,
-			TotalLines:            totalLines,
-			CoveredPCs:            file.coveredPCs,
-			TotalPCs:              file.totalPCs,
-			TotalFunctions:        totalFuncs,
-			CoveredPCsInFunctions: coveredInFunc,
-			TotalPCsInFunctions:   pcsInFunc,
+			Name:                       fname,
+			Module:                     file.module,
+			CoveredLines:               coveredLines,
+			TotalLines:                 totalLines,
+			CoveredPCs:                 file.coveredPCs,
+			TotalPCs:                   file.totalPCs,
+			TotalFunctions:             totalFuncs,
+			CoveredFunctions:           coveredFunc,
+			CoveredPCsInFunctions:      coveredInFunc,
+			TotalPCsInFunctions:        pcsInFunc,
+			TotalPCsInCoveredFunctions: pcsInCoveredFunc,
 		})
 	}
 
 	return data, nil
 }
 
-func (rg *ReportGenerator) DoCSVFiles(w io.Writer, progs []Prog) error {
+func (rg *ReportGenerator) DoCSVFiles(w io.Writer, progs []Prog, coverFilter map[uint32]uint32) error {
+	progs = fixUpPCs(rg.target.Arch, progs, coverFilter)
 	data, err := rg.convertToStats(progs)
 	if err != nil {
 		return err
@@ -186,6 +327,7 @@ func (rg *ReportGenerator) DoCSVFiles(w io.Writer, progs []Prog) error {
 	var d [][]string
 	for _, dt := range data {
 		d = append(d, []string{
+			dt.Module,
 			dt.Name,
 			strconv.Itoa(dt.CoveredLines),
 			strconv.Itoa(dt.TotalLines),
@@ -194,12 +336,13 @@ func (rg *ReportGenerator) DoCSVFiles(w io.Writer, progs []Prog) error {
 			strconv.Itoa(dt.TotalFunctions),
 			strconv.Itoa(dt.CoveredPCsInFunctions),
 			strconv.Itoa(dt.TotalPCsInFunctions),
+			strconv.Itoa(dt.TotalPCsInCoveredFunctions),
 		})
 	}
 	return writer.WriteAll(d)
 }
 
-func groupCoverByFilePrefixes(datas []fileStats, subsystems []Subsystem) map[string]map[string]string {
+func groupCoverByFilePrefixes(datas []fileStats, subsystems []mgrconfig.Subsystem) map[string]map[string]string {
 	d := make(map[string]map[string]string)
 
 	for _, subsystem := range subsystems {
@@ -208,11 +351,15 @@ func groupCoverByFilePrefixes(datas []fileStats, subsystems []Subsystem) map[str
 		var coveredPCsInFile int
 		var totalPCsInFile int
 		var totalFuncs int
+		var coveredFuncs int
 		var coveredPCsInFuncs int
+		var pcsInCoveredFuncs int
 		var pcsInFuncs int
 		var percentLines float64
 		var percentPCsInFile float64
 		var percentPCsInFunc float64
+		var percentInCoveredFunc float64
+		var percentCoveredFunc float64
 
 		for _, path := range subsystem.Paths {
 			for _, data := range datas {
@@ -224,8 +371,10 @@ func groupCoverByFilePrefixes(datas []fileStats, subsystems []Subsystem) map[str
 				coveredPCsInFile += data.CoveredPCs
 				totalPCsInFile += data.TotalPCs
 				totalFuncs += data.TotalFunctions
+				coveredFuncs += data.CoveredFunctions
 				coveredPCsInFuncs += data.CoveredPCsInFunctions
 				pcsInFuncs += data.TotalPCsInFunctions
+				pcsInCoveredFuncs += data.TotalPCsInCoveredFunctions
 			}
 		}
 
@@ -238,20 +387,28 @@ func groupCoverByFilePrefixes(datas []fileStats, subsystems []Subsystem) map[str
 		if pcsInFuncs != 0 {
 			percentPCsInFunc = 100.0 * float64(coveredPCsInFuncs) / float64(pcsInFuncs)
 		}
+		if pcsInCoveredFuncs != 0 {
+			percentInCoveredFunc = 100.0 * float64(coveredPCsInFuncs) / float64(pcsInCoveredFuncs)
+		}
+		if totalFuncs != 0 {
+			percentCoveredFunc = 100.0 * float64(coveredFuncs) / float64(totalFuncs)
+		}
 
 		d[subsystem.Name] = map[string]string{
-			"subsystem":  subsystem.Name,
-			"lines":      fmt.Sprintf("%v / %v / %.2f%%", coveredLines, totalLines, percentLines),
-			"PCsInFiles": fmt.Sprintf("%v / %v / %.2f%%", coveredPCsInFile, totalPCsInFile, percentPCsInFile),
-			"totalFuncs": strconv.Itoa(totalFuncs),
-			"PCsInFuncs": fmt.Sprintf("%v / %v / %.2f%%", coveredPCsInFuncs, pcsInFuncs, percentPCsInFunc),
+			"name":              subsystem.Name,
+			"lines":             fmt.Sprintf("%v / %v / %.2f%%", coveredLines, totalLines, percentLines),
+			"PCsInFiles":        fmt.Sprintf("%v / %v / %.2f%%", coveredPCsInFile, totalPCsInFile, percentPCsInFile),
+			"Funcs":             fmt.Sprintf("%v / %v / %.2f%%", coveredFuncs, totalFuncs, percentCoveredFunc),
+			"PCsInFuncs":        fmt.Sprintf("%v / %v / %.2f%%", coveredPCsInFuncs, pcsInFuncs, percentPCsInFunc),
+			"PCsInCoveredFuncs": fmt.Sprintf("%v / %v / %.2f%%", coveredPCsInFuncs, pcsInCoveredFuncs, percentInCoveredFunc),
 		}
 	}
 
 	return d
 }
 
-func (rg *ReportGenerator) DoHTMLTable(w io.Writer, progs []Prog) error {
+func (rg *ReportGenerator) DoHTMLTable(w io.Writer, progs []Prog, coverFilter map[uint32]uint32) error {
+	progs = fixUpPCs(rg.target.Arch, progs, coverFilter)
 	data, err := rg.convertToStats(progs)
 	if err != nil {
 		return err
@@ -262,14 +419,92 @@ func (rg *ReportGenerator) DoHTMLTable(w io.Writer, progs []Prog) error {
 	return coverTableTemplate.Execute(w, d)
 }
 
+func groupCoverByModule(datas []fileStats) map[string]map[string]string {
+	d := make(map[string]map[string]string)
+
+	coveredLines := make(map[string]int)
+	totalLines := make(map[string]int)
+	coveredPCsInFile := make(map[string]int)
+	totalPCsInFile := make(map[string]int)
+	totalFuncs := make(map[string]int)
+	coveredFuncs := make(map[string]int)
+	coveredPCsInFuncs := make(map[string]int)
+	pcsInCoveredFuncs := make(map[string]int)
+	pcsInFuncs := make(map[string]int)
+	percentLines := make(map[string]float64)
+	percentPCsInFile := make(map[string]float64)
+	percentPCsInFunc := make(map[string]float64)
+	percentInCoveredFunc := make(map[string]float64)
+	percentCoveredFunc := make(map[string]float64)
+
+	for _, data := range datas {
+		coveredLines[data.Module] += data.CoveredLines
+		totalLines[data.Module] += data.TotalLines
+		coveredPCsInFile[data.Module] += data.CoveredPCs
+		totalPCsInFile[data.Module] += data.TotalPCs
+		totalFuncs[data.Module] += data.TotalFunctions
+		coveredFuncs[data.Module] += data.CoveredFunctions
+		coveredPCsInFuncs[data.Module] += data.CoveredPCsInFunctions
+		pcsInFuncs[data.Module] += data.TotalPCsInFunctions
+		pcsInCoveredFuncs[data.Module] += data.TotalPCsInCoveredFunctions
+	}
+
+	for m := range totalLines {
+		if totalLines[m] != 0 {
+			percentLines[m] = 100.0 * float64(coveredLines[m]) / float64(totalLines[m])
+		}
+		if totalPCsInFile[m] != 0 {
+			percentPCsInFile[m] = 100.0 * float64(coveredPCsInFile[m]) / float64(totalPCsInFile[m])
+		}
+		if pcsInFuncs[m] != 0 {
+			percentPCsInFunc[m] = 100.0 * float64(coveredPCsInFuncs[m]) / float64(pcsInFuncs[m])
+		}
+		if pcsInCoveredFuncs[m] != 0 {
+			percentInCoveredFunc[m] = 100.0 * float64(coveredPCsInFuncs[m]) / float64(pcsInCoveredFuncs[m])
+		}
+		if totalFuncs[m] != 0 {
+			percentCoveredFunc[m] = 100.0 * float64(coveredFuncs[m]) / float64(totalFuncs[m])
+		}
+		lines := fmt.Sprintf("%v / %v / %.2f%%", coveredLines[m], totalLines[m], percentLines[m])
+		pcsInFiles := fmt.Sprintf("%v / %v / %.2f%%", coveredPCsInFile[m], totalPCsInFile[m], percentPCsInFile[m])
+		funcs := fmt.Sprintf("%v / %v / %.2f%%", coveredFuncs[m], totalFuncs[m], percentCoveredFunc[m])
+		pcsInFuncs := fmt.Sprintf("%v / %v / %.2f%%", coveredPCsInFuncs[m], pcsInFuncs[m], percentPCsInFunc[m])
+		covedFuncs := fmt.Sprintf("%v / %v / %.2f%%", coveredPCsInFuncs[m], pcsInCoveredFuncs[m], percentInCoveredFunc[m])
+		d[m] = map[string]string{
+			"name":              m,
+			"lines":             lines,
+			"PCsInFiles":        pcsInFiles,
+			"Funcs":             funcs,
+			"PCsInFuncs":        pcsInFuncs,
+			"PCsInCoveredFuncs": covedFuncs,
+		}
+	}
+
+	return d
+}
+
+func (rg *ReportGenerator) DoModuleCover(w io.Writer, progs []Prog, coverFilter map[uint32]uint32) error {
+	progs = fixUpPCs(rg.target.Arch, progs, coverFilter)
+	data, err := rg.convertToStats(progs)
+	if err != nil {
+		return err
+	}
+
+	d := groupCoverByModule(data)
+
+	return coverTableTemplate.Execute(w, d)
+}
+
 var csvHeader = []string{
+	"Module",
 	"Filename",
 	"Function",
 	"Covered PCs",
 	"Total PCs",
 }
 
-func (rg *ReportGenerator) DoCSV(w io.Writer, progs []Prog) error {
+func (rg *ReportGenerator) DoCSV(w io.Writer, progs []Prog, coverFilter map[uint32]uint32) error {
+	progs = fixUpPCs(rg.target.Arch, progs, coverFilter)
 	files, err := rg.prepareFileMap(progs)
 	if err != nil {
 		return err
@@ -278,6 +513,7 @@ func (rg *ReportGenerator) DoCSV(w io.Writer, progs []Prog) error {
 	for fname, file := range files {
 		for _, function := range file.functions {
 			data = append(data, []string{
+				file.module,
 				fname,
 				function.name,
 				strconv.Itoa(function.covered),
@@ -303,16 +539,24 @@ func fileContents(file *file, lines [][]byte, haveProgs bool) string {
 	var buf bytes.Buffer
 	lineCover := perLineCoverage(file.covered, file.uncovered)
 	htmlReplacer := strings.NewReplacer(">", "&gt;", "<", "&lt;", "&", "&amp;", "\t", "        ")
-	for i, ln := range lines {
+	buf.WriteString("<table><tr><td class='count'>")
+	for i := range lines {
 		if haveProgs {
 			prog, count := "", "     "
 			if line := file.lines[i+1]; len(line.progCount) != 0 {
-				prog = fmt.Sprintf("onclick='onProgClick(%v)'", line.progIndex)
+				prog = fmt.Sprintf("onclick='onProgClick(%v, this)'", line.progIndex)
 				count = fmt.Sprintf("% 5v", len(line.progCount))
+				buf.WriteString(fmt.Sprintf("<span %v>%v</span> ", prog, count))
 			}
-			buf.WriteString(fmt.Sprintf("<span class='count' %v>%v</span> ", prog, count))
+			buf.WriteByte('\n')
 		}
-
+	}
+	buf.WriteString("</td><td>")
+	for i := range lines {
+		buf.WriteString(fmt.Sprintf("%d\n", i+1))
+	}
+	buf.WriteString("</td><td>")
+	for i, ln := range lines {
 		start := 0
 		cover := append(lineCover[i+1], lineCoverChunk{End: backend.LineEnd})
 		for _, cov := range cover {
@@ -340,6 +584,7 @@ func fileContents(file *file, lines [][]byte, haveProgs bool) string {
 		}
 		buf.WriteByte('\n')
 	}
+	buf.WriteString("</td></tr></table>")
 	return buf.String()
 }
 
@@ -420,10 +665,14 @@ func mergeLine(chunks []lineCoverChunk, start, end int, covered bool) []lineCove
 
 func addFunctionCoverage(file *file, data *templateData) {
 	var buf bytes.Buffer
+	var coveredTotal int
+	var TotalInCoveredFunc int
 	for _, function := range file.functions {
 		percentage := ""
+		coveredTotal += function.covered
 		if function.covered > 0 {
 			percentage = fmt.Sprintf("%v%%", percent(function.covered, function.pcs))
+			TotalInCoveredFunc += function.pcs
 		} else {
 			percentage = "---"
 		}
@@ -432,6 +681,17 @@ func addFunctionCoverage(file *file, data *templateData) {
 		buf.WriteString(fmt.Sprintf("<span class='cover-right'>of %v", strconv.Itoa(function.pcs)))
 		buf.WriteString("</span></span></span><br>\n")
 	}
+	buf.WriteString("-----------<br>\n")
+	buf.WriteString("<span class='hover'>SUMMARY")
+	percentInCoveredFunc := ""
+	if TotalInCoveredFunc > 0 {
+		percentInCoveredFunc = fmt.Sprintf("%v%%", percent(coveredTotal, TotalInCoveredFunc))
+	} else {
+		percentInCoveredFunc = "---"
+	}
+	buf.WriteString(fmt.Sprintf("<span class='cover hover'>%v", percentInCoveredFunc))
+	buf.WriteString(fmt.Sprintf("<span class='cover-right'>of %v", strconv.Itoa(TotalInCoveredFunc)))
+	buf.WriteString("</span></span></span><br>\n")
 	data.Functions = append(data.Functions, template.HTML(buf.String()))
 }
 
@@ -449,14 +709,22 @@ func processDir(dir *templateDir) {
 	for _, f := range dir.Files {
 		dir.Total += f.Total
 		dir.Covered += f.Covered
+		dir.TotalInCoveredFunc += f.TotalInCoveredFunc
 		f.Percent = percent(f.Covered, f.Total)
+		if f.TotalInCoveredFunc > 0 {
+			f.PercentInCoveredFunc = percent(f.Covered, f.TotalInCoveredFunc)
+		}
 	}
 	for _, child := range dir.Dirs {
 		processDir(child)
 		dir.Total += child.Total
 		dir.Covered += child.Covered
+		dir.TotalInCoveredFunc += child.TotalInCoveredFunc
 	}
 	dir.Percent = percent(dir.Covered, dir.Total)
+	if dir.TotalInCoveredFunc > 0 {
+		dir.PercentInCoveredFunc += percent(dir.Covered, dir.TotalInCoveredFunc)
+	}
 	if dir.Covered == 0 {
 		dir.Dirs = nil
 		dir.Files = nil
@@ -494,16 +762,24 @@ func parseFile(fn string) ([][]byte, error) {
 type templateData struct {
 	Root      *templateDir
 	Contents  []template.HTML
-	Progs     []template.HTML
+	Progs     []templateProg
 	Functions []template.HTML
+	RawCover  bool
+}
+
+type templateProg struct {
+	Sig     string
+	Content template.HTML
 }
 
 type templateBase struct {
-	Name    string
-	Path    string
-	Total   int
-	Covered int
-	Percent int
+	Name                 string
+	Path                 string
+	Total                int
+	Covered              int
+	TotalInCoveredFunc   int
+	Percent              int
+	PercentInCoveredFunc int
 }
 
 type templateDir struct {
@@ -567,7 +843,7 @@ var coverTemplate = template.Must(template.New("").Parse(`
 			}
 			.cover {
 				float: right;
-				width: 120px;
+				width: 250px;
 				padding-right: 4px;
 			}
 			.cover-right {
@@ -624,11 +900,16 @@ var coverTemplate = template.Must(template.New("").Parse(`
 			</ul>
 		</div>
 		<div id="right_pane" class="split right">
+			<button class="nested" id="close-btn" onclick="onCloseClick()">X</button>
 			{{range $i, $f := .Contents}}
 				<pre class="file" id="contents_{{$i}}">{{$f}}</pre>
 			{{end}}
+			{{$base := .}}
 			{{range $i, $p := .Progs}}
-				<pre class="file" id="prog_{{$i}}">{{$p}}</pre>
+				<pre class="file" id="prog_{{$i}}">
+{{if $base.RawCover}}<a href="/debuginput?sig={{$p.Sig}}">[raw coverage]</a><br />{{end}}
+{{$p.Content}}
+</pre>
 			{{end}}
 			{{range $i, $p := .Functions}}
 				<div class="function list" id="function_{{$i}}">{{$p}}</div>
@@ -656,26 +937,47 @@ var coverTemplate = template.Must(template.New("").Parse(`
 		}
 	})();
 	var visible;
+	var contentIdx;
+	var currentPC;
         function onPercentClick(index) {
 		if (visible)
 			visible.style.display = 'none';
 		visible = document.getElementById("function_" + index);
 		visible.style.display = 'block';
 		document.getElementById("right_pane").scrollTo(0, 0);
+		toggleCloseBtn();
 	}
 	function onFileClick(index) {
 		if (visible)
 			visible.style.display = 'none';
 		visible = document.getElementById("contents_" + index);
 		visible.style.display = 'block';
+		contentIdx = index;
 		document.getElementById("right_pane").scrollTo(0, 0);
+		toggleCloseBtn();
 	}
-	function onProgClick(index) {
+	function toggleCloseBtn(showBtn) {
+		let display = 'none';
+		if (showBtn)
+			display	= 'block';
+		document.getElementById("close-btn").style.display = display;
+	}
+	function onProgClick(index, span) {
 		if (visible)
 			visible.style.display = 'none';
 		visible = document.getElementById("prog_" + index);
 		visible.style.display = 'block';
 		document.getElementById("right_pane").scrollTo(0, 0);
+		currentPC = span;
+		toggleCloseBtn(true);
+	}
+	function onCloseClick() {
+		if (visible)
+			visible.style.display = 'none';
+		visible = document.getElementById("contents_" + contentIdx);
+		visible.style.display = 'block';
+		toggleCloseBtn();
+		currentPC.scrollIntoView();
 	}
 	</script>
 </html>
@@ -686,8 +988,8 @@ var coverTemplate = template.Must(template.New("").Parse(`
 			<span id="path/{{$dir.Path}}" class="caret hover">
 				{{$dir.Name}}
 				<span class="cover hover">
-					{{if $dir.Covered}}{{$dir.Percent}}%{{else}}---{{end}}
-					<span class="cover-right">of {{$dir.Total}}</span>
+					{{if $dir.Covered}}{{$dir.Percent}}%({{$dir.PercentInCoveredFunc}}%){{else}}---{{end}}
+					<span class="cover-right">of {{$dir.Total}}({{$dir.TotalInCoveredFunc}})</span>
 				</span>
 			</span>
 			<ul class="nested">
@@ -704,9 +1006,9 @@ var coverTemplate = template.Must(template.New("").Parse(`
 				<span class="cover hover">
 					<a href="#{{$file.Path}}" id="path/{{$file.Path}}"
 						onclick="{{if .HasFunctions}}onPercentClick{{else}}onFileClick{{end}}({{$file.Index}})">
-                                                {{$file.Percent}}%
+                                                {{$file.Percent}}%({{$file.PercentInCoveredFunc}}%)
 					</a>
-					<span class="cover-right">of {{$file.Total}}</span>
+					<span class="cover-right">of {{$file.Total}}({{$file.TotalInCoveredFunc}})</span>
 				</span>
 			{{else}}
 					{{$file.Name}}<span class="cover hover">---<span class="cover-right">
@@ -752,21 +1054,23 @@ var coverTableTemplate = template.Must(template.New("coverTable").Parse(`
 			<table>
 				<thead>
 					<tr>
-						<th>Subsystem</th>
+						<th>Name</th>
 						<th>Covered / Total Lines / %</th>
 						<th>Covered / Total PCs in File / %</th>
 						<th>Covered / Total PCs in Function / %</th>
-						<th>Covered Functions</th>
+						<th>Covered / Total PCs in Covered Function / %</th>
+						<th>Covered / Total Functions / %</th>
 					</tr>
 				</thead>
 				<tbody id="content">
 					{{range $i, $p := .}}
 					<tr>
-						<td>{{$p.subsystem}}</td>
+						<td>{{$p.name}}</td>
 						<td>{{$p.lines}}</td>
 						<td>{{$p.PCsInFiles}}</td>
 						<td>{{$p.PCsInFuncs}}</td>
-						<td>{{$p.totalFuncs}}</td>
+						<td>{{$p.PCsInCoveredFuncs}}</td>
+						<td>{{$p.Funcs}}</td>
 					</tr>
 					{{end}}
 				</tbody>

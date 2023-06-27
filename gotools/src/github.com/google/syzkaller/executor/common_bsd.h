@@ -43,6 +43,7 @@ static void setup_usb(void)
 #if SYZ_EXECUTOR || SYZ_FAULT
 #include <fcntl.h>
 #include <sys/fault.h>
+#include <sys/stat.h>
 static void setup_fault(void)
 {
 	if (chmod("/dev/fault", 0666))
@@ -59,7 +60,7 @@ static int inject_fault(int nth)
 
 	en.scope = FAULT_SCOPE_LWP;
 	en.mode = 0; // FAULT_MODE_NTH_ONESHOT
-	en.nth = nth + 2; // FAULT_NTH_MIN
+	en.nth = nth + 1; // FAULT_NTH_MIN
 	if (ioctl(fd, FAULT_IOC_ENABLE, &en) != 0)
 		failmsg("FAULT_IOC_ENABLE failed", "nth=%d", nth);
 
@@ -73,6 +74,7 @@ static int fault_injected(int fd)
 	struct fault_ioc_disable dis;
 	int res;
 
+	info.scope = FAULT_SCOPE_LWP;
 	if (ioctl(fd, FAULT_IOC_GETINFO, &info) != 0)
 		fail("FAULT_IOC_GETINFO failed");
 	res = (info.nfaults > 0);
@@ -89,12 +91,11 @@ static int fault_injected(int fd)
 
 #endif
 
-#if GOOS_openbsd
-
+#if GOOS_openbsd || GOOS_darwin
 #define __syscall syscall
+#endif // GOOS_openbsd || GOOS_darwin
 
-#if SYZ_EXECUTOR || __NR_syz_open_pts
-
+#if GOOS_openbsd && (SYZ_EXECUTOR || __NR_syz_open_pts)
 #include <termios.h>
 #include <util.h>
 
@@ -110,15 +111,18 @@ static uintptr_t syz_open_pts(void)
 		close(master);
 	return slave;
 }
-
-#endif // SYZ_EXECUTOR || __NR_syz_open_pts
-
-#endif // GOOS_openbsd
+#endif // GOOS_openbsd && (SYZ_EXECUTOR || __NR_syz_open_pts)
 
 #if SYZ_EXECUTOR || SYZ_NET_INJECTION
 
 #include <fcntl.h>
+// FIXME(HerrSpace): XNU has xnu/bsd/netinet/if_tun.h, but it's not shipped in
+// the installed header files (probably internal). It's also likely not very
+// interesting, as XNU only ships a tun driver called utun, not tap which is
+// currently required for SYZ_NET_INJECTION anyhow.
+#if !GOOS_darwin
 #include <net/if_tun.h>
+#endif // !GOOS_darwin
 #include <sys/types.h>
 
 static int tunfd = -1;
@@ -126,22 +130,35 @@ static int tunfd = -1;
 #if GOOS_netbsd
 // Increased number of tap and tun devices if image script is used
 #define MAX_TUN 64
-
+#elif GOOS_freebsd
+// The maximum number of tun devices is limited by the way IP addresses
+// are assigned. Based on this, the limit is 256.
+#define MAX_TUN 256
+#elif GOOS_openbsd
+#define MAX_TUN 8
 #else
 // Maximum number of tun devices in the default install.
 #define MAX_TUN 4
 #endif
 
-// All patterns are non-expanding given values < MAX_TUN.
+// Because the interface and device name contain an int, use MAXINT to determine
+// the maximum size of the string.
+// Since on *BSD  sizeof(int) is 4, MAXINT is 2147483647.
 #define TUN_IFACE "tap%d"
+#define MAX_TUN_IFACE_SIZE sizeof("tap2147483647")
 #define TUN_DEVICE "/dev/tap%d"
+#define MAX_TUN_DEVICE_SIZE sizeof("/dev/tap2147483647")
 
 #define LOCAL_MAC "aa:aa:aa:aa:aa:aa"
 #define REMOTE_MAC "aa:aa:aa:aa:aa:bb"
 #define LOCAL_IPV4 "172.20.%d.170"
+#define MAX_LOCAL_IPV4_SIZE sizeof("172.20.255.170")
 #define REMOTE_IPV4 "172.20.%d.187"
-#define LOCAL_IPV6 "fe80::%02hxaa"
-#define REMOTE_IPV6 "fe80::%02hxbb"
+#define MAX_REMOTE_IPV4_SIZE sizeof("172.20.255.187")
+#define LOCAL_IPV6 "fe80::%02xaa"
+#define MAX_LOCAL_IPV6_SIZE sizeof("fe80::ffaa")
+#define REMOTE_IPV6 "fe80::%02xbb"
+#define MAX_REMOTE_IPV6_SIZE sizeof("fe80::ffbb")
 
 static void vsnprintf_check(char* str, size_t size, const char* format, va_list args)
 {
@@ -194,10 +211,10 @@ static void initialize_tun(int tun_id)
 	if (tun_id < 0 || tun_id >= MAX_TUN)
 		failmsg("tun_id out of range", "tun_id=%d", tun_id);
 
-	char tun_device[sizeof(TUN_DEVICE)];
+	char tun_device[MAX_TUN_DEVICE_SIZE];
 	snprintf_check(tun_device, sizeof(tun_device), TUN_DEVICE, tun_id);
 
-	char tun_iface[sizeof(TUN_IFACE)];
+	char tun_iface[MAX_TUN_IFACE_SIZE];
 	snprintf_check(tun_iface, sizeof(tun_iface), TUN_IFACE, tun_id);
 
 #if GOOS_netbsd
@@ -206,7 +223,7 @@ static void initialize_tun(int tun_id)
 	execute_command(0, "ifconfig %s destroy", tun_iface);
 	execute_command(0, "ifconfig %s create", tun_iface);
 #else
-	execute_command(0, "ifconfig %s destroy", tun_device);
+	execute_command(0, "ifconfig %s destroy", tun_iface);
 #endif
 
 	tunfd = open(tun_device, O_RDWR | O_NONBLOCK);
@@ -226,7 +243,7 @@ static void initialize_tun(int tun_id)
 	}
 	// Remap tun onto higher fd number to hide it from fuzzer and to keep
 	// fd numbers stable regardless of whether tun is opened or not (also see kMaxFd).
-	const int kTunFd = 240;
+	const int kTunFd = 200;
 	if (dup2(tunfd, kTunFd) < 0)
 		fail("dup2(tunfd, kTunFd) failed");
 	close(tunfd);
@@ -245,31 +262,31 @@ static void initialize_tun(int tun_id)
 #endif
 
 	// Setting up a static ip for the interface
-	char local_ipv4[sizeof(LOCAL_IPV4)];
+	char local_ipv4[MAX_LOCAL_IPV4_SIZE];
 	snprintf_check(local_ipv4, sizeof(local_ipv4), LOCAL_IPV4, tun_id);
 	execute_command(1, "ifconfig %s inet %s netmask 255.255.255.0", tun_iface, local_ipv4);
 
 	// Creates an ARP table entry for the remote ip and MAC address
 	char remote_mac[sizeof(REMOTE_MAC)];
-	char remote_ipv4[sizeof(REMOTE_IPV4)];
+	char remote_ipv4[MAX_REMOTE_IPV4_SIZE];
 	snprintf_check(remote_mac, sizeof(remote_mac), REMOTE_MAC);
 	snprintf_check(remote_ipv4, sizeof(remote_ipv4), REMOTE_IPV4, tun_id);
 	execute_command(0, "arp -s %s %s", remote_ipv4, remote_mac);
 
 	// Set up a static ipv6 address for the interface
-	char local_ipv6[sizeof(LOCAL_IPV6)];
+	char local_ipv6[MAX_LOCAL_IPV6_SIZE];
 	snprintf_check(local_ipv6, sizeof(local_ipv6), LOCAL_IPV6, tun_id);
 	execute_command(1, "ifconfig %s inet6 %s", tun_iface, local_ipv6);
 
 	// Registers an NDP entry for the remote MAC with the remote ipv6 address
-	char remote_ipv6[sizeof(REMOTE_IPV6)];
+	char remote_ipv6[MAX_REMOTE_IPV6_SIZE];
 	snprintf_check(remote_ipv6, sizeof(remote_ipv6), REMOTE_IPV6, tun_id);
 	execute_command(0, "ndp -s %s%%%s %s", remote_ipv6, tun_iface, remote_mac);
 }
 
 #endif // SYZ_EXECUTOR || SYZ_NET_INJECTION
 
-#if SYZ_EXECUTOR || __NR_syz_emit_ethernet && SYZ_NET_INJECTION
+#if !GOOS_darwin && SYZ_EXECUTOR || __NR_syz_emit_ethernet && SYZ_NET_INJECTION
 #include <stdbool.h>
 #include <sys/uio.h>
 
@@ -287,7 +304,7 @@ static long syz_emit_ethernet(volatile long a0, volatile long a1)
 }
 #endif
 
-#if SYZ_EXECUTOR || SYZ_NET_INJECTION && (__NR_syz_extract_tcp_res || SYZ_REPEAT)
+#if !GOOS_darwin && SYZ_EXECUTOR || SYZ_NET_INJECTION && (__NR_syz_extract_tcp_res || SYZ_REPEAT)
 #include <errno.h>
 
 static int read_tun(char* data, int size)
@@ -305,14 +322,14 @@ static int read_tun(char* data, int size)
 }
 #endif
 
-#if SYZ_EXECUTOR || __NR_syz_extract_tcp_res && SYZ_NET_INJECTION
+#if !GOOS_darwin && SYZ_EXECUTOR || __NR_syz_extract_tcp_res && SYZ_NET_INJECTION
 
 struct tcp_resources {
 	uint32 seq;
 	uint32 ack;
 };
 
-#if GOOS_freebsd
+#if GOOS_freebsd || GOOS_darwin
 #include <net/ethernet.h>
 #else
 #include <net/ethertypes.h>

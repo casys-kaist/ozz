@@ -22,11 +22,11 @@ When using bhyve as the VM backend, a DHCP server must also be installed:
 ```
 To checkout the syzkaller sources, run:
 ```console
-$ go get -u -d github.com/google/syzkaller/prog
+$ git clone https://github.com/google/syzkaller
 ```
 and the binaries can be built by running:
 ```console
-$ cd go/src/github.com/google/syzkaller/
+$ cd syzkaller
 $ gmake
 ```
 
@@ -40,7 +40,7 @@ make manager fuzzer execprog TARGETOS=freebsd
 ```
 To build C `syz-executor` binary, copy `executor/*` files to a FreeBSD machine and build there with:
 ```
-c++ executor/executor_freebsd.cc -o syz-executor -O1 -lpthread -DGOOS=\"freebsd\" -DGIT_REVISION=\"CURRENT_GIT_REVISION\"
+c++ executor/executor.cc -o syz-executor -O1 -lpthread -DGOOS_freebsd=1 -DGOARCH_amd64=1 -DGIT_REVISION=\"CURRENT_GIT_REVISION\"
 ```
 Then, copy out the binary back to host into `bin/freebsd_amd64` dir.
 
@@ -61,7 +61,7 @@ This will create a memory device for the VM file and allow host to install the c
 To get a copy of the current development sources:
 ```console
 # pkg install git
-# git clone --depth=1 --branch=master https://github.com/freebsd/freebsd /usr/src
+# git clone --depth=1 --branch=main https://github.com/freebsd/freebsd-src /usr/src
 ```
 To create a custom kernel configuration file for syzkaller and build a new kernel, run:
 
