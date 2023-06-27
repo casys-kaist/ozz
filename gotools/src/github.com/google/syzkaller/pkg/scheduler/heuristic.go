@@ -13,13 +13,14 @@ func ComputePotentialBuggyKnots(seq []interleaving.SerialAccess) []interleaving.
 		return nil
 	}
 
-	cs0, cs1 := chunkize(seq[0]), chunkize(seq[1])
+	cs0, cs1 := chunknize(seq[0]), chunknize(seq[1])
 	// TODO: optimize
 	knots := []interleaving.Segment{}
 	for _, c0 := range cs0 {
-		for _, c1 := range cs1 {
-			knots = append(knots, computePotentialBuggyKnots(c0, c1)...)
-		}
+		knots = append(knots, computePotentialBuggyKnots(c0, chunk(seq[1]))...)
+	}
+	for _, c1 := range cs1 {
+		knots = append(knots, computePotentialBuggyKnots(c1, chunk(seq[0]))...)
 	}
 	// TODO: optimize
 	ht := make(map[uint64]struct{})
@@ -35,7 +36,7 @@ func ComputePotentialBuggyKnots(seq []interleaving.SerialAccess) []interleaving.
 	return res
 }
 
-func chunkize(serial interleaving.SerialAccess) []chunk {
+func chunknize(serial interleaving.SerialAccess) []chunk {
 	chunks := []chunk{}
 	start := 0
 	size := 0
@@ -52,13 +53,24 @@ func chunkize(serial interleaving.SerialAccess) []chunk {
 		if create {
 			if size > 1 {
 				new := append(chunk{}, serial[start:i]...)
-				chunks = append(chunks, new)
+				if contain_store(new) {
+					chunks = append(chunks, new)
+				}
 			}
 			start = i + 1
 			create = false
 		}
 	}
 	return chunks
+}
+
+func contain_store(c chunk) bool {
+	for _, acc := range c {
+		if acc.Typ == interleaving.TypeStore {
+			return true
+		}
+	}
+	return false
 }
 
 func computePotentialBuggyKnots(c0, c1 chunk) []interleaving.Segment {

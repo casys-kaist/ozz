@@ -6,7 +6,7 @@ import (
 	"github.com/google/syzkaller/pkg/interleaving"
 )
 
-func testChunknize(t *testing.T, filename string, ans [2]chunk) {
+func testChunknize(t *testing.T, filename string, ans chunk) {
 	check := func(c, ansc chunk, ok bool) bool {
 		if ok {
 			return true
@@ -23,42 +23,40 @@ func testChunknize(t *testing.T, filename string, ans [2]chunk) {
 		return false
 	}
 	seq := loadTestdata(t, []string{filename}, nil)[0]
+	var ok bool
 	for i, serial := range seq {
-		chunks := chunkize(serial)
+		chunks := chunknize(serial)
 		t.Logf("Chunknized %d-th serial (#: %d)", i, len(chunks))
-		var ok bool
 		for j, chunk := range chunks {
 			t.Logf("%d-th chunk", j)
 			for _, acc := range chunk {
 				t.Logf("%v", acc)
 			}
-			if check(chunk, ans[i], ok) {
+			if check(chunk, ans, ok) {
 				ok = true
 			}
 		}
-		if !ok {
-			t.Errorf("%v: Failed to find a chunk %d", filename, i)
-		}
+	}
+	if !ok {
+		t.Errorf("%v: Failed to find a chunk", filename)
 	}
 }
 
 func TestChunknize(t *testing.T) {
 	tests := []struct {
 		filename string
-		ans      [2]chunk
+		ans      chunk
 	}{
 		{
 			filename: "pso_test",
-			ans: [2]chunk{
-				{{Inst: 0x81a6167c}, {Inst: 0x81a616a6}},
-				{{Inst: 0x81a61af7}, {Inst: 0x81a61ba4}},
+			ans: chunk{
+				{Inst: 0x81a6167c}, {Inst: 0x81a616a6},
 			},
 		},
 		{
 			filename: "watchqueue_pipe",
-			ans: [2]chunk{
-				{{Inst: 0x81ad9a0c}, {Inst: 0x81ad9a84}},
-				{{Inst: 0x81f82be8}, {Inst: 0x81f83178}},
+			ans: chunk{
+				{Inst: 0x81ad9a0c}, {Inst: 0x81ad9a84},
 			},
 		},
 	}
