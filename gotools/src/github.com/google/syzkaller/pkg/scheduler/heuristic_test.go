@@ -6,18 +6,64 @@ import (
 	"github.com/google/syzkaller/pkg/interleaving"
 )
 
-func TestChunknize(t *testing.T) {
-	seq := loadTestdata(t, []string{"pso_test"}, nil)[0]
+func testChunknize(t *testing.T, filename string, ans [2]chunk) {
+	check := func(c, ansc chunk, ok bool) bool {
+		if ok {
+			return true
+		}
+		i := 0
+		for _, acc := range c {
+			if acc.Inst == ansc[i].Inst {
+				i++
+				if i == len(ansc) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	seq := loadTestdata(t, []string{filename}, nil)[0]
 	for i, serial := range seq {
-		t.Logf("Chunknizing %d-th serial", i)
 		chunks := chunkize(serial)
-		t.Logf("# of chunks: %d", len(chunks))
-		for i, chunk := range chunks {
-			t.Logf("%d-th chunk", i)
+		t.Logf("Chunknized %d-th serial (#: %d)", i, len(chunks))
+		var ok bool
+		for j, chunk := range chunks {
+			t.Logf("%d-th chunk", j)
 			for _, acc := range chunk {
 				t.Logf("%v", acc)
 			}
+			if check(chunk, ans[i], ok) {
+				ok = true
+			}
 		}
+		if !ok {
+			t.Errorf("%v: Failed to find a chunk %d", filename, i)
+		}
+	}
+}
+
+func TestChunknize(t *testing.T) {
+	tests := []struct {
+		filename string
+		ans      [2]chunk
+	}{
+		{
+			filename: "pso_test",
+			ans: [2]chunk{
+				{{Inst: 0x81a6167c}, {Inst: 0x81a616a6}},
+				{{Inst: 0x81a61af7}, {Inst: 0x81a61ba4}},
+			},
+		},
+		{
+			filename: "watchqueue_pipe",
+			ans: [2]chunk{
+				{{Inst: 0x81ad9a0c}, {Inst: 0x81ad9a84}},
+				{{Inst: 0x81f82be8}, {Inst: 0x81f83178}},
+			},
+		},
+	}
+	for _, test := range tests {
+		testChunknize(t, test.filename, test.ans)
 	}
 }
 
@@ -36,7 +82,7 @@ func TestComputePotentialBuggyKnots(t *testing.T) {
 			filename: "watchqueue_pipe",
 			ans: interleaving.Knot{
 				{{Inst: 0x81ad9a0c, Size: 8, Typ: interleaving.TypeStore, Timestamp: 98}, {Inst: 0x81f83178, Size: 8, Typ: interleaving.TypeLoad, Thread: 1, Timestamp: 197}},
-				{{Inst: 0x81ad9a84, Size: 4, Typ: interleaving.TypeStore, Timestamp: 102}, {Inst: 0x81a61af7, Size: 4, Typ: interleaving.TypeLoad, Thread: 1, Timestamp: 191}}},
+				{{Inst: 0x81ad9a84, Size: 4, Typ: interleaving.TypeStore, Timestamp: 102}, {Inst: 0x81f82be8, Size: 4, Typ: interleaving.TypeLoad, Thread: 1, Timestamp: 191}}},
 		},
 	}
 
