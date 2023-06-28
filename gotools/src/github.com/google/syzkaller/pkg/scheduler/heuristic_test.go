@@ -59,17 +59,20 @@ func TestChunknize(t *testing.T) {
 				{Inst: 0x81ad9a0c}, {Inst: 0x81ad9a84},
 			},
 		},
+		{
+			filename: "tso_test",
+			ans: chunk{
+				{Inst: 0x81a651e0}, {Inst: 0x81a651f1},
+			},
+		},
 	}
 	for _, test := range tests {
 		testChunknize(t, test.filename, test.ans)
 	}
 }
 
-func TestComputePotentialBuggyKnots(t *testing.T) {
-	tests := []struct {
-		filename string
-		ans      interleaving.Knot
-	}{
+func TestComputePotentialBuggyKnotsPSO(t *testing.T) {
+	pso_tests := []T{
 		{
 			filename: "pso_test",
 			ans: interleaving.Knot{
@@ -83,7 +86,23 @@ func TestComputePotentialBuggyKnots(t *testing.T) {
 				{{Inst: 0x81ad9a84, Size: 4, Typ: interleaving.TypeStore, Timestamp: 102}, {Inst: 0x81f82be8, Size: 4, Typ: interleaving.TypeLoad, Thread: 1, Timestamp: 191}}},
 		},
 	}
+	testComputePotentialBuggyKnots(t, pso_tests, "PSO")
+}
 
+func TestComputePotentialBuggyKnotsTSO(t *testing.T) {
+	tso_tests := []T{
+		{
+			filename: "tso_test",
+			ans: interleaving.Knot{
+				{{Inst: 0x81a651e0, Size: 4, Typ: interleaving.TypeStore, Timestamp: 6}, {Inst: 0x81a65291, Size: 4, Typ: interleaving.TypeLoad, Thread: 1, Timestamp: 22}},
+				{{Inst: 0x81a651f1, Size: 4, Typ: interleaving.TypeLoad, Timestamp: 8}, {Inst: 0x81a65280, Size: 4, Typ: interleaving.TypeStore, Thread: 1, Timestamp: 20}},
+			},
+		},
+	}
+	testComputePotentialBuggyKnots(t, tso_tests, "TSO")
+}
+
+func testComputePotentialBuggyKnots(t *testing.T, tests []T, model string) {
 	for _, test := range tests {
 		seq := loadTestdata(t, []string{test.filename}, nil)[0]
 		res := ComputePotentialBuggyKnots(seq[:])
@@ -100,7 +119,12 @@ func TestComputePotentialBuggyKnots(t *testing.T) {
 			}
 		}
 		if !checkAnswer(t, knots, test.ans) {
-			t.Errorf("%s: can't find the required knot", test.filename)
+			t.Errorf("%s: %s: can't find the required knot", model, test.filename)
 		}
 	}
+}
+
+type T struct {
+	filename string
+	ans      interleaving.Knot
 }
