@@ -3,3 +3,6 @@ arches = amd64
 __NR_pso_clear = amd64:504
 __NR_ssb_pso_reader = amd64:502
 __NR_ssb_pso_writer = amd64:501
+__NR_ssb_tso_thread1 = amd64:505
+__NR_ssb_tso_thread2 = amd64:506
+__NR_tso_check = amd64:507

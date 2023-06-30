@@ -1,0 +1,3 @@
+ssb_tso_thread1()
+ssb_tso_thread2()
+tso_check()
