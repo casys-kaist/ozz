@@ -94,8 +94,8 @@ func TestComputePotentialBuggyKnotsTSO(t *testing.T) {
 		{
 			filename: "tso_test",
 			ans: interleaving.Knot{
-				{{Inst: 0x81a651e0, Size: 4, Typ: interleaving.TypeStore, Timestamp: 6}, {Inst: 0x81a65291, Size: 4, Typ: interleaving.TypeLoad, Thread: 1, Timestamp: 22}},
-				{{Inst: 0x81a651f1, Size: 4, Typ: interleaving.TypeLoad, Timestamp: 8}, {Inst: 0x81a65280, Size: 4, Typ: interleaving.TypeStore, Thread: 1, Timestamp: 20}},
+				{{Inst: 0x81a651e0, Size: 4, Typ: interleaving.TypeStore, Timestamp: 1}, {Inst: 0x81a65291, Size: 4, Typ: interleaving.TypeLoad, Thread: 1, Timestamp: 8}},
+				{{Inst: 0x81a651f1, Size: 4, Typ: interleaving.TypeLoad, Timestamp: 2}, {Inst: 0x81a65280, Size: 4, Typ: interleaving.TypeStore, Thread: 1, Timestamp: 7}},
 			},
 		},
 	}

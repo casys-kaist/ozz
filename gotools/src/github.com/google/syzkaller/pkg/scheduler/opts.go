@@ -21,6 +21,7 @@ const (
 	FlagWantMessagePassing
 	FlagDifferentAccessTypeOnly
 	FlagWantStrictMessagePassing
+	FlagWantOOTA // out-of-thin-air
 )
 
 func (opts KnotterOpts) flagSet(flag KnotterFlags) bool {

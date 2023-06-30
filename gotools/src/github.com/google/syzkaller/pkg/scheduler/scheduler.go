@@ -44,6 +44,9 @@ func GetKnotter(opts KnotterOpts) Knotter {
 	if opts.flagSet(FlagWantStrictMessagePassing) {
 		opts.Flags |= FlagDifferentAccessTypeOnly
 	}
+	if opts.flagSet(FlagWantOOTA) && opts.flagSet(FlagWantMessagePassing) {
+		panic("invalid flag")
+	}
 	return Knotter{
 		opts: opts,
 	}
@@ -387,6 +390,11 @@ func (knotter *Knotter) doFormKnotsNotParallel() {
 
 func (knotter *Knotter) doFormKnotsParallel() {
 	knotter.doFormKnotsinThread(knotter.comms0)
+	if knotter.opts.flagSet(FlagWantOOTA) {
+		// NOTE: For OOTA, forming knots in both directions will make
+		// dupped knots without any new interesting knots.
+		return
+	}
 	knotter.doFormKnotsinThread(knotter.comms1)
 }
 
@@ -400,32 +408,57 @@ func (knotter *Knotter) doFormKnotsinThread(comms []interleaving.Communication) 
 }
 
 func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication) {
-	knot := interleaving.Knot{comm0, comm1}
-	parallel := knot.Type() == interleaving.KnotParallel
+	parallel := comm0.Parallel(comm1)
 	if parallel && comm0.Former().Timestamp > comm1.Former().Timestamp {
-		knot = interleaving.Knot{comm1, comm0}
+		comm0, comm1 = comm1, comm0
 	}
-	if knotter.opts.flagSet(FlagWantMessagePassing) {
-		if !(comm0.Former().Typ == comm1.Former().Typ &&
-			comm0.Latter().Typ == comm1.Latter().Typ &&
-			comm0.Former().Typ != comm0.Latter().Typ) {
-			return
-		}
-		if knotter.opts.flagSet(FlagWantStrictMessagePassing) &&
-			(comm1.Former().Typ != interleaving.TypeStore || comm0.Former().Addr == comm1.Former().Addr) {
-			return
-		}
+	if !parallel && knotter.opts.flagSet(FlagWantParallel) {
+		panic("want parallel but comms are not parallel")
 	}
+	knotter.formKnotSingleSorted(comm0, comm1)
+}
+
+func (knotter *Knotter) formKnotSingleSorted(comm0, comm1 interleaving.Communication) {
+	if !sanitizeKnotSingle(comm0, comm1, knotter.opts) {
+		return
+	}
+	knot := interleaving.Knot{comm0, comm1}
 	if knotter.alreadyHave(knot) {
 		return
 	}
-	if knotter.tooFarComms(comm0, comm1, parallel) {
+	if knotter.tooFarComms(comm0, comm1) {
 		return
 	}
 	if typ := knot.Type(); typ == interleaving.KnotInvalid {
 		return
 	}
 	knotter.knots = append(knotter.knots, knot)
+}
+
+func sanitizeKnotSingle(comm0, comm1 interleaving.Communication, opts KnotterOpts) bool {
+	if opts.flagSet(FlagWantOOTA) {
+		// NB. Not sure the OOTA behavior is really limited in the
+		// following pattern
+		if !(comm0.Former().Typ == comm1.Latter().Typ &&
+			comm1.Latter().Typ == comm0.Former().Typ) {
+			return false
+		}
+	} else if opts.flagSet(FlagWantMessagePassing) {
+		if !isMessagePassing(comm0, comm1) {
+			return false
+		}
+		if opts.flagSet(FlagWantStrictMessagePassing) &&
+			(comm1.Former().Typ != interleaving.TypeStore || comm0.Former().Addr == comm1.Former().Addr) {
+			return false
+		}
+	}
+	return true
+}
+
+func isMessagePassing(c0, c1 interleaving.Communication) bool {
+	return (c0.Former().Typ == c1.Former().Typ &&
+		c0.Latter().Typ == c1.Latter().Typ &&
+		c0.Former().Typ != c0.Latter().Typ)
 }
 
 func (knotter *Knotter) alreadyHave(knot interleaving.Knot) bool {
@@ -441,7 +474,8 @@ func (knotter *Knotter) tooManyNestedComm(comm interleaving.Communication) bool 
 	return knotter.innerCommCount[comm] >= knotter.config.threshold
 }
 
-func (knotter *Knotter) tooFarComms(comm0, comm1 interleaving.Communication, parallel bool) bool {
+func (knotter *Knotter) tooFarComms(comm0, comm1 interleaving.Communication) bool {
+	parallel := comm0.Parallel(comm1)
 	tooFar := func(acc0, acc1 interleaving.Access) bool {
 		if acc0.Thread != acc1.Thread {
 			panic("wrong")
