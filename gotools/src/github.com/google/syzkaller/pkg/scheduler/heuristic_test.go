@@ -117,6 +117,9 @@ func testComputePotentialBuggyKnots(t *testing.T, tests []T, model string) {
 			for _, comm := range knot {
 				t.Logf("%v --> %v", comm.Former(), comm.Latter())
 			}
+			if knot[0].Former().Typ != interleaving.TypeStore {
+				t.Errorf("Wrong")
+			}
 		}
 		if !checkAnswer(t, knots, test.ans) {
 			t.Errorf("%s: %s: can't find the required knot", model, test.filename)

@@ -437,10 +437,11 @@ func (knotter *Knotter) formKnotSingleSorted(comm0, comm1 interleaving.Communica
 
 func sanitizeKnotSingle(comm0, comm1 interleaving.Communication, opts KnotterOpts) bool {
 	if opts.flagSet(FlagWantOOTA) {
-		// NB. Not sure the OOTA behavior is really limited in the
+		// XXX: Not sure the OOTA behavior is really limited in the
 		// following pattern
 		if !(comm0.Former().Typ == comm1.Latter().Typ &&
-			comm1.Latter().Typ == comm0.Former().Typ) {
+			comm1.Latter().Typ == comm0.Former().Typ &&
+			comm0.Former().Typ == interleaving.TypeStore) {
 			return false
 		}
 	} else if opts.flagSet(FlagWantMessagePassing) {
