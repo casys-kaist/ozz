@@ -172,7 +172,7 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 			continue
 		}
 
-		flushVector := ssb.GenerateFlushVector(proc.rnd)
+		flushVector := ssb.GenerateFlushVector(proc.rnd, used)
 		p.AttachFlushVector(flushVector)
 
 		proc.countUsedInstructions(used)
