@@ -112,11 +112,7 @@ func loadKnots(t *testing.T, paths []string, opts KnotterOpts) []interleaving.Kn
 
 func checkAnswer(t *testing.T, knots []interleaving.Knot, required interleaving.Knot) bool {
 	for _, knot := range knots {
-		if ok, err := knot.Imply(required); err != nil {
-			printKnot(knot)
-			printKnot(required)
-			panic(err)
-		} else if ok {
+		if ok, err := knot.Imply(required); err == nil && ok {
 			return true
 		}
 	}

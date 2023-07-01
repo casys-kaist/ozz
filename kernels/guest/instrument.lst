@@ -26061,11 +26061,12 @@ __do_sys_restart_syscall
 __do_sys_set_mempolicy_home_node
 __do_sys_setsid
 __do_sys_sgetmask
-__do_sys_ssb_sbitmap_clear
-__do_sys_ssb_sbitmap_init
+__do_sys_ssb_tso_thread1
+__do_sys_ssb_tso_thread2
 __do_sys_swapoff
 __do_sys_sync
 do_sys_truncate
+__do_sys_tso_check
 __do_sys_vfork
 __do_sys_vhangup
 __do_sys_waitid
@@ -43250,8 +43251,6 @@ __ia32_sys_socketpair
 __ia32_sys_splice
 __ia32_sys_ssb_pso_reader
 __ia32_sys_ssb_pso_writer
-__ia32_sys_ssb_sbitmap_func1
-__ia32_sys_ssb_sbitmap_func2
 __ia32_sys_ssetmask
 __ia32_sys_stat
 __ia32_sys_statfs
@@ -84877,8 +84876,6 @@ __se_sys_shutdown
 __se_sys_sigprocmask
 __se_sys_socketcall
 __se_sys_splice
-__se_sys_ssb_sbitmap_func1
-__se_sys_ssb_sbitmap_func2
 __se_sys_statfs
 __se_sys_statfs64
 __se_sys_swapon
@@ -112683,8 +112680,6 @@ __x64_sys_socketpair
 __x64_sys_splice
 __x64_sys_ssb_pso_reader
 __x64_sys_ssb_pso_writer
-__x64_sys_ssb_sbitmap_func1
-__x64_sys_ssb_sbitmap_func2
 __x64_sys_ssetmask
 __x64_sys_stat
 __x64_sys_statfs

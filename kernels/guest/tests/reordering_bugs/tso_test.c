@@ -1,53 +1,41 @@
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 
 #include <pthread.h>
 #include <stdio.h>
-#include <sys/mman.h>
-#include <sys/socket.h>
-#include <sys/types.h>
+#include <unistd.h>
 
+#include "hypercall.h"
 #include "test.h"
 
-#define AF_XDP 44
-#define XDP_UMEM_PGOFF_FILL_RING 0x100000000ULL
-#define FQ_NUM_DESCS 1024
-#define XDP_UMEM_FILL_RING 5
-#define SOL_XDP 283
+#define SYS_TSO_THREAD1 505
+#define SYS_TSO_THREAD2 506
+#define SYS_TSO_CHECK 507
 
-int sk;
-
-void *th1(void *unused) {
+void *th1(void *_arg) {
   pin(1);
-
-  hypercall(HCALL_INSTALL_BP, 0xffffffff8e4c390f, 0, 0);
-
+  hypercall(HCALL_INSTALL_BP, 0xffffffff81a65204, 0, 0);
   activate_bp_sync();
-
   syscall(SYS_SSB_SWITCH);
-  int fq_size = FQ_NUM_DESCS;
-  if (setsockopt(sk, SOL_XDP, XDP_UMEM_FILL_RING, &fq_size, sizeof(int)))
-    perror("setsockopt");
+  syscall(SYS_TSO_THREAD1);
   hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
+  return NULL;
 }
 
-void *th2(void *unused) {
+void *th2(void *_arg) {
   pin(2);
-
   hypercall(HCALL_INSTALL_BP, 0xffffffffffffffff, 1, 0);
-
   activate_bp_sync();
-
   syscall(SYS_SSB_SWITCH);
-  mmap(0, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, sk,
-       XDP_UMEM_PGOFF_FILL_RING);
+  syscall(SYS_TSO_THREAD2);
   hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
+  return NULL;
 }
 
 void run() {
   hypercall(HCALL_RESET, 0, 0, 0);
   hypercall(HCALL_PREPARE, 2, 2, 0);
-
-  sk = socket(AF_XDP, SOCK_RAW, 0);
 
   pthread_t pth1, pth2;
 
@@ -57,12 +45,12 @@ void run() {
   pthread_join(pth1, NULL);
   pthread_join(pth2, NULL);
 
-  close(sk);
+  syscall(SYS_TSO_CHECK);
 
   hypercall(HCALL_RESET, 0, 0, 0);
 }
 
-int main() {
+int main(void) {
   pin(0);
   do_test(true);
   return 0;
