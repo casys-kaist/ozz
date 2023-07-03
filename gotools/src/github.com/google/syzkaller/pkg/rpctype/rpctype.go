@@ -220,3 +220,7 @@ type RunTestDoneArgs struct {
 	Info   []*ipc.ProgInfo
 	Error  string
 }
+
+type SendUsedKnotsArg struct {
+	Insts [][]uint32
+}

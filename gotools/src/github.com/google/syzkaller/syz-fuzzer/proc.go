@@ -162,11 +162,13 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 		if !ok {
 			continue
 		}
+		// NOTE: This may not be necessary, but as we are exploring
+		// new research problems, we wanna know what knots are used
+		// and understand how the fuzzer can be improved futher.
+		proc.inspectUsedKnots(used)
 
 		flushVector := ssb.GenerateFlushVector(proc.rnd, used)
 		p.AttachFlushVector(flushVector)
-
-		proc.countUsedInstructions(used)
 
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
 		proc.execute(proc.execOpts, p, ProgNormal, StatSchedule)
@@ -196,9 +198,20 @@ func (proc *Proc) setHint(tp *prog.Candidate, remaining []interleaving.Segment) 
 	tp.Hint = remaining
 }
 
+func (proc *Proc) inspectUsedKnots(used []interleaving.Segment) {
+	proc.sendUsedKnots(used)
+	proc.countUsedInstructions(used)
+}
+
+func (proc *Proc) sendUsedKnots(used []interleaving.Segment) {
+	// XXX: This may degrade the runtime performance as it keeps
+	// invoking RPC calls. Not sure we want to keep this.
+	proc.fuzzer.sendUsedKnots(used)
+}
+
 func (proc *Proc) countUsedInstructions(used []interleaving.Segment) {
-	proc.fuzzer.signalMu.RLock()
-	defer proc.fuzzer.signalMu.RUnlock()
+	proc.fuzzer.signalMu.Lock()
+	defer proc.fuzzer.signalMu.Unlock()
 	for _, _knot := range used {
 		knot := _knot.(interleaving.Knot)
 		proc.fuzzer.countInstructionInKnot(knot)

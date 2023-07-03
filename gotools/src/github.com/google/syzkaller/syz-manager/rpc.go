@@ -75,6 +75,7 @@ type RPCManagerView interface {
 	newScheduledInput(inp rpctype.ScheduledInput, signal interleaving.Signal) bool
 	candidateBatch(size int) []rpctype.Candidate
 	rotateCorpus() bool
+	recordKnot(knot interleaving.Knot)
 }
 
 func startRPCServer(mgr *Manager) (*RPCServer, error) {
@@ -480,6 +481,18 @@ func (serv *RPCServer) accumulateInstCount(a *rpctype.PollArgs) {
 		}
 	}
 	serv.stats.instBlacklist.set(len(serv.instBlacklist))
+}
+
+func (serv *RPCServer) SendUsedKnots(a *rpctype.SendUsedKnotsArg, r *int) error {
+	for _, insts := range a.Insts {
+		// XXX: Tentative implementation. Seems really terrible.
+		knot := interleaving.Knot{
+			{{Inst: insts[0]}, {Inst: insts[1]}},
+			{{Inst: insts[2]}, {Inst: insts[3]}},
+		}
+		serv.mgr.recordKnot(knot)
+	}
+	return nil
 }
 
 func (serv *RPCServer) shutdownInstance(name string) []byte {

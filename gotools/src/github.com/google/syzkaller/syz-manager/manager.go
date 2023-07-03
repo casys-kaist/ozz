@@ -117,6 +117,7 @@ type Manager struct {
 	modulesInitialized bool
 
 	assetStorage *asset.Storage
+	usedKnotFile *os.File
 }
 
 type CorpusItemUpdate struct {
@@ -728,6 +729,14 @@ func (mgr *Manager) loadInterleavingCoverage() {
 	}
 	mgr.interleavingCovPath = fn
 	mgr.interleavingCovFile = f
+
+	// XXX: Piggybacking here. Need to
+	fn = filepath.Join(mgr.cfg.Workdir, fmt.Sprintf("used_knots"))
+	f, err = os.OpenFile(fn, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		panic(err)
+	}
+	mgr.usedKnotFile = f
 }
 
 func (mgr *Manager) loadCorpus() {
@@ -1764,6 +1773,14 @@ func (mgr *Manager) dumpCoverageToFile(dir, filename string, cov bytes.Buffer) {
 	if _, err := codef.Write(cov.Bytes()); err != nil {
 		log.Fatalf("failed to write coverage to file (%s): %v", filename, err)
 	}
+}
+
+func (mgr *Manager) recordKnot(knot interleaving.Knot) {
+	// XXX: Tentative implementation. Definitely terrible.
+	mgr.usedKnotFile.WriteString(
+		fmt.Sprintf("%x --> %x\n%x --> %x\n---------------------",
+			knot[0].Former().Inst, knot[0].Latter().Inst,
+			knot[1].Former().Inst, knot[1].Latter().Inst))
 }
 
 func publicWebAddr(addr string) string {
