@@ -2,6 +2,9 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"math"
+	"math/rand"
 	"runtime"
 
 	"github.com/google/syzkaller/pkg/log"
@@ -76,15 +79,52 @@ func (proc *Proc) powerSchedule() {
 }
 
 func (proc *Proc) unplugThreading() {
-	if proc.scheduled < uint64(float64(proc.executed)*0.4) {
+	if proc.balancer.scheduled < uint64(float64(proc.balancer.executed)*0.4) {
 		proc.fuzzer.addCollection(CollectionUnplug, 1)
 		proc.threadingPlugged = false
 	}
 }
 
 func (proc *Proc) plugThreading() {
-	if proc.scheduled > uint64(float64(proc.executed)*0.7) {
+	if proc.balancer.scheduled > uint64(float64(proc.balancer.executed)*0.7) {
 		proc.fuzzer.addCollection(CollectionPlug, 1)
 		proc.threadingPlugged = true
 	}
+}
+
+type balancer struct {
+	executed  uint64
+	scheduled uint64
+	// Values last printed
+	executed0  uint64
+	scheduled0 uint64
+}
+
+func (bal balancer) String() string {
+	return fmt.Sprintf("executed=%v scheduled=%v", bal.executed, bal.scheduled)
+}
+
+func (bal *balancer) print() {
+	if bal.executed0 != bal.executed || bal.scheduled0 != bal.scheduled {
+		// Values has been chagned
+		log.Logf(2, "%v", bal)
+		bal.executed0, bal.scheduled0 = bal.executed, bal.scheduled
+	}
+}
+
+func (bal *balancer) count(stat Stat) {
+	bal.executed++
+	if stat == StatSchedule || stat == StatThreading {
+		bal.scheduled++
+	}
+}
+
+func (bal balancer) needScheduling(r *rand.Rand) bool {
+	// prob = 1 / (1 + exp(-25 * (-x + 0.25))) where x = (scheduled/executed)
+	x := float64(bal.scheduled) / float64(bal.executed)
+	prob1000 := int(1 / (1 + math.Exp(-30*(-1*x+0.25))) * 1000)
+	if prob1000 < 50 {
+		prob1000 = 50
+	}
+	return prob1000 >= r.Intn(1000)
 }

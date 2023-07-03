@@ -5,7 +5,6 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"math/rand"
 	"runtime/debug"
 	"sync/atomic"
@@ -41,8 +40,7 @@ type Proc struct {
 	// To give a half of computing power for scheduling. We don't use
 	// proc.fuzzer.Stats and proc.env.StatExec as it is periodically
 	// set to 0.
-	executed  uint64
-	scheduled uint64
+	balancer balancer
 	// If scheduled is too large, we block Proc.pickupThreadingWorks()
 	// to give more chance to sequential-fuzzing.
 	threadingPlugged bool
@@ -97,8 +95,8 @@ func (proc *Proc) loop() {
 	}
 	for i := 0; ; i++ {
 		proc.relieveMemoryPressure()
+		proc.balancer.print()
 		if i%100 == 0 {
-			log.Logf(3, "executed=%v scheduled=%v", proc.executed, proc.scheduled)
 			proc.powerSchedule()
 		}
 
@@ -143,14 +141,7 @@ func (proc *Proc) needScheduling() bool {
 	if len(proc.fuzzer.candidates) == 0 {
 		return false
 	}
-
-	// prob = 1 / (1 + exp(-25 * (-x + 0.25))) where x = (scheduled/executed)
-	x := float64(proc.scheduled) / float64(proc.executed)
-	prob1000 := int(1 / (1 + math.Exp(-30*(-1*x+0.25))) * 1000)
-	if prob1000 < 50 {
-		prob1000 = 50
-	}
-	return prob1000 >= proc.rnd.Intn(1000)
+	return proc.balancer.needScheduling(proc.rnd)
 }
 
 func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
@@ -582,10 +573,7 @@ func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, knots []i
 }
 
 func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.ProgInfo {
-	proc.executed++
-	if stat == StatSchedule || stat == StatThreading {
-		proc.scheduled++
-	}
+	proc.balancer.count(stat)
 	proc.fuzzer.checkDisabledCalls(p)
 
 	// Limit concurrency window and do leak checking once in a while.
