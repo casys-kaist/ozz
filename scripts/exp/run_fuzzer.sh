@@ -43,6 +43,7 @@ WORKDIR=${WORKDIR## }
 
 if [ -n "$DEBUG" ]; then
 	_DEBUG="-debug"
+	TS=1
 	BENCH=1
 fi
 
@@ -63,12 +64,13 @@ echo "    config    : $CONFIG"
 echo "    debug     : $DEBUG"
 echo "    options   : $OPTS"
 echo "    tee       : $_TEE"
+echo "    timestamp : $TS"
 echo "    workdir   : $WORKDIR"
 
 sleep 2
 
-if [ -n "$_TEE" ]; then
+if [ -n "$TS" ]; then
 	exec $SYZKALLER $OPTS 2>&1 | ts "[%Y-%m-%d %H:%M:%.S]" | tee $_TEE
 else
-	exec $SYZKALLER $OPTS
+	exec $SYZKALLER $OPTS 2>&1 | tee $_TEE
 fi
