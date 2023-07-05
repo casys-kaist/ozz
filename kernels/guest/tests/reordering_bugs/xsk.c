@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 
+#include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <sys/mman.h>
@@ -19,7 +20,7 @@ int sk;
 void *th1(void *unused) {
   pin(1);
 
-  hypercall(HCALL_INSTALL_BP, 0xffffffff8e4c390f, 0, 0);
+  hypercall(HCALL_INSTALL_BP, 0xffffffff8ef0eac5, 0, 0);
 
   activate_bp_sync();
 
@@ -38,8 +39,9 @@ void *th2(void *unused) {
   activate_bp_sync();
 
   syscall(SYS_SSB_SWITCH);
-  mmap(0, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, sk,
-       XDP_UMEM_PGOFF_FILL_RING);
+  if (mmap(0, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, sk,
+           XDP_UMEM_PGOFF_FILL_RING) == MAP_FAILED)
+    printf("mmap: %d\n", errno);
   hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
 }
 
