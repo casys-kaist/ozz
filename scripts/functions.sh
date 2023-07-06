@@ -27,7 +27,7 @@ __git_am() {
 	GIT="${GIT:-git}"
 	_LOCAL=$(realpath $1)
 	_PATCH_DIR=$(realpath $2)
-	for _PATCH in `find $_PATCH_DIR -name "*.patch"`;
+	for _PATCH in `find $_PATCH_DIR -name "*.patch" | sort`;
 	do
 		(cd $_LOCAL; git am $_PATCH)
 	done
