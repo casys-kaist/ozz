@@ -550,15 +550,8 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 
 func (proc *Proc) executeAndCollide(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes, stat Stat) {
 	proc.execute(execOpts, p, flags, stat)
-
-	if proc.execOptsCollide.Flags&ipc.FlagThreaded == 0 {
-		// We cannot collide syscalls without being in the threaded mode.
-		return
-	}
-	const collideIterations = 2
-	for i := 0; i < collideIterations; i++ {
-		proc.executeRaw(proc.execOptsCollide, proc.randomCollide(p), StatCollide)
-	}
+	// We do not want to run programs in the collide mode
+	return
 }
 
 func (proc *Proc) randomCollide(origP *prog.Prog) *prog.Prog {
