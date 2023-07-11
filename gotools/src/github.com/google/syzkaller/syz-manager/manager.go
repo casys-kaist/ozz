@@ -696,6 +696,9 @@ func (mgr *Manager) preloadCorpus() {
 			if wanted != "" && seed.Name() != wanted {
 				continue
 			}
+			if strings.HasPrefix(seed.Name(), "syz_mount_image") {
+				continue
+			}
 			if seed.IsDir() {
 				continue
 			}
