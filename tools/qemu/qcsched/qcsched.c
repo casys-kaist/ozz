@@ -38,6 +38,14 @@ bool qcsched_pre_run(CPUState *cpu)
 void qcsched_post_run(CPUState *cpu)
 {
     ASSERT(!kvm_read_registers(cpu, &cpu->regs), "failed to read registers");
+#ifndef CONFIG_QCSCHED_TRAMPOLINE
+    qemu_mutex_lock_iothread();
+    if (want_to_wake_up(cpu)) {
+        DRPRINTF(cpu, "I want to wake up\n");
+        resume_task(cpu);
+    }
+    qemu_mutex_unlock_iothread();
+#endif
 }
 
 // NOTE: The man page for sigevent clearly specifies that struct

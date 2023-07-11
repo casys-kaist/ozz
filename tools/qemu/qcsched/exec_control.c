@@ -58,7 +58,7 @@ void resume_task(CPUState *cpu)
 {
     bool kidnapped = task_kidnapped(cpu);
 
-    ASSERT(kidnapped, "nothing has been kidnapped");
+    ASSERT(kidnapped, "nothing has been kidnapped %d", cpu->cpu_index);
     // These two asserts should be enforced to safely run with
     // qcsched_handle_kick().
     ASSERT(qemu_mutex_iothread_locked(), "iothread mutex is not locked");
@@ -95,4 +95,20 @@ void wake_others_up(CPUState *cpu0)
             continue;
         wake_cpu_up(cpu0, cpu);
     }
+}
+
+bool want_to_wake_up(CPUState *cpu)
+{
+#ifdef CONFIG_QCSCHED_TRAMPOLINE
+    return false;
+#else
+    return blocker_want_to_wake_up(cpu);
+#endif
+}
+
+void reset_exec_control(CPUState *cpu)
+{
+#ifndef CONFIG_QCSCHED_TRAMPOLINE
+    blocker_reset(cpu);
+#endif
 }

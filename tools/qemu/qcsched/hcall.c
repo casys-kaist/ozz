@@ -41,6 +41,7 @@ static void __escape_if_kidnapped(CPUState *cpu, CPUState *wakeup)
     bool kidnapped = task_kidnapped(wakeup);
     if (kidnapped)
         wake_cpu_up(cpu, wakeup);
+    reset_exec_control(wakeup);
 }
 
 static void __remove_breakpoints_and_escape_cpu(CPUState *this,
