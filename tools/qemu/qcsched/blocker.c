@@ -32,5 +32,5 @@ void blocker_resume_task(CPUState *cpu)
 
 void blocker_wake_cpu_up(CPUState *cpu, CPUState *wakeup)
 {
-    blocker_resume_task(wakeup);
+    resume_task(wakeup);
 }

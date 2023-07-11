@@ -478,6 +478,8 @@ void forward_focus(CPUState *cpu, int step)
     enum qcschedpoint_footprint footprint =
         sched.entries[current].schedpoint.footprint;
 
+    ASSERT(step >= 1, "step (%d) is smaller than 1", step);
+
     if (footprint == footprint_missed)
         DRPRINTF(
             cpu,
