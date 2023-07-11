@@ -42,8 +42,6 @@ static void qcsched_handle_kick_locked(CPUState *cpu)
     if (!exec->kicked)
         return;
 
-    DRPRINTF(cpu, "timer expired\n");
-
     exec->kicked = false;
 
     if (!task_kidnapped(cpu))
