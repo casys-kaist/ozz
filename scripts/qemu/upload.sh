@@ -8,7 +8,7 @@ if [ -z "$ARCH" ]; then
 fi
 
 if [ "$ARCH" = "x86_64" ]; then
-	KEY_OPTS="-i $KERNELS_DIR/guest/images/x86_64/stretch.id_rsa"
+	KEY_OPTS="-i $KERNELS_DIR/guest/images/x86_64/bullseye.id_rsa"
 fi
 
 for _FN in "$@"
