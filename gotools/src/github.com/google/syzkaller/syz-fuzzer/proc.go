@@ -31,7 +31,6 @@ type Proc struct {
 	execOpts        *ipc.ExecOpts
 	execOptsCollide *ipc.ExecOpts
 	execOptsCover   *ipc.ExecOpts
-	execOptsComps   *ipc.ExecOpts
 
 	knotterOptsPreThreading scheduler.KnotterOpts
 	knotterOptsThreading    scheduler.KnotterOpts
@@ -53,11 +52,11 @@ func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
 	}
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano() + int64(pid)*1e12))
 	execOptsCollide := *fuzzer.execOpts
+	execOptsCollide.Flags |= ipc.FlagCollectCover
 	execOptsCollide.Flags &= ^ipc.FlagCollectSignal
+	execOptsCollide.Flags |= ipc.FlagTurnOnKSSB
 	execOptsCover := *fuzzer.execOpts
 	execOptsCover.Flags |= ipc.FlagCollectCover
-	execOptsComps := *fuzzer.execOpts
-	execOptsComps.Flags |= ipc.FlagCollectComps
 
 	defaultKnotterOpts := scheduler.KnotterOpts{
 		Signal: &fuzzer.maxInterleaving,
@@ -77,8 +76,8 @@ func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
 		env:                     env,
 		rnd:                     rnd,
 		execOpts:                fuzzer.execOpts,
+		execOptsCollide:         &execOptsCollide,
 		execOptsCover:           &execOptsCover,
-		execOptsComps:           &execOptsComps,
 		knotterOptsPreThreading: knotterOptsPreThreading,
 		knotterOptsThreading:    knotterOptsThreading,
 		knotterOptsSchedule:     knotterOptsSchedule,
@@ -171,7 +170,7 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 		p.AttachFlushVector(flushVector)
 
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
-		proc.execute(proc.execOpts, p, ProgNormal, StatSchedule)
+		proc.execute(proc.execOptsCollide, p, ProgNormal, StatSchedule)
 		if !proc.needScheduling() {
 			break
 		}
@@ -334,9 +333,6 @@ func (proc *Proc) smashInput(item *WorkSmash) {
 	if proc.fuzzer.faultInjectionEnabled && item.call != -1 {
 		proc.failCall(item.p, item.call)
 	}
-	if proc.fuzzer.comparisonTracingEnabled && item.call != -1 {
-		proc.executeHintSeed(item.p, item.call)
-	}
 	fuzzerSnapshot := proc.fuzzer.snapshot()
 	for i := 0; i < 30; i++ {
 		p := item.p.Clone()
@@ -389,23 +385,6 @@ func (proc *Proc) failCall(p *prog.Prog, call int) {
 			break
 		}
 	}
-}
-
-func (proc *Proc) executeHintSeed(p *prog.Prog, call int) {
-	log.Logf(1, "#%v: collecting comparisons", proc.pid)
-	// First execute the original program to dump comparisons from KCOV.
-	info := proc.execute(proc.execOptsComps, p, ProgNormal, StatSeed)
-	if info == nil {
-		return
-	}
-
-	// Then mutate the initial program for every match between
-	// a syscall argument and a comparison operand.
-	// Execute each of such mutants to check if it gives new coverage.
-	p.MutateWithHints(call, info.Calls[call].Comps, func(p *prog.Prog) {
-		log.Logf(1, "#%v: executing comparison hint", proc.pid)
-		proc.execute(proc.execOpts, p, ProgNormal, StatHint)
-	})
 }
 
 func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes, stat Stat) (info *ipc.ProgInfo) {

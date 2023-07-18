@@ -154,14 +154,6 @@ static void receive_handshake();
 static void reply_handshake();
 #endif
 
-#define turn_onoff_kssb_switch()                    \
-	do {                                        \
-		if (syscall(kSSBSwitch))            \
-			fail("kssb switch failed"); \
-	} while (0)
-#define turn_on_kssb_switch turn_onoff_kssb_switch
-#define turn_off_kssb_switch turn_onoff_kssb_switch
-
 #if SYZ_EXECUTOR_USES_SHMEM
 // The output region is the only thing in executor process for which consistency matters.
 // If it is corrupted ipc package will fail to parse its contents and panic.
@@ -225,6 +217,8 @@ static bool flag_collect_signal;
 static bool flag_dedup_cover;
 static bool flag_threaded;
 static bool flag_coverage_filter;
+
+static bool flag_turn_on_kssb;
 
 // If true, then executor should write the comparisons data to fuzzer.
 static bool flag_comparisons;
@@ -479,6 +473,17 @@ static void setup_affinity_mask(int mask);
 static bool __run_in_epoch(uint32 epoch, uint32 global);
 static bool run_in_epoch(thread_t* th);
 static void feed_flush_vector(int* vector, int size);
+
+#define turn_onoff_kssb_switch()                            \
+	do {                                                \
+		if (flag_turn_on_kssb) {                    \
+			if (syscall(kSSBSwitch))            \
+				fail("kssb switch failed"); \
+		}                                           \
+	} while (0)
+
+#define turn_on_kssb_switch turn_onoff_kssb_switch
+#define turn_off_kssb_switch turn_onoff_kssb_switch
 
 #include "syscalls.h"
 
@@ -775,12 +780,16 @@ void receive_execute()
 	// NOTE: We always enable flag_threaded
 	flag_threaded = true;
 	flag_coverage_filter = req.exec_flags & (1 << 5);
+	flag_turn_on_kssb = req.exec_flags & (1 << 10);
+	if (flag_turn_on_kssb)
+		// Enabling kssb makes syscalls about 10x slower.
+		slowdown_scale *= 10;
 
 	debug("[%llums] exec opts: procid=%llu threaded=%d cover=%d comps=%d dedup=%d signal=%d"
-	      " timeouts=%llu/%llu/%llu prog=%llu filter=%d\n",
+	      " timeouts=%llu/%llu/%llu prog=%llu filter=%d kssb=%d\n",
 	      current_time_ms() - start_time_ms, procid, flag_threaded, flag_collect_cover,
 	      flag_comparisons, flag_dedup_cover, flag_collect_signal, syscall_timeout_ms,
-	      program_timeout_ms, slowdown_scale, req.prog_size, flag_coverage_filter);
+	      program_timeout_ms, slowdown_scale, req.prog_size, flag_coverage_filter, flag_turn_on_kssb);
 	if (syscall_timeout_ms == 0 || program_timeout_ms <= syscall_timeout_ms || slowdown_scale == 0)
 		failmsg("bad timeouts", "syscall=%llu, program=%llu, scale=%llu",
 			syscall_timeout_ms, program_timeout_ms, slowdown_scale);
@@ -1703,7 +1712,7 @@ void execute_call(thread_t* th)
 	if (th->res == (intptr_t)-1)
 		debug_noprefix(" errno=%d", th->reserrno);
 	if (flag_coverage)
-		debug_noprefix("cover=%u rfcov=%u", th->cov.size, th->rfcov.size);
+		debug_noprefix(" cover=%u rfcov=%u", th->cov.size, th->rfcov.size);
 	if (th->call_props.fail_nth > 0)
 		debug_noprefix(" fault=%d", th->fault_injected);
 	if (th->call_props.rerun > 0)
