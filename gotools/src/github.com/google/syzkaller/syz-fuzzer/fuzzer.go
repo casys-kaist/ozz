@@ -925,7 +925,7 @@ func (fuzzer *Fuzzer) sendUsedKnots(used []interleaving.Segment) {
 	a := rpctype.SendUsedKnotsArg{}
 	// XXX: Also we know that len(used) == 1 for now.
 	for _, knot0 := range used {
-		knot, ok := knot0.(*interleaving.Knot)
+		knot, ok := knot0.(interleaving.Knot)
 		if !ok {
 			panic("wrong")
 		}
@@ -935,7 +935,7 @@ func (fuzzer *Fuzzer) sendUsedKnots(used []interleaving.Segment) {
 		}
 		a.Insts = append(a.Insts, insts)
 	}
-	if err := fuzzer.manager.Call("Manager.sendUsedKnot", a, nil); err != nil {
+	if err := fuzzer.manager.Call("Manager.SendUsedKnots", a, nil); err != nil {
 		log.Fatalf("failed to call Manager.Connect(): %v ", err)
 	}
 }
