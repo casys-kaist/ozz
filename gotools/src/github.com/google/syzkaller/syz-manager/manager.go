@@ -246,6 +246,7 @@ func RunManager(cfg *mgrconfig.Config) {
 	}
 
 	mgr.loadInterleavingCoverage()
+	mgr.openDebuggingFiles()
 
 	if cfg.DashboardAddr != "" {
 		mgr.dash, err = dashapi.New(cfg.DashboardClient, cfg.DashboardAddr, cfg.DashboardKey)
@@ -732,10 +733,12 @@ func (mgr *Manager) loadInterleavingCoverage() {
 	}
 	mgr.interleavingCovPath = fn
 	mgr.interleavingCovFile = f
+}
 
+func (mgr *Manager) openDebuggingFiles() {
 	// XXX: Piggybacking here. Need to
-	fn = filepath.Join(mgr.cfg.Workdir, fmt.Sprintf("used_knots"))
-	f, err = os.OpenFile(fn, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+	fn := filepath.Join(mgr.cfg.Workdir, fmt.Sprintf("used_knots"))
+	f, err := os.OpenFile(fn, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
 		panic(err)
 	}
