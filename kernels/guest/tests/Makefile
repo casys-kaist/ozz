@@ -9,6 +9,18 @@ prep:
 	@mkdir -p $(OUTDIR)/reordering_bugs
 	@mkdir -p $(OUTDIR)/tests
 
+print_notice:
+    $(info ********************************************************)
+    $(info **  NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE  **)
+    $(info **                                                    **)
+    $(info **    In tests programs, addresses where breakpoints  **)
+    $(info **    should be installed are hard-coded. Please      **)
+    $(info **    make sure those addresses are correct before    **)
+    $(info **    running test programs.                          **)
+    $(info **                                                    **)
+    $(info **  NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE  **)
+    $(info ********************************************************)
+
 build/tests/%: tests/%.c
 	@gcc $< -o $@ -x86_64 -lpthread --static -I./include
 
@@ -21,4 +33,4 @@ build/reordering_bugs/%: reordering_bugs/%.c
 clean:
 	@rm -rf $(OUTDIR)
 
-.PHONY: all prep clean
+.PHONY: all prep print_notice clean
