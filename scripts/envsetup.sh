@@ -14,7 +14,11 @@ mkdir_env() {
 ## |-tools
 ## |-toolchains
 ## |-(tmp)
-export SCRIPTS_DIR=$(mkdir_env "$(cd "$(dirname "$0")"; pwd)")
+if [ -n "$BASH_SOURCE" ]; then
+	export SCRIPTS_DIR=$(mkdir_env "$(cd "$(dirname "$BASH_SOURCE")"; pwd)")
+else
+	export SCRIPTS_DIR=$(mkdir_env "$(cd "$(dirname "$0")"; pwd)")
+fi
 export PROJECT_HOME=$(mkdir_env "$(dirname $SCRIPTS_DIR)")
 export EXP_DIR=$(mkdir_env "$PROJECT_HOME/exp")
 export KERNELS_DIR=$(mkdir_env "$PROJECT_HOME/kernels")
