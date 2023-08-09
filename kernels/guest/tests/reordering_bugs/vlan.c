@@ -57,8 +57,7 @@ struct vlan_ioctl_args if_request2 = {
 void *th1(void *ret) {
   pin(1);
 
-  hypercall(HCALL_INSTALL_BP, 0xffffffff8dea2653, 0, 0); // Not working now
-
+  hypercall(HCALL_INSTALL_BP, 0xffffffff8dea2653, 0, 0);
   activate_bp_sync();
   syscall(SYS_SSB_SWITCH);
   if (ioctl(sk, SIOCSIFVLAN, &if_request) < 0)
