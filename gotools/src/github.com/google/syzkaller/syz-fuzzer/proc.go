@@ -372,7 +372,7 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 func (proc *Proc) executeThreading(p *prog.Prog) []interleaving.Segment {
 	inf := proc.executeRaw(proc.execOpts, p, StatThreading)
 	seq := proc.sequentialAccesses(inf, p.Contender)
-	return scheduler.ComputePotentialBuggyKnots(seq)
+	return scheduler.ComputeCandidate(seq)
 }
 
 func (proc *Proc) failCall(p *prog.Prog, call int) {
