@@ -78,24 +78,19 @@ func (p *Prog) removeDummyPoints() {
 	p.Schedule.points = p.Schedule.points[:i+1]
 }
 
-func (p *Prog) MutateScheduleFromHint(rs rand.Source, hint []interleaving.Segment) (bool, []interleaving.Segment, []interleaving.Segment) {
+func (p *Prog) MutateScheduleFromCandidate(rs rand.Source, cand interleaving.Candidate) bool {
 	if len(p.Contenders()) != 2 {
-		return false, nil, hint
+		return false
 	}
 
-	if len(hint) == 0 {
+	if cand.Invalid() {
 		// TODO: We may want to generate random scheduling points
-		return false, nil, nil
+		return false
 	}
 
-	r := newRand(p.Target, rs)
-	idx := r.Intn(len(hint))
-	knot := hint[idx].(interleaving.Knot)
-	schedule := []interleaving.Access{knot[1][0]}
+	schedule := cand.GenerateSchedule()
 	p.applySchedule(schedule)
-
-	hint = append(hint[:idx], hint[idx+1:]...)
-	return true, []interleaving.Segment{knot}, hint
+	return true
 }
 
 func (p *Prog) applySchedule(schedule []interleaving.Access) {

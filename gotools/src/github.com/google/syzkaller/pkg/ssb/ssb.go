@@ -12,7 +12,7 @@ func (vec FlushVector) Len() int {
 	return len(vec)
 }
 
-func GenerateFlushVector(r *rand.Rand, hints []interleaving.Segment) FlushVector {
+func GenerateFlushVector(r *rand.Rand, cand interleaving.Candidate) FlushVector {
 	doRandom := func() bool {
 		if r == nil {
 			return false
@@ -20,12 +20,7 @@ func GenerateFlushVector(r *rand.Rand, hints []interleaving.Segment) FlushVector
 		// 5%
 		return r.Intn(100) < 5
 	}
-	if len(hints) == 1 && !doRandom() {
-		h := hints[0]
-		vec, ok := generateFlushVectorForOneHint(r, h)
-		if ok {
-			return vec
-		}
+	if !cand.Invalid() && !doRandom() {
 	}
 	// Return a random flush vector
 	return generateRandomFlushVector(r)

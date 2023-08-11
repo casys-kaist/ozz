@@ -154,7 +154,9 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 		}
 		p, hint := tp.P.Clone(), proc.pruneHint(tp.Hint)
 
-		ok, used, remaining := p.MutateScheduleFromHint(proc.rnd, hint)
+		cand, used, remaining := scheduler.GenerateCandidates(proc.rnd, hint)
+
+		ok := p.MutateScheduleFromCandidate(proc.rnd, cand)
 		proc.setHint(tp, remaining)
 		// We exclude used knots from tp.Hint even if the schedule
 		// mutation fails.
@@ -166,7 +168,7 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 		// and understand how the fuzzer can be improved futher.
 		proc.inspectUsedKnots(used)
 
-		flushVector := ssb.GenerateFlushVector(proc.rnd, used)
+		flushVector := ssb.GenerateFlushVector(proc.rnd, cand)
 		p.AttachFlushVector(flushVector)
 
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
