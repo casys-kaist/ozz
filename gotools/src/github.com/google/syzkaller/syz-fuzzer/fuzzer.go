@@ -60,12 +60,12 @@ type Fuzzer struct {
 	comparisonTracingEnabled bool
 	fetchRawCover            bool
 
-	corpusMu     sync.RWMutex
-	corpus       []*prog.Prog
-	corpusHashes map[hash.Sig]struct{}
-	corpusPrios  []int64
-	sumPrios     int64
-	candidates   []*prog.Candidate
+	corpusMu        sync.RWMutex
+	corpus          []*prog.Prog
+	corpusHashes    map[hash.Sig]struct{}
+	corpusPrios     []int64
+	sumPrios        int64
+	concurrentCalls []*prog.ConcurrentCalls
 
 	signalMu     sync.RWMutex
 	corpusSignal signal.Signal // signal of inputs in corpus
@@ -93,11 +93,11 @@ type Fuzzer struct {
 }
 
 type FuzzerSnapshot struct {
-	corpus      []*prog.Prog
-	candidates  []*prog.Candidate
-	corpusPrios []int64
-	sumPrios    int64
-	fuzzer      *Fuzzer
+	corpus          []*prog.Prog
+	concurrentCalls []*prog.ConcurrentCalls
+	corpusPrios     []int64
+	sumPrios        int64
+	fuzzer          *Fuzzer
 }
 
 type Collection int
@@ -106,18 +106,18 @@ const (
 	// Stats of collected data
 	CollectionScheduleHint Collection = iota
 	CollectionThreadingHint
-	CollectionCandidate
+	CollectionConcurrentCalls
 	CollectionPlug
 	CollectionUnplug
 	CollectionCount
 )
 
 var collectionNames = [CollectionCount]string{
-	CollectionScheduleHint:  "schedule hint",
-	CollectionThreadingHint: "threading hint",
-	CollectionCandidate:     "candidate",
-	CollectionPlug:          "plug",
-	CollectionUnplug:        "unplug",
+	CollectionScheduleHint:    "schedule hint",
+	CollectionThreadingHint:   "threading hint",
+	CollectionConcurrentCalls: "concurrent calls",
+	CollectionPlug:            "plug",
+	CollectionUnplug:          "unplug",
 }
 
 type Stat int
@@ -674,12 +674,12 @@ func (fuzzer *FuzzerSnapshot) chooseProgram(r *rand.Rand) *prog.Prog {
 	return fuzzer.corpus[idx]
 }
 
-func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.Candidate {
+func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.ConcurrentCalls {
 	// TODO: Prioritize inputs according to the number of
 	// hints.
-	for retry := 0; len(fuzzer.candidates) != 0 && retry < 100; retry++ {
-		idx := r.Intn(len(fuzzer.candidates))
-		tp := fuzzer.candidates[idx]
+	for retry := 0; len(fuzzer.concurrentCalls) != 0 && retry < 100; retry++ {
+		idx := r.Intn(len(fuzzer.concurrentCalls))
+		tp := fuzzer.concurrentCalls[idx]
 		if len(tp.Hint) != 0 {
 			return tp
 		}
@@ -691,11 +691,11 @@ func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.Candidat
 func (fuzzer *FuzzerSnapshot) removeCandidateAt(idx int) {
 	log.Logf(2, "remove a schedule guide")
 	fuzzer.fuzzer.corpusMu.Lock()
-	ln := len(fuzzer.candidates)
-	fuzzer.fuzzer.candidates[idx] = fuzzer.fuzzer.candidates[ln-1]
-	fuzzer.fuzzer.candidates = fuzzer.fuzzer.candidates[:ln-1]
+	ln := len(fuzzer.concurrentCalls)
+	fuzzer.fuzzer.concurrentCalls[idx] = fuzzer.fuzzer.concurrentCalls[ln-1]
+	fuzzer.fuzzer.concurrentCalls = fuzzer.fuzzer.concurrentCalls[:ln-1]
 	fuzzer.fuzzer.corpusMu.Unlock()
-	fuzzer.fuzzer.subCollection(CollectionCandidate, 1)
+	fuzzer.fuzzer.subCollection(CollectionConcurrentCalls, 1)
 	*fuzzer = fuzzer.fuzzer.snapshot()
 }
 
@@ -727,10 +727,10 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hint []interleaving.Segment) {
 	log.Logf(2, "book a schedule guide")
 	fuzzer.addCollection(CollectionScheduleHint, uint64(len(hint)))
-	fuzzer.addCollection(CollectionCandidate, 1)
+	fuzzer.addCollection(CollectionConcurrentCalls, 1)
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()
-	fuzzer.candidates = append(fuzzer.candidates, &prog.Candidate{
+	fuzzer.concurrentCalls = append(fuzzer.concurrentCalls, &prog.ConcurrentCalls{
 		P:    p,
 		Hint: hint,
 	})
@@ -749,7 +749,13 @@ func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, sign interleaving.S
 func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
 	fuzzer.corpusMu.RLock()
 	defer fuzzer.corpusMu.RUnlock()
-	return FuzzerSnapshot{fuzzer.corpus, fuzzer.candidates, fuzzer.corpusPrios, fuzzer.sumPrios, fuzzer}
+	return FuzzerSnapshot{
+		fuzzer.corpus,
+		fuzzer.concurrentCalls,
+		fuzzer.corpusPrios,
+		fuzzer.sumPrios,
+		fuzzer,
+	}
 }
 
 func (fuzzer *Fuzzer) addMaxSignal(sign signal.Signal) {

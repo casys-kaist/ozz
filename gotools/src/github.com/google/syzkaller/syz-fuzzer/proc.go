@@ -137,7 +137,7 @@ func (proc *Proc) loop() {
 }
 
 func (proc *Proc) needScheduling() bool {
-	if len(proc.fuzzer.candidates) == 0 {
+	if len(proc.fuzzer.concurrentCalls) == 0 {
 		return false
 	}
 	return proc.balancer.needScheduling(proc.rnd)
@@ -190,7 +190,7 @@ func (proc *Proc) pruneHint(hint []interleaving.Segment) []interleaving.Segment 
 	return pruned
 }
 
-func (proc *Proc) setHint(tp *prog.Candidate, remaining []interleaving.Segment) {
+func (proc *Proc) setHint(tp *prog.ConcurrentCalls, remaining []interleaving.Segment) {
 	debugHint(tp, remaining)
 	used := len(tp.Hint) - len(remaining)
 	proc.fuzzer.subCollection(CollectionScheduleHint, uint64(used))
