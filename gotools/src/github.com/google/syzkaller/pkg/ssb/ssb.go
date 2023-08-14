@@ -6,10 +6,26 @@ import (
 	"github.com/google/syzkaller/pkg/interleaving"
 )
 
-type FlushVector []uint32
+type tableEntry struct {
+	inst  uint64
+	value int
+}
 
-func (vec FlushVector) Len() int {
-	return len(vec)
+type FlushVector struct {
+	table  []tableEntry
+	vector []uint32
+}
+
+func (vec FlushVector) SerializeVector() []uint32 {
+	return vec.vector
+}
+
+func (vec FlushVector) SerializeTable() []uint64 {
+	r := []uint64{}
+	for _, e := range vec.table {
+		r = append(r, e.inst, uint64(e.value))
+	}
+	return r
 }
 
 func GenerateFlushVector(r *rand.Rand, cand interleaving.Candidate) FlushVector {
@@ -17,13 +33,26 @@ func GenerateFlushVector(r *rand.Rand, cand interleaving.Candidate) FlushVector 
 		if r == nil {
 			return false
 		}
-		// 5%
-		return r.Intn(100) < 5
+		// 0.5%
+		return r.Intn(1000) < 5
 	}
 	if !cand.Invalid() && !doRandom() {
+		return generateFlushVectorForCandidate(cand)
+	} else {
+		// Return a random flush vector
+		return generateRandomFlushVector(r)
 	}
-	// Return a random flush vector
-	return generateRandomFlushVector(r)
+}
+
+func generateFlushVectorForCandidate(cand interleaving.Candidate) FlushVector {
+	uext := func(v uint32) uint64 {
+		return uint64(v) | 0xffffffff00000000
+	}
+	table := []tableEntry{}
+	for _, acc := range cand.DelayingInst {
+		table = append(table, tableEntry{inst: uext(acc.Inst), value: 0})
+	}
+	return FlushVector{table: table}
 }
 
 func generateRandomFlushVector(r *rand.Rand) FlushVector {
@@ -31,118 +60,11 @@ func generateRandomFlushVector(r *rand.Rand) FlushVector {
 		MAX_LEGNTH = 10
 		MAX_VALUE  = 1
 	)
+	// Random FlushVector uses the vector interface
 	len := (r.Uint32()%(MAX_LEGNTH-1) + 2)
-	vec := make(FlushVector, len)
+	vector := make([]uint32, len)
 	for i := uint32(0); i < len; i++ {
-		vec[i] = r.Uint32() % (MAX_VALUE + 1)
+		vector[i] = r.Uint32() % (MAX_VALUE + 1)
 	}
-	return vec
-}
-
-func generateFlushVectorForOneHint(r *rand.Rand, h interleaving.Segment) (FlushVector, bool) {
-	k, ok := h.(interleaving.Knot)
-	if !ok {
-		panic("wrong")
-	}
-	// TODO: need a better solution
-	cands := generatePossibleFlushVectors()
-	for _, cand := range cands {
-		if isReorderingKnot(k, cand) {
-			return cand, true
-		}
-	}
-	return FlushVector{}, false
-}
-
-var generated []FlushVector = nil
-
-func generatePossibleFlushVectors() (rt []FlushVector) {
-	const MAX_LENGTH = 4
-	if len(generated) == 0 {
-		generated = []FlushVector{}
-		for i := 2; i < MAX_LENGTH; i++ {
-			generated = append(generated,
-				__generatePossibleFlushVectors(i)...,
-			)
-		}
-	}
-	return generated
-}
-
-// Generate all possible FlushVectors of length n. This is probably
-// slow, but we may not need to take care about it since n is small.
-// Ref: https://www.sobyte.net/post/2022-01/go-slice/
-func __generatePossibleFlushVectors(n int) (rt []FlushVector) {
-	if n <= 1 {
-		return
-	}
-	for r := 1; r < n; r++ {
-		indices := make([]int, r)
-		for i := range indices {
-			indices[i] = i
-		}
-
-		vec := make(FlushVector, n)
-		for _, el := range indices {
-			vec[el] = 1
-		}
-		rt = append(rt, vec)
-
-		for {
-			i := r - 1
-			for ; i >= 0 && indices[i] == i+n-r; i -= 1 {
-			}
-
-			if i < 0 {
-				break
-			}
-
-			indices[i] += 1
-			for j := i + 1; j < r; j += 1 {
-				indices[j] = indices[j-1] + 1
-			}
-
-			vec := make(FlushVector, n)
-			for j := 0; j < len(indices); j += 1 {
-				vec[indices[j]] = 1
-			}
-			rt = append(rt, vec)
-		}
-	}
-	return
-}
-
-func isReorderingKnot(knot interleaving.Knot, vec FlushVector) bool {
-	// NB: Should be compatible with the kssb implementation in the
-	// kernel
-	if knot.Type() != interleaving.KnotParallel {
-		panic("wrong")
-	}
-	if knot[0].Former().Typ != interleaving.TypeStore {
-		panic("wrong")
-	}
-	const (
-		GOLDEN_RATIO = 0x61C8864680B583EB
-		BITS         = 64
-	)
-	idx := [2][2]int{}
-	for i, comm := range knot {
-		for j, acc := range comm {
-			inst64 := 0xffffffff00000000 | uint64(acc.Inst)
-			hsh := (inst64 * GOLDEN_RATIO) >> (64 - BITS)
-			idx[i][j] = int(hsh % uint64(len(vec)))
-		}
-	}
-
-	if knot[1].Former().Typ == interleaving.TypeStore {
-		// Message passing. Want:
-		// - knot[0][0] --> 0
-		// - knot[1][0] --> 1
-		return vec[idx[0][0]] == 0 && vec[idx[1][0]] == 1
-	} else {
-		// OOTA. Want:
-		// - knot[0][0] --> 0
-		// - knot[1][1] --> 0
-		return vec[idx[0][0]] == 0 && vec[idx[1][1]] == 0
-	}
+	return FlushVector{vector: vector}
 }

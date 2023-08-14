@@ -13,6 +13,5 @@ func (p *Prog) MutateFlushVectorFromCandidate(r *rand.Rand, cand interleaving.Ca
 }
 
 func (p *Prog) AttachFlushVector(vec ssb.FlushVector) {
-	p.FlushVector = make(ssb.FlushVector, len(vec))
-	copy(p.FlushVector, vec)
+	p.FlushVector = vec
 }

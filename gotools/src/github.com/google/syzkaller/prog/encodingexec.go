@@ -99,10 +99,16 @@ func (w *execContext) writeScheduleFilter(p *Prog) {
 }
 
 func (w *execContext) writeFlushVector(p *Prog) {
-	vec := p.FlushVector
-	w.write(uint64(vec.Len()))
-	for _, entry := range vec {
-		w.write(uint64(entry))
+	f := p.FlushVector
+	vec := f.SerializeVector()
+	w.write(uint64(len(vec)))
+	for _, v := range vec {
+		w.write(uint64(v))
+	}
+	table := f.SerializeTable()
+	w.write(uint64(len(table)))
+	for _, v := range table {
+		w.write(uint64(v))
 	}
 }
 
