@@ -6,9 +6,18 @@ type Candidate struct {
 }
 
 func (cand Candidate) Invalid() bool {
-	return false
+	return len(cand.DelayingInst) != 0 && !cand.invalidCriticalComm()
+}
+
+func (cand Candidate) invalidCriticalComm() bool {
+	c := cand.CriticalComm
+	return c.Former().Addr == 0 || c.Latter().Addr == 0
 }
 
 func (cand Candidate) GenerateSchedule() []Access {
-	return nil
+	c := cand.CriticalComm
+	// NOTE: As long as we consider one critical communication for one
+	// candidate, a schedule always contains one access which is the
+	// first access of the critcal comm.
+	return []Access{c.Former()}
 }
