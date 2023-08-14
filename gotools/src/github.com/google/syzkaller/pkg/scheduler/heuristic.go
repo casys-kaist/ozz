@@ -6,14 +6,14 @@ import (
 
 type chunk interleaving.SerialAccess
 
-func ComputeCandidate(seq []interleaving.SerialAccess) []interleaving.Segment {
+func ComputeHints(seq []interleaving.SerialAccess) []interleaving.Segment {
 	if len(seq) != 2 {
 		return nil
 	}
 	cs0, cs1 := chunknize(seq[0]), chunknize(seq[1])
 	// TODO: optimize
-	pso := computeCandidatePSO(cs0, cs1, seq)
-	tso := computeCandidateTSO(cs0, cs1, seq)
+	pso := computeHintsPSO(cs0, cs1, seq)
+	tso := computeHintsTSO(cs0, cs1, seq)
 
 	ht := make(map[uint64]struct{})
 	res := []interleaving.Segment{}
@@ -61,13 +61,13 @@ func chunknize(serial interleaving.SerialAccess) []chunk {
 	return chunks
 }
 
-func computeCandidatePSO(cs0, cs1 []chunk, seq []interleaving.SerialAccess) []interleaving.Segment {
+func computeHintsPSO(cs0, cs1 []chunk, seq []interleaving.SerialAccess) []interleaving.Segment {
 	knots := []interleaving.Segment{}
 	for _, c0 := range cs0 {
-		knots = append(knots, __computeCandidate(c0, chunk(seq[1]), psoOpts)...)
+		knots = append(knots, __computeHints(c0, chunk(seq[1]), psoOpts)...)
 	}
 	for _, c1 := range cs1 {
-		knots = append(knots, __computeCandidate(c1, chunk(seq[0]), psoOpts)...)
+		knots = append(knots, __computeHints(c1, chunk(seq[0]), psoOpts)...)
 	}
 	return knots
 }
@@ -79,17 +79,17 @@ var psoOpts = KnotterOpts{
 		FlagWantStrictMessagePassing,
 }
 
-func computeCandidateTSO(cs0, cs1 []chunk, seq []interleaving.SerialAccess) []interleaving.Segment {
+func computeHintsTSO(cs0, cs1 []chunk, seq []interleaving.SerialAccess) []interleaving.Segment {
 	knots := []interleaving.Segment{}
 	for _, c0 := range cs0 {
 		for _, c1 := range cs1 {
-			knots = append(knots, __computeCandidate(c0, c1, tsoOpts)...)
+			knots = append(knots, __computeHints(c0, c1, tsoOpts)...)
 		}
 	}
 	return knots
 }
 
-func __computeCandidate(c0, c1 chunk, opts KnotterOpts) []interleaving.Segment {
+func __computeHints(c0, c1 chunk, opts KnotterOpts) []interleaving.Segment {
 	knotter := GetKnotter(opts)
 	knotter.AddSequentialTrace(
 		[]interleaving.SerialAccess{

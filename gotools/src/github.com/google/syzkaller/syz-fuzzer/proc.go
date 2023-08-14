@@ -18,7 +18,6 @@ import (
 	"github.com/google/syzkaller/pkg/rpctype"
 	"github.com/google/syzkaller/pkg/scheduler"
 	"github.com/google/syzkaller/pkg/signal"
-	"github.com/google/syzkaller/pkg/ssb"
 	"github.com/google/syzkaller/prog"
 )
 
@@ -168,8 +167,7 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 		// and understand how the fuzzer can be improved futher.
 		proc.inspectUsedKnots(used)
 
-		flushVector := ssb.GenerateFlushVector(proc.rnd, cand)
-		p.AttachFlushVector(flushVector)
+		p.MutateFlushVectorFromCandidate(proc.rnd, cand)
 
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
 		proc.execute(proc.execOptsCollide, p, ProgNormal, StatSchedule)
@@ -374,7 +372,7 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 func (proc *Proc) executeThreading(p *prog.Prog) []interleaving.Segment {
 	inf := proc.executeRaw(proc.execOpts, p, StatThreading)
 	seq := proc.sequentialAccesses(inf, p.Contender)
-	return scheduler.ComputeCandidate(seq)
+	return scheduler.ComputeHints(seq)
 }
 
 func (proc *Proc) failCall(p *prog.Prog, call int) {
@@ -437,12 +435,13 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 			}
 
 			cont := prog.Contender{Calls: []int{c1, c2}}
-			knots, comms := proc.extractKnotsAndComms(info, cont, proc.knotterOptsPreThreading)
-			if len(knots) == 0 && len(comms) == 0 {
+			seq := proc.sequentialAccesses(info, cont)
+			hints := scheduler.ComputeHints(seq)
+			if len(hints) == 0 {
 				continue
 			}
-			if newKnots, newComms := proc.fuzzer.getNewKnot(knots), proc.fuzzer.getNewCommunication(comms); len(newKnots) != 0 || len(newComms) != 0 {
-				proc.enqueueThreading(p, cont, newKnots)
+			if newHints := proc.fuzzer.getNewKnot(hints); len(newHints) != 0 {
+				proc.enqueueThreading(p, cont, newHints)
 			}
 		}
 	}
@@ -474,21 +473,21 @@ func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.Pro
 	return info
 }
 
-func (proc *Proc) extractKnotsAndComms(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) ([]interleaving.Segment, []interleaving.Segment) {
+func (proc *Proc) extractHints(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) []interleaving.Segment {
 	knotter := scheduler.GetKnotter(opts)
 
 	seq := proc.sequentialAccesses(info, calls)
 	if !knotter.AddSequentialTrace(seq) {
-		return nil, nil
+		return nil
 	}
 	knotter.ExcavateKnots()
 
-	return knotter.GetKnots(), knotter.GetCommunications()
+	return knotter.GetKnots()
 }
 
 func (proc *Proc) extractKnots(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) []interleaving.Segment {
-	knots, _ := proc.extractKnotsAndComms(info, calls, opts)
-	return knots
+	// TODO: IMPLEMENT
+	return nil
 }
 
 func (proc *Proc) sequentialAccesses(info *ipc.ProgInfo, calls prog.Contender) (seq []interleaving.SerialAccess) {

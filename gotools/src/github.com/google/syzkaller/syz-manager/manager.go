@@ -1748,11 +1748,6 @@ func (mgr *Manager) serializeCoverage() (bytes.Buffer, bytes.Buffer, bytes.Buffe
 		hintcov.WriteString(fmt.Sprintf("%x\n", k))
 	}
 
-	comm := mgr.serv.maxCommunication
-	for k := range comm {
-		commcov.WriteString(fmt.Sprintf("%x\n", k))
-	}
-
 	log.Logf(0, "Serializing coverage takes %v", time.Since(start))
 
 	return codecov, intcov, hintcov, commcov

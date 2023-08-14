@@ -35,7 +35,6 @@ type RPCServer struct {
 	checkResult        *rpctype.CheckArgs
 	maxSignal          signal.Signal
 	maxInterleaving    interleaving.Signal
-	maxCommunication   interleaving.Signal
 	corpusSignal       signal.Signal
 	corpusCover        cover.Cover
 	corpusInterleaving interleaving.Signal
@@ -49,14 +48,13 @@ type RPCServer struct {
 }
 
 type Fuzzer struct {
-	name                string
-	rotated             bool
-	inputs              []rpctype.Input
-	newMaxSignal        signal.Signal
-	newMaxInterleaving  interleaving.Signal
-	newMaxCommunication interleaving.Signal
-	rotatedSignal       signal.Signal
-	machineInfo         []byte
+	name               string
+	rotated            bool
+	inputs             []rpctype.Input
+	newMaxSignal       signal.Signal
+	newMaxInterleaving interleaving.Signal
+	rotatedSignal      signal.Signal
+	machineInfo        []byte
 
 	instBlacklist map[uint32]struct{}
 }
@@ -145,7 +143,6 @@ func (serv *RPCServer) Connect(a *rpctype.ConnectArgs, r *rpctype.ConnectRes) er
 		f.inputs = corpus
 		f.newMaxSignal = serv.maxSignal.Copy()
 		f.newMaxInterleaving = serv.maxInterleaving.Copy()
-		f.newMaxCommunication = serv.maxCommunication.Copy()
 		for inst := range serv.instBlacklist {
 			if f.instBlacklist == nil {
 				f.instBlacklist = make(map[uint32]struct{})
@@ -412,24 +409,12 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 			f1.newMaxInterleaving.Merge(newMaxInterleaving)
 		}
 	}
-	newMaxCommunication := serv.maxCommunication.Diff(a.MaxCommunication.Deserialize())
-	if !newMaxCommunication.Empty() {
-		serv.maxCommunication.Merge(newMaxCommunication)
-		serv.stats.maxCommunication.set(len(serv.maxCommunication))
-		for _, f1 := range serv.fuzzers {
-			if f1 == f || f1.rotated {
-				continue
-			}
-			f1.newMaxCommunication.Merge(newMaxCommunication)
-		}
-	}
 	if f.rotated {
 		// Let rotated VMs run in isolation, don't send them anything.
 		return nil
 	}
 	r.MaxSignal = f.newMaxSignal.Split(2000).Serialize()
 	r.MaxInterleaving = f.newMaxInterleaving.Split(2000).Serialize()
-	r.MaxCommunication = f.newMaxCommunication.Split(2000).Serialize()
 	for inst := range f.instBlacklist {
 		r.InstBlacklist = append(r.InstBlacklist, inst)
 	}

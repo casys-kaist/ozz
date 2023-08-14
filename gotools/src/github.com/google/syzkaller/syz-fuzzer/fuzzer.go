@@ -78,9 +78,6 @@ type Fuzzer struct {
 	maxInterleaving    interleaving.Signal
 	newInterleaving    interleaving.Signal
 
-	maxCommunication interleaving.Signal
-	newCommunication interleaving.Signal
-
 	instCount     map[uint32]uint32
 	instBlacklist map[uint32]struct{}
 
@@ -337,9 +334,6 @@ func main() {
 		maxInterleaving:    make(interleaving.Signal),
 		newInterleaving:    make(interleaving.Signal),
 
-		maxCommunication: make(interleaving.Signal),
-		newCommunication: make(interleaving.Signal),
-
 		instCount:     make(map[uint32]uint32),
 		instBlacklist: make(map[uint32]struct{}),
 
@@ -538,13 +532,12 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 		log.Logf(0, "Poll takes %v", time.Since(start))
 	}()
 	a := &rpctype.PollArgs{
-		Name:             fuzzer.name,
-		NeedCandidates:   needCandidates,
-		MaxSignal:        fuzzer.grabNewSignal().Serialize(),
-		MaxInterleaving:  fuzzer.grabNewInterleaving().Serialize(),
-		MaxCommunication: fuzzer.grabNewCommunication().Serialize(),
-		Stats:            stats,
-		Collections:      collections,
+		Name:            fuzzer.name,
+		NeedCandidates:  needCandidates,
+		MaxSignal:       fuzzer.grabNewSignal().Serialize(),
+		MaxInterleaving: fuzzer.grabNewInterleaving().Serialize(),
+		Stats:           stats,
+		Collections:     collections,
 
 		InstCount: fuzzer.serializeInstCount(&fuzzer.instCount),
 	}
@@ -558,7 +551,6 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 	}
 	maxSignal := r.MaxSignal.Deserialize()
 	maxInterleaving := r.MaxInterleaving.Deserialize()
-	maxCommunication := r.MaxCommunication.Deserialize()
 	log.Logf(1, "poll: candidates=%v inputs=%v signal=%v interleaving=%v",
 		len(r.Candidates), len(r.NewInputs), maxSignal.Len(), maxInterleaving.Len())
 
@@ -570,7 +562,6 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 
 	fuzzer.addMaxSignal(maxSignal)
 	fuzzer.addMaxInterleaving(maxInterleaving)
-	fuzzer.addMaxCommunication(maxCommunication)
 	for _, inp := range r.NewInputs {
 		fuzzer.addInputFromAnotherFuzzer(inp)
 	}
@@ -776,15 +767,6 @@ func (fuzzer *Fuzzer) addMaxInterleaving(sign interleaving.Signal) {
 	fuzzer.maxInterleaving.Merge(sign)
 }
 
-func (fuzzer *Fuzzer) addMaxCommunication(sign interleaving.Signal) {
-	if sign.Len() == 0 {
-		return
-	}
-	fuzzer.signalMu.Lock()
-	defer fuzzer.signalMu.Unlock()
-	fuzzer.maxCommunication.Merge(sign)
-}
-
 func (fuzzer *Fuzzer) grabNewSignal() signal.Signal {
 	fuzzer.signalMu.Lock()
 	defer fuzzer.signalMu.Unlock()
@@ -804,17 +786,6 @@ func (fuzzer *Fuzzer) grabNewInterleaving() interleaving.Signal {
 		return nil
 	}
 	fuzzer.newInterleaving = nil
-	return sign
-}
-
-func (fuzzer *Fuzzer) grabNewCommunication() interleaving.Signal {
-	fuzzer.signalMu.Lock()
-	defer fuzzer.signalMu.Unlock()
-	sign := fuzzer.newCommunication
-	if sign.Empty() {
-		return nil
-	}
-	fuzzer.newCommunication = nil
 	return sign
 }
 
@@ -865,19 +836,6 @@ func (fuzzer *Fuzzer) getNewKnot(knots []interleaving.Segment) []interleaving.Se
 	fuzzer.signalMu.Lock()
 	fuzzer.newInterleaving.Merge(sign)
 	fuzzer.maxInterleaving.Merge(sign)
-	fuzzer.signalMu.Unlock()
-	return diff
-}
-
-func (fuzzer *Fuzzer) getNewCommunication(comms []interleaving.Segment) []interleaving.Segment {
-	diff := fuzzer.newSegment(&fuzzer.maxCommunication, comms)
-	if len(diff) == 0 {
-		return nil
-	}
-	sign := interleaving.FromCoverToSignal(diff)
-	fuzzer.signalMu.Lock()
-	fuzzer.maxCommunication.Merge(sign)
-	fuzzer.newCommunication.Merge(sign)
 	fuzzer.signalMu.Unlock()
 	return diff
 }

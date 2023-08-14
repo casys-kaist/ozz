@@ -9,11 +9,9 @@ import (
 func GenerateCandidates(rnd *rand.Rand, hints []interleaving.Segment) (interleaving.Candidate, []interleaving.Segment, []interleaving.Segment) {
 	idx := rnd.Intn(len(hints))
 	pivot := hints[idx].(interleaving.Knot)
-	if isMessagePassing(pivot[0], pivot[1]) {
-		return aggregateCandidates(pivot[1], hints)
-	} else {
-		return aggregateCandidates(pivot[1], hints)
-	}
+	// TODO: Why is this always a crit comm?
+	critComm := pivot[1]
+	return aggregateCandidates(critComm, hints)
 }
 
 func aggregateCandidates(critComm interleaving.Communication, hints []interleaving.Segment) (interleaving.Candidate, []interleaving.Segment, []interleaving.Segment) {
