@@ -1233,11 +1233,13 @@ void execute_one()
 void feed_flush_vector(int* vector, int vector_size, struct kssb_flush_table_entry* table, int table_size)
 {
 	// XXX: Not sure we don't have to do this
-	if (vector_size == 0) {
+	if (vector_size == 0 && table_size != 0) {
 		vector_size = 1;
 		vector[0] = 1;
 	}
 #define SYS_FEEDINPUT 500
+#define DEBUG_FLUSH_VECTOR
+#ifdef DEBUG_FLUSH_VECTOR
 	debug("vector: %d [", vector_size);
 	for (int i = 0; i < vector_size; i++) {
 		if (i != 0)
@@ -1252,6 +1254,7 @@ void feed_flush_vector(int* vector, int vector_size, struct kssb_flush_table_ent
 		debug_noprefix("%lx: %d", table[i].inst, table[i].value);
 	}
 	debug_noprefix("]\n");
+#endif
 	if (syscall(SYS_FEEDINPUT, vector, vector_size, table, table_size))
 		fail("feedinput failed");
 }
