@@ -6,7 +6,38 @@ import (
 
 type chunk interleaving.SerialAccess
 
+// TODO: Not sure the current implementation is what we
+// want. Currently, ComputeHints assumes that two given serials are
+// executed in order and finds out hints with strict timestamps
+// assumed. Although this is fine for delaying stores, but we may need
+// to change it if we want to prefetching loads.
+
+func ComputeHints0(seq []interleaving.SerialAccess) []interleaving.Segment {
+	if len(seq) != 2 {
+		return nil
+	}
+	// TODO: optimzie
+	copySeq := func(s0, s1 interleaving.SerialAccess) []interleaving.SerialAccess {
+		serial0 := interleaving.SerialAccess{}
+		for i, acc := range s0 {
+			acc.Timestamp = uint32(i)
+			serial0 = append(serial0, acc)
+		}
+		serial1 := interleaving.SerialAccess{}
+		for i, acc := range s1 {
+			acc.Timestamp = uint32(i + len(serial0))
+			serial1 = append(serial1, acc)
+		}
+		return []interleaving.SerialAccess{serial0, serial1}
+	}
+	h0 := ComputeHints(copySeq(seq[0], seq[1]))
+	h1 := ComputeHints(copySeq(seq[1], seq[0]))
+	return append(h0, h1...)
+}
+
 func ComputeHints(seq []interleaving.SerialAccess) []interleaving.Segment {
+	// XXX: This function assumes that seq[0] was executed before
+	// seq[1]
 	if len(seq) != 2 {
 		return nil
 	}
@@ -66,17 +97,11 @@ func computeHintsPSO(cs0, cs1 []chunk, seq []interleaving.SerialAccess) []interl
 	for _, c0 := range cs0 {
 		knots = append(knots, __computeHints(c0, chunk(seq[1]), psoOpts)...)
 	}
-	for _, c1 := range cs1 {
-		knots = append(knots, __computeHints(c1, chunk(seq[0]), psoOpts)...)
-	}
 	return knots
 }
 
 var psoOpts = KnotterOpts{
 	Flags: FlagWantMessagePassing |
-		FlagWantParallel |
-		FlagDifferentAccessTypeOnly |
-		FlagReassignThreadID |
 		FlagWantStrictMessagePassing,
 }
 
@@ -91,6 +116,11 @@ func computeHintsTSO(cs0, cs1 []chunk, seq []interleaving.SerialAccess) []interl
 }
 
 func __computeHints(c0, c1 chunk, opts KnotterOpts) []interleaving.Segment {
+	commonFlags := (FlagStrictTimestamp |
+		FlagWantParallel |
+		FlagDifferentAccessTypeOnly |
+		FlagReassignThreadID)
+	opts.Flags |= commonFlags
 	knotter := GetKnotter(opts)
 	knotter.AddSequentialTrace(
 		[]interleaving.SerialAccess{
@@ -102,8 +132,5 @@ func __computeHints(c0, c1 chunk, opts KnotterOpts) []interleaving.Segment {
 }
 
 var tsoOpts = KnotterOpts{
-	Flags: FlagWantParallel |
-		FlagReassignThreadID |
-		FlagDifferentAccessTypeOnly |
-		FlagWantOOTA,
+	Flags: FlagWantOOTA,
 }

@@ -374,9 +374,14 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 }
 
 func (proc *Proc) executeThreading(p *prog.Prog) []interleaving.Segment {
-	inf := proc.executeRaw(proc.execOpts, p, StatThreading)
-	seq := proc.sequentialAccesses(inf, p.Contender)
-	return scheduler.ComputeHints(seq)
+	hints := []interleaving.Segment{}
+	for i := 0; i < 2; i++ {
+		inf := proc.executeRaw(proc.execOpts, p, StatThreading)
+		seq := proc.sequentialAccesses(inf, p.Contender)
+		hints = append(hints, scheduler.ComputeHints(seq)...)
+		p.Reverse()
+	}
+	return hints
 }
 
 func (proc *Proc) failCall(p *prog.Prog, call int) {
@@ -428,19 +433,19 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 		return
 	}
 
-	maxIntermediateCalls := 10
-	intermediateCalls := func(c1, c2 int) int {
-		return c2 - c1 - 1
+	notTooFar := func(c1, c2 int) bool {
+		maxIntermediateCalls := 10
+		dist := (c2 - c1 - 1)
+		return dist < maxIntermediateCalls
 	}
 	for c1 := 0; c1 < len(p.Calls); c1++ {
-		for c2 := c1 + 1; c2 < len(p.Calls) && intermediateCalls(c1, c2) < maxIntermediateCalls; c2++ {
+		for c2 := c1 + 1; c2 < len(p.Calls) && notTooFar(c1, c2); c2++ {
 			if proc.fuzzer.shutOffThreading(p) {
 				return
 			}
-
 			cont := prog.Contender{Calls: []int{c1, c2}}
 			seq := proc.sequentialAccesses(info, cont)
-			hints := scheduler.ComputeHints(seq)
+			hints := scheduler.ComputeHints0(seq)
 			if len(hints) == 0 {
 				continue
 			}
