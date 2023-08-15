@@ -1023,8 +1023,8 @@ void execute_one()
 	vector_size = (int)read_input(&input_pos);
 	for (int i = 0; i < vector_size; i++)
 		vector[i] = (int)read_input(&input_pos);
-	table_size = (int)read_input(&input_pos);
-	for (int i = 0; i < table_size; i += 2) {
+	table_size = (int)read_input(&input_pos) / 2;
+	for (int i = 0; i < table_size; i++) {
 		unsigned long inst = read_input(&input_pos);
 		int value = read_input(&input_pos);
 		table[i] = {.inst = inst, .value = value};
