@@ -76,6 +76,7 @@ var psoOpts = KnotterOpts{
 	Flags: FlagWantMessagePassing |
 		FlagWantParallel |
 		FlagDifferentAccessTypeOnly |
+		FlagReassignThreadID |
 		FlagWantStrictMessagePassing,
 }
 
@@ -102,6 +103,7 @@ func __computeHints(c0, c1 chunk, opts KnotterOpts) []interleaving.Segment {
 
 var tsoOpts = KnotterOpts{
 	Flags: FlagWantParallel |
+		FlagReassignThreadID |
 		FlagDifferentAccessTypeOnly |
 		FlagWantOOTA,
 }
