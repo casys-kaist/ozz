@@ -6,12 +6,12 @@ type Candidate struct {
 }
 
 func (cand Candidate) Invalid() bool {
-	return len(cand.DelayingInst) != 0 && !cand.invalidCriticalComm()
+	return len(cand.DelayingInst) == 0 || cand.invalidCriticalComm()
 }
 
 func (cand Candidate) invalidCriticalComm() bool {
 	c := cand.CriticalComm
-	return c.Former().Addr == 0 || c.Latter().Addr == 0
+	return c.Former().Inst == 0 || c.Latter().Inst == 0
 }
 
 func (cand Candidate) GenerateSchedule() []Access {
