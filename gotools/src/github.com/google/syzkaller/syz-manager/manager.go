@@ -1629,7 +1629,6 @@ func (mgr *Manager) collectUsedFiles() {
 	}
 	cfg := mgr.cfg
 	addUsedFile(cfg.FuzzerBin)
-	addUsedFile(cfg.ExecprogBin)
 	addUsedFile(cfg.ExecutorBin)
 	addUsedFile(cfg.SSHKey)
 	if vmlinux := filepath.Join(cfg.KernelObj, mgr.sysTarget.KernelObject); osutil.IsExist(vmlinux) {

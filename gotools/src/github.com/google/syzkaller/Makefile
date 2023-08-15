@@ -118,7 +118,7 @@ endif
 	presubmit_arch_netbsd presubmit_arch_openbsd presubmit_arch_darwin presubmit_arch_windows \
 	presubmit_arch_executor presubmit_big presubmit_race presubmit_old
 
-relrazzer: manager fuzzer executor db execprog
+relrazzer: manager fuzzer executor db
 all: host target
 host: manager runtest repro mutate prog2c db upgrade
 target: fuzzer execprog stress executor
