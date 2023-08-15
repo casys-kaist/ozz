@@ -78,19 +78,9 @@ func (p *Prog) removeDummyPoints() {
 	p.Schedule.points = p.Schedule.points[:i+1]
 }
 
-func (p *Prog) MutateScheduleFromCandidate(rs rand.Source, cand interleaving.Candidate) bool {
-	if len(p.Contenders()) != 2 {
-		return false
-	}
-
-	if cand.Invalid() {
-		// TODO: We may want to generate random scheduling points
-		return false
-	}
-
+func (p *Prog) MutateScheduleFromCandidate(rs rand.Source, cand interleaving.Candidate) {
 	schedule := cand.GenerateSchedule()
 	p.applySchedule(schedule)
-	return true
 }
 
 func (p *Prog) applySchedule(schedule []interleaving.Access) {

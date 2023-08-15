@@ -154,12 +154,11 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 		p, hint := tp.P.Clone(), proc.pruneHint(tp.Hint)
 
 		cand, used, remaining := scheduler.GenerateCandidates(proc.rnd, hint)
-
-		ok := p.MutateScheduleFromCandidate(proc.rnd, cand)
-		proc.setHint(tp, remaining)
 		// We exclude used knots from tp.Hint even if the schedule
 		// mutation fails.
-		if !ok {
+		proc.setHint(tp, remaining)
+		if !canSchedule(p, cand) {
+			// TODO: We may want to generate random scheduling points
 			continue
 		}
 		// NOTE: This may not be necessary, but as we are exploring
@@ -167,6 +166,7 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 		// and understand how the fuzzer can be improved futher.
 		proc.inspectUsedKnots(used)
 
+		p.MutateScheduleFromCandidate(proc.rnd, cand)
 		p.MutateFlushVectorFromCandidate(proc.rnd, cand)
 
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
@@ -175,6 +175,10 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 			break
 		}
 	}
+}
+
+func canSchedule(p *prog.Prog, cand interleaving.Candidate) bool {
+	return len(p.Contenders()) == 2 && !cand.Invalid()
 }
 
 func (proc *Proc) pruneHint(hint []interleaving.Segment) []interleaving.Segment {
