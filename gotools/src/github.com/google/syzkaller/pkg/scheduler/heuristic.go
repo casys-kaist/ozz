@@ -17,21 +17,27 @@ func ComputeHints0(seq []interleaving.SerialAccess) []interleaving.Segment {
 		return nil
 	}
 	// TODO: optimzie
-	copySeq := func(s0, s1 interleaving.SerialAccess) []interleaving.SerialAccess {
+	copySeq := func(s0, s1 interleaving.SerialAccess, first int) []interleaving.SerialAccess {
+		var start0, start1 int
+		if first == 0 {
+			start0, start1 = 0, len(s0)
+		} else {
+			start0, start1 = len(s1), 0
+		}
 		serial0 := interleaving.SerialAccess{}
 		for i, acc := range s0 {
-			acc.Timestamp = uint32(i)
+			acc.Timestamp = uint32(i + start0)
 			serial0 = append(serial0, acc)
 		}
 		serial1 := interleaving.SerialAccess{}
 		for i, acc := range s1 {
-			acc.Timestamp = uint32(i + len(serial0))
+			acc.Timestamp = uint32(i + start1)
 			serial1 = append(serial1, acc)
 		}
 		return []interleaving.SerialAccess{serial0, serial1}
 	}
-	h0 := ComputeHints(copySeq(seq[0], seq[1]))
-	h1 := ComputeHints(copySeq(seq[1], seq[0]))
+	h0 := ComputeHints(copySeq(seq[0], seq[1], 0))
+	h1 := ComputeHints(copySeq(seq[0], seq[1], 1))
 	return append(h0, h1...)
 }
 

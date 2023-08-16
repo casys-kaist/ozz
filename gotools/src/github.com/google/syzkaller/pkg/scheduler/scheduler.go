@@ -449,6 +449,12 @@ func sanitizeKnotSingle(comm0, comm1 interleaving.Communication, opts KnotterOpt
 			return false
 		}
 	}
+	if opts.flagSet(FlagWantParallel) {
+		// We want twisted knots only for relrazzer
+		if comm0.Latter().Timestamp < comm1.Latter().Timestamp {
+			return false
+		}
+	}
 	return true
 }
 
