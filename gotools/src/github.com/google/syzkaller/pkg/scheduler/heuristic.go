@@ -119,7 +119,8 @@ func __computeHints(c0, c1 chunk, opts KnotterOpts) []interleaving.Segment {
 	commonFlags := (FlagStrictTimestamp |
 		FlagWantParallel |
 		FlagDifferentAccessTypeOnly |
-		FlagReassignThreadID)
+		FlagReassignThreadID |
+		FlagMultiVariableOnly)
 	opts.Flags |= commonFlags
 	knotter := GetKnotter(opts)
 	knotter.AddSequentialTrace(

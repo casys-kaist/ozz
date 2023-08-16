@@ -453,6 +453,11 @@ func sanitizeKnotSingle(comm0, comm1 interleaving.Communication, opts KnotterOpt
 			return false
 		}
 	}
+	if opts.flagSet(FlagMultiVariableOnly) {
+		if comm0.Former().Addr == comm1.Former().Addr {
+			return false
+		}
+	}
 	return true
 }
 
