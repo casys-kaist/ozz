@@ -20,16 +20,14 @@ func (comm Communication) Hash() uint64 {
 }
 
 func (knot Knot) Hash() uint64 {
-	// NOTE: Assumption: the knot type is not Invalid or Parallel, and
-	// there are only two threads. TODO: extend the implmentation if
-	// needed.
+	// NOTE: Assumption: there are only two threads.
 	b := make([]byte, 32)
 	w := writer{b: b}
 	for i := 0; i < 2; i++ {
 		for j := 0; j < 2; j++ {
 			w.write(knot[i][j].Inst)
 			var normalized uint32
-			if knot[i][j].Timestamp > knot[1-i][1-j].Timestamp {
+			if knot[i][j].Timestamp > knot[1-i][1].Timestamp {
 				normalized = 1
 			}
 			w.write(normalized)
