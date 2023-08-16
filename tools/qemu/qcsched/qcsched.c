@@ -23,6 +23,7 @@ struct qcsched sched;
 
 bool qcsched_pre_run(CPUState *cpu)
 {
+    g_assert(!qemu_mutex_iothread_locked());
     if (cpu->qcsched_dirty) {
         ASSERT(!kvm_write_registers(cpu, &cpu->regs),
                "failed to write registers");
