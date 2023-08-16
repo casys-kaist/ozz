@@ -38,10 +38,7 @@ func GetKnotter(opts KnotterOpts) Knotter {
 	if !opts.flagSet(FlagWantParallel) {
 		opts.Flags &= ^FlagWantMessagePassing
 	}
-	if !opts.flagSet(FlagWantMessagePassing) {
-		opts.Flags &= ^FlagWantStrictMessagePassing
-	}
-	if opts.flagSet(FlagWantStrictMessagePassing) {
+	if opts.flagSet(FlagWantMessagePassing) {
 		opts.Flags |= FlagDifferentAccessTypeOnly
 	}
 	if opts.flagSet(FlagWantOOTA) && opts.flagSet(FlagWantMessagePassing) {
@@ -368,10 +365,8 @@ func (knotter *Knotter) doFormKnots() bool {
 	}
 
 	if knotter.opts.flagSet(FlagWantParallel) {
-		// RelRazzer
 		knotter.doFormKnotsParallel()
 	} else {
-		// SegFuzz
 		knotter.doFormKnotsNotParallel()
 	}
 	return len(knotter.knots) < thresholdKnots
@@ -448,10 +443,6 @@ func sanitizeKnotSingle(comm0, comm1 interleaving.Communication, opts KnotterOpt
 		if !isMessagePassing(comm0, comm1) {
 			return false
 		}
-		if opts.flagSet(FlagWantStrictMessagePassing) &&
-			(comm1.Former().Typ != interleaving.TypeStore || comm0.Former().Addr == comm1.Former().Addr) {
-			return false
-		}
 	}
 	if opts.flagSet(FlagMultiVariableOnly) {
 		if comm0.Former().Addr == comm1.Former().Addr {
@@ -462,7 +453,8 @@ func sanitizeKnotSingle(comm0, comm1 interleaving.Communication, opts KnotterOpt
 }
 
 func isMessagePassing(c0, c1 interleaving.Communication) bool {
-	return (c0.Former().Typ == c1.Former().Typ &&
+	return (c0.Former().Typ == interleaving.TypeStore &&
+		c0.Former().Typ == c1.Former().Typ &&
 		c0.Latter().Typ == c1.Latter().Typ &&
 		c0.Former().Typ != c0.Latter().Typ)
 }

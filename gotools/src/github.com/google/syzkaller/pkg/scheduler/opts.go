@@ -20,7 +20,6 @@ const (
 	FlagWantParallel
 	FlagWantMessagePassing
 	FlagDifferentAccessTypeOnly
-	FlagWantStrictMessagePassing
 	FlagWantOOTA // out-of-thin-air
 	FlagMultiVariableOnly
 )

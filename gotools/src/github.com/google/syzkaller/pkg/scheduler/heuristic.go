@@ -101,8 +101,7 @@ func computeHintsPSO(cs0, cs1 []chunk, seq []interleaving.SerialAccess) []interl
 }
 
 var psoOpts = KnotterOpts{
-	Flags: FlagWantMessagePassing |
-		FlagWantStrictMessagePassing,
+	Flags: FlagWantMessagePassing,
 }
 
 func computeHintsTSO(cs0, cs1 []chunk, seq []interleaving.SerialAccess) []interleaving.Segment {
