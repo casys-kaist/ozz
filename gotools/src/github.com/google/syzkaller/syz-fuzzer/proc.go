@@ -18,7 +18,6 @@ import (
 	"github.com/google/syzkaller/pkg/rpctype"
 	"github.com/google/syzkaller/pkg/scheduler"
 	"github.com/google/syzkaller/pkg/signal"
-	"github.com/google/syzkaller/pkg/ssb"
 	"github.com/google/syzkaller/prog"
 )
 
@@ -137,7 +136,7 @@ func (proc *Proc) loop() {
 }
 
 func (proc *Proc) needScheduling() bool {
-	if len(proc.fuzzer.candidates) == 0 {
+	if len(proc.fuzzer.concurrentCalls) == 0 {
 		return false
 	}
 	return proc.balancer.needScheduling(proc.rnd)
@@ -154,11 +153,12 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 		}
 		p, hint := tp.P.Clone(), proc.pruneHint(tp.Hint)
 
-		ok, used, remaining := p.MutateScheduleFromHint(proc.rnd, hint)
-		proc.setHint(tp, remaining)
+		cand, used, remaining := scheduler.GenerateCandidates(proc.rnd, hint)
 		// We exclude used knots from tp.Hint even if the schedule
 		// mutation fails.
-		if !ok {
+		proc.setHint(tp, remaining)
+		if !canSchedule(p, cand) {
+			// TODO: We may want to generate random scheduling points
 			continue
 		}
 		// NOTE: This may not be necessary, but as we are exploring
@@ -166,8 +166,8 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 		// and understand how the fuzzer can be improved futher.
 		proc.inspectUsedKnots(used)
 
-		flushVector := ssb.GenerateFlushVector(proc.rnd, used)
-		p.AttachFlushVector(flushVector)
+		p.MutateScheduleFromCandidate(proc.rnd, cand)
+		p.MutateFlushVectorFromCandidate(proc.rnd, cand)
 
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
 		proc.execute(proc.execOptsCollide, p, ProgNormal, StatSchedule)
@@ -175,6 +175,10 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 			break
 		}
 	}
+}
+
+func canSchedule(p *prog.Prog, cand interleaving.Candidate) bool {
+	return len(p.Contenders()) == 2 && !cand.Invalid()
 }
 
 func (proc *Proc) pruneHint(hint []interleaving.Segment) []interleaving.Segment {
@@ -188,7 +192,7 @@ func (proc *Proc) pruneHint(hint []interleaving.Segment) []interleaving.Segment 
 	return pruned
 }
 
-func (proc *Proc) setHint(tp *prog.Candidate, remaining []interleaving.Segment) {
+func (proc *Proc) setHint(tp *prog.ConcurrentCalls, remaining []interleaving.Segment) {
 	debugHint(tp, remaining)
 	used := len(tp.Hint) - len(remaining)
 	proc.fuzzer.subCollection(CollectionScheduleHint, uint64(used))
@@ -370,9 +374,14 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 }
 
 func (proc *Proc) executeThreading(p *prog.Prog) []interleaving.Segment {
-	inf := proc.executeRaw(proc.execOpts, p, StatThreading)
-	seq := proc.sequentialAccesses(inf, p.Contender)
-	return scheduler.ComputePotentialBuggyKnots(seq)
+	hints := []interleaving.Segment{}
+	for i := 0; i < 2; i++ {
+		inf := proc.executeRaw(proc.execOpts, p, StatThreading)
+		seq := proc.sequentialAccesses(inf, p.Contender)
+		hints = append(hints, scheduler.ComputeHints(seq)...)
+		p.Reverse()
+	}
+	return hints
 }
 
 func (proc *Proc) failCall(p *prog.Prog, call int) {
@@ -424,23 +433,24 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 		return
 	}
 
-	maxIntermediateCalls := 10
-	intermediateCalls := func(c1, c2 int) int {
-		return c2 - c1 - 1
+	notTooFar := func(c1, c2 int) bool {
+		maxIntermediateCalls := 10
+		dist := (c2 - c1 - 1)
+		return dist < maxIntermediateCalls
 	}
 	for c1 := 0; c1 < len(p.Calls); c1++ {
-		for c2 := c1 + 1; c2 < len(p.Calls) && intermediateCalls(c1, c2) < maxIntermediateCalls; c2++ {
+		for c2 := c1 + 1; c2 < len(p.Calls) && notTooFar(c1, c2); c2++ {
 			if proc.fuzzer.shutOffThreading(p) {
 				return
 			}
-
 			cont := prog.Contender{Calls: []int{c1, c2}}
-			knots, comms := proc.extractKnotsAndComms(info, cont, proc.knotterOptsPreThreading)
-			if len(knots) == 0 && len(comms) == 0 {
+			seq := proc.sequentialAccesses(info, cont)
+			hints := scheduler.ComputeHints0(seq)
+			if len(hints) == 0 {
 				continue
 			}
-			if newKnots, newComms := proc.fuzzer.getNewKnot(knots), proc.fuzzer.getNewCommunication(comms); len(newKnots) != 0 || len(newComms) != 0 {
-				proc.enqueueThreading(p, cont, newKnots)
+			if newHints := proc.fuzzer.getNewKnot(hints); len(newHints) != 0 {
+				proc.enqueueThreading(p, cont, newHints)
 			}
 		}
 	}
@@ -472,21 +482,21 @@ func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.Pro
 	return info
 }
 
-func (proc *Proc) extractKnotsAndComms(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) ([]interleaving.Segment, []interleaving.Segment) {
+func (proc *Proc) extractHints(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) []interleaving.Segment {
 	knotter := scheduler.GetKnotter(opts)
 
 	seq := proc.sequentialAccesses(info, calls)
 	if !knotter.AddSequentialTrace(seq) {
-		return nil, nil
+		return nil
 	}
 	knotter.ExcavateKnots()
 
-	return knotter.GetKnots(), knotter.GetCommunications()
+	return knotter.GetKnots()
 }
 
 func (proc *Proc) extractKnots(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) []interleaving.Segment {
-	knots, _ := proc.extractKnotsAndComms(info, calls, opts)
-	return knots
+	// TODO: IMPLEMENT
+	return nil
 }
 
 func (proc *Proc) sequentialAccesses(info *ipc.ProgInfo, calls prog.Contender) (seq []interleaving.SerialAccess) {

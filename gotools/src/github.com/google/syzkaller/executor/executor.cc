@@ -442,6 +442,12 @@ struct feature_t {
 	void (*setup)();
 };
 
+struct kssb_flush_table_entry {
+	unsigned long inst;
+	int value;
+	void *pad1, *pad2;
+};
+
 static thread_t* get_thread(int thread);
 static void prepare_thread(thread_t* th, int call_index, int call_num, uint64 copyout_index, uint64 num_args, uint64* args, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos, call_props_t call_props);
 static thread_t* schedule_call(int call_index, int call_num, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos, call_props_t call_props);
@@ -472,7 +478,7 @@ static void setup_features(char** enable, int n);
 static void setup_affinity_mask(int mask);
 static bool __run_in_epoch(uint32 epoch, uint32 global);
 static bool run_in_epoch(thread_t* th);
-static void feed_flush_vector(int* vector, int size);
+static void feed_flush_vector(int* vector, int vector_size, struct kssb_flush_table_entry* table, int table_size);
 
 #define turn_onoff_kssb_switch()                            \
 	do {                                                \
@@ -993,11 +999,14 @@ void execute_one()
 	uint64 prog_extra_cover_timeout = 0;
 	call_props_t call_props;
 	memset(&call_props, 0, sizeof(call_props));
-	int filter_size, vector_size;
+	int filter_size, vector_size, table_size;
 	int filter[kMaxSchedule] = {
 	    0,
 	};
 	int vector[kMaxVector] = {
+	    0,
+	};
+	struct kssb_flush_table_entry table[kMaxVector] = {
 	    0,
 	};
 
@@ -1014,7 +1023,13 @@ void execute_one()
 	vector_size = (int)read_input(&input_pos);
 	for (int i = 0; i < vector_size; i++)
 		vector[i] = (int)read_input(&input_pos);
-	feed_flush_vector(vector, vector_size);
+	table_size = (int)read_input(&input_pos) / 2;
+	for (int i = 0; i < table_size; i++) {
+		unsigned long inst = read_input(&input_pos);
+		int value = read_input(&input_pos);
+		table[i] = {.inst = inst, .value = value};
+	}
+	feed_flush_vector(vector, vector_size, table, table_size);
 
 	for (;;) {
 		uint64 call_num = read_input(&input_pos);
@@ -1215,17 +1230,32 @@ void execute_one()
 	}
 }
 
-void feed_flush_vector(int* vector, int size)
+void feed_flush_vector(int* vector, int vector_size, struct kssb_flush_table_entry* table, int table_size)
 {
+	// XXX: Not sure we don't have to do this
+	if (vector_size == 0 && table_size != 0) {
+		vector_size = 1;
+		vector[0] = 1;
+	}
 #define SYS_FEEDINPUT 500
-	debug("flush vector: %d [", size);
-	for (int i = 0; i < size; i++) {
+#define DEBUG_FLUSH_VECTOR
+#ifdef DEBUG_FLUSH_VECTOR
+	debug("vector: %d [", vector_size);
+	for (int i = 0; i < vector_size; i++) {
 		if (i != 0)
 			debug_noprefix(", ");
 		debug_noprefix("%d", vector[i]);
 	}
 	debug_noprefix("]\n");
-	if (syscall(SYS_FEEDINPUT, vector, size))
+	debug("table: %d [", table_size);
+	for (int i = 0; i < table_size; i++) {
+		if (i != 0)
+			debug_noprefix(", ");
+		debug_noprefix("%lx: %d", table[i].inst, table[i].value);
+	}
+	debug_noprefix("]\n");
+#endif
+	if (syscall(SYS_FEEDINPUT, vector, vector_size, table, table_size))
 		fail("feedinput failed");
 }
 

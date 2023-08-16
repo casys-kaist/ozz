@@ -1629,7 +1629,6 @@ func (mgr *Manager) collectUsedFiles() {
 	}
 	cfg := mgr.cfg
 	addUsedFile(cfg.FuzzerBin)
-	addUsedFile(cfg.ExecprogBin)
 	addUsedFile(cfg.ExecutorBin)
 	addUsedFile(cfg.SSHKey)
 	if vmlinux := filepath.Join(cfg.KernelObj, mgr.sysTarget.KernelObject); osutil.IsExist(vmlinux) {
@@ -1746,11 +1745,6 @@ func (mgr *Manager) serializeCoverage() (bytes.Buffer, bytes.Buffer, bytes.Buffe
 	hint := mgr.serv.maxInterleaving
 	for k := range hint {
 		hintcov.WriteString(fmt.Sprintf("%x\n", k))
-	}
-
-	comm := mgr.serv.maxCommunication
-	for k := range comm {
-		commcov.WriteString(fmt.Sprintf("%x\n", k))
 	}
 
 	log.Logf(0, "Serializing coverage takes %v", time.Since(start))

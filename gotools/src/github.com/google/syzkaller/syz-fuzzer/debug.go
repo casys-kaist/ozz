@@ -6,7 +6,7 @@ import (
 	"github.com/google/syzkaller/prog"
 )
 
-func debugHint(tp *prog.Candidate, remaining []interleaving.Segment) {
+func debugHint(tp *prog.ConcurrentCalls, remaining []interleaving.Segment) {
 	if !_debug {
 		return
 	}

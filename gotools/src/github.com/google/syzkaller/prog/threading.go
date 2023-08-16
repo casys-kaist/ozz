@@ -161,7 +161,7 @@ type ScheduledProg struct {
 	Prio      int
 }
 
-type Candidate struct {
+type ConcurrentCalls struct {
 	P    *Prog
 	Hint []interleaving.Segment
 }
