@@ -1635,6 +1635,7 @@ void write_extra_output()
 void thread_create(thread_t* th, int id, bool need_coverage)
 {
 	debug("creating a thread %d (need_coverage: %d)\n", id, need_coverage);
+	disable_kssb();
 	th->created = true;
 	th->id = id;
 	th->executing = false;
@@ -1652,6 +1653,7 @@ void thread_create(thread_t* th, int id, bool need_coverage)
 	event_set(&th->done);
 	if (flag_threaded)
 		thread_start(worker_thread, th);
+	enable_kssb();
 }
 
 void thread_mmap_cover(cover_t* cov)
