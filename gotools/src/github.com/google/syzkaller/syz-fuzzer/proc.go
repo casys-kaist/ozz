@@ -599,7 +599,6 @@ func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.P
 		proc.shiftAccesses(info)
 
 		retry := needRetry(p, info)
-		proc.logResult(p, info, hanged, retry)
 		log.Logf(2, "result hanged=%v retry=%v: %s", hanged, retry, output)
 		if retry {
 			filter := buildScheduleFilter(p, info)
