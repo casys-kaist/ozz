@@ -385,11 +385,6 @@ func (knotter *Knotter) doFormKnotsNotParallel() {
 
 func (knotter *Knotter) doFormKnotsParallel() {
 	knotter.doFormKnotsinThread(knotter.comms0)
-	if knotter.opts.flagSet(FlagWantOOTA) {
-		// NOTE: For OOTA, forming knots in both directions will make
-		// dupped knots without any new interesting knots.
-		return
-	}
 	knotter.doFormKnotsinThread(knotter.comms1)
 }
 
