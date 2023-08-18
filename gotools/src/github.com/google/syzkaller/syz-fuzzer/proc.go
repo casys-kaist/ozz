@@ -524,6 +524,12 @@ func (proc *Proc) sequentialAccesses(info *ipc.ProgInfo, calls prog.Contender) (
 }
 
 func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int, info ipc.CallInfo) {
+	if !proc.fuzzer.generate {
+		// XXX: fuzzer.generate is mostly for debugging, and if we
+		// turn off generate, triage is also pretty meaningless.
+		return
+	}
+
 	// info.Signal points to the output shmem region, detach it before queueing.
 	info.Signal = append([]uint32{}, info.Signal...)
 	// None of the caller use Cover, so just nil it instead of detaching.
