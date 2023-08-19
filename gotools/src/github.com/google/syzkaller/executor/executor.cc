@@ -167,8 +167,10 @@ const uint64 kOutputBase = 0x1b2bc20000ull;
 // Allocating (and forking) virtual memory for each executed process is expensive, so we only mmap
 // the amount we might possibly need for the specific received prog.
 const int kMaxOutputComparisons = 14 << 20; // executions with comparsions enabled are usually < 1% of all executions
-const int kMaxOutputCoverage = 6 << 20; // coverage is needed in ~ up to 1/3 of all executions (depending on corpus rotation)
-const int kMaxOutputSignal = 4 << 20;
+// XXX: memcov consumes more memory, so we increase the the amount of
+// memory.
+const int kMaxOutputCoverage = 6 << 20 << 2; // coverage is needed in ~ up to 1/3 of all executions (depending on corpus rotation)
+const int kMaxOutputSignal = 4 << 20 << 2;
 const int kMinOutput = 256 << 10; // if we don't need to send signal, the output is rather short.
 const int kInitialOutput = kMinOutput; // the minimal size to be allocated in the parent process
 #else
