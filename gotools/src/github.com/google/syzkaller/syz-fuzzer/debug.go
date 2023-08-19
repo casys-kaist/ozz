@@ -31,4 +31,13 @@ func testingHints(hint []interleaving.Segment) bool {
 	return false
 }
 
+func printSeq(seq []interleaving.SerialAccess) {
+	for i, serial := range seq {
+		log.Logf(0, "%d-th", i)
+		for _, acc := range serial {
+			log.Logf(0, "%v", acc)
+		}
+	}
+}
+
 var _debug bool = true
