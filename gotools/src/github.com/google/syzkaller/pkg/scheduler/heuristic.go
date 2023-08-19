@@ -12,14 +12,25 @@ type chunk interleaving.SerialAccess
 // assumed. Although this is fine for delaying stores, but we may need
 // to change it if we want to prefetching loads.
 
+type temp struct {
+	inst, addr uint32
+}
+
 func ComputeHints0(seq []interleaving.SerialAccess) []interleaving.Segment {
 	if len(seq) != 2 {
 		return nil
 	}
 	// TODO: optimzie
 	copySeq := func(s0, s1 interleaving.SerialAccess, first int) []interleaving.SerialAccess {
+		ht := make(map[temp]struct{})
+		start := time.Now()
 		serial0 := interleaving.SerialAccess{}
 		for i, acc := range s0 {
+			t := temp{inst: acc.Inst, addr: acc.Addr}
+			if _, ok := ht[t]; ok {
+				continue
+			}
+			ht[t] = struct{}{}
 			acc.Timestamp = uint32(i)
 			acc.Thread = uint64(first)
 			serial0 = append(serial0, acc)
