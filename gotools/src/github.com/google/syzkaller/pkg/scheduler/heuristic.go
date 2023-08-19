@@ -23,7 +23,6 @@ func ComputeHints0(seq []interleaving.SerialAccess) []interleaving.Segment {
 	// TODO: optimzie
 	copySeq := func(s0, s1 interleaving.SerialAccess, first int) []interleaving.SerialAccess {
 		ht := make(map[temp]struct{})
-		start := time.Now()
 		serial0 := interleaving.SerialAccess{}
 		for i, acc := range s0 {
 			t := temp{inst: acc.Inst, addr: acc.Addr}
