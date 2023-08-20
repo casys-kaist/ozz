@@ -57,7 +57,17 @@ if [ -z "$NPROC" ]; then
 	NPROC=$(expr `nproc` / 2)
 fi
 
-(cd $LINUXDIR; make O=$OUTDIR oldconfig; make O=$OUTDIR -j"$NPROC" "$@")
+(cd $LINUXDIR; make O=$OUTDIR oldconfig)
+__MISSING_CONFIG=$(__check_config "$OUTDIR/.config")
+if [ -n "$__MISSING_CONFIG" ];
+then
+   echo "Following configs may be mssing"
+   printf "%s\n" "$__MISSING_CONFIG"
+   echo "Please check the config file"
+   exit 1
+fi
+
+(cd $LINUXDIR; make O=$OUTDIR -j"$NPROC" "$@")
 
 if [ -n "$_DEDUP" ]; then
 	# TODO: do this inline

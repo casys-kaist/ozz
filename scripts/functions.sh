@@ -101,3 +101,15 @@ __contains() {
         echo 0    # $substring is not in $string
     fi
 }
+
+__check_config() {
+	config_file="$1"
+	for _o in "KSSB" "KSSB_SWITCH" "KSSB_BINARY" \
+					"KSSB_PROFILE" "KMEMCOV" "RELRAZZER"
+	do
+		o="CONFIG_$_o=y"
+		if ! grep -q "$o" "$config_file"; then
+			printf '%s\n' "$o"
+		fi
+	done
+}
