@@ -26166,7 +26166,6 @@ do_acct_process
 do_action
 do_active_device
 do_add_page_to_bio
-do_alloc_pages
 do_anonymous_page
 do_arpt_get_ctl
 do_arpt_set_ctl
@@ -110462,7 +110461,6 @@ trace_track_foreign_dirty
 trace_ucsi_connector_change
 trace_ucsi_register_altmode
 trace_ucsi_register_port
-trace_udp_fail_queue_rcv_skb
 trace_unmap
 trace_usb_ep_alloc_request
 trace_usb_ep_clear_halt
