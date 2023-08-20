@@ -89,3 +89,15 @@ __check_installed() {
 	mkdir -p $DIR
 	[ -z "$2" -a -f "$DIR/$1" ]
 }
+
+## Usage: __contains STRING SUBSTRING
+## Ref: https://stackoverflow.com/questions/2829613/how-do-you-tell-if-a-string-contains-another-string-in-posix-sh
+__contains() {
+    string="$1"
+    substring="$2"
+    if [ "${string#*"$substring"}" != "$string" ]; then
+        echo 1    # $substring is in $string
+    else
+        echo 0    # $substring is not in $string
+    fi
+}

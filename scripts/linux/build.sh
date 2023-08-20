@@ -1,5 +1,9 @@
 #!/bin/sh -e
 
+if [ -z "$PROJECT_HOME" ]; then
+	exit 1
+fi
+
 if [ -z "$CFLAGS_KSSB" ]; then
 	. "$SCRIPTS_DIR/linux/build_setup.sh"
 fi
@@ -34,6 +38,13 @@ fi
 if [ -n "$COPY_CONFIG" -o ! -f "$OUTDIR/.config" ]; then
 	echo "copy $_CONFIG to $OUTDIR/.config"
 	cp "$_CONFIG" "$OUTDIR/.config"
+fi
+
+# XXX: we can't export functions in a POSIX-compatible way.
+. "$SCRIPTS_DIR/functions.sh"
+__FIRSTPASS=$(__contains "$CFLAGS_KSSB" "second-pass=false")
+if [ "$__FIRSTPASS" -eq "1" ]; then
+	echo "Running the first pass..."
 fi
 
 if [ -n "$REBUILD" ]; then
