@@ -104,12 +104,16 @@ __contains() {
 
 __check_config() {
 	config_file="$1"
-	for _o in "KSSB" "KSSB_SWITCH" "KSSB_BINARY" \
-					"KSSB_PROFILE" "KMEMCOV" "RELRAZZER"
+	configs_to_check="$2"
+	for _o in $(echo $configs_to_check)
 	do
 		o="CONFIG_$_o=y"
 		if ! grep -q "$o" "$config_file"; then
 			printf '%s\n' "$o"
 		fi
 	done
+}
+
+count_item() {
+   echo $(IFS=' '; set -f -- $1; echo $#)
 }
