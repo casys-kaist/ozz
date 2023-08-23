@@ -49,13 +49,21 @@ func generateFlushVectorForCandidate(cand interleaving.Candidate) FlushVector {
 		return uint64(v) | 0xffffffff00000000
 	}
 	table := []tableEntry{}
+	ht := make(map[uint32]struct{})
+	_add_entry := func (i uint32, v int) {
+		if _, ok := ht[i]; ok {
+			return
+		}
+		ht[i] = struct{}{}
+		table = append(table, tableEntry{inst: uext(i), value: v})
+	}
 	for _, acc := range cand.DelayingInst {
-		table = append(table, tableEntry{inst: uext(acc.Inst), value: 0})
+		_add_entry(acc.Inst, 0)
 	}
 	// TODO: Reuse generated sched point
 	// Sched point (= first acc of crit comm) should be 1
 	schedPoint := cand.CriticalComm.Former()
-	table = append(table, tableEntry{inst: uext(schedPoint.Inst), value: 1})
+	_add_entry(schedPoint.Inst, 1)
 	return FlushVector{table: table}
 }
 
