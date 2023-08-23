@@ -57,7 +57,18 @@ if [ -z "$NPROC" ]; then
     NPROC=$(expr `nproc` / 2)
 fi
 
+# XXX: check config
 (cd $LINUXDIR; make O=$OUTDIR oldconfig)
+
+proceed_yes_no() {
+    while true; do
+        read -p "Do you want to proceed? [yn] " yn
+        case $yn in
+            [Yy]* ) break;;
+            * ) exit 1;;
+        esac
+    done
+}
 
 __MISSING_CONFIG=$(__check_config "$OUTDIR/.config" \
                                 "KSSB KSSB_SWITCH KSSB_BINARY \
@@ -66,8 +77,7 @@ if [ -n "$__MISSING_CONFIG" ];
 then
    echo "Following configs may be mssing."
    printf "%s\n" "$__MISSING_CONFIG"
-   echo "Please check the config file."
-   exit 1
+   proceed_yes_no
 fi
 
 __CHECK="KFENCE"
@@ -79,8 +89,7 @@ if [ "$_a" -ne "$_b" ];
 then
     echo "Following conflicting configs may be set."
     printf "%s\n" "$__CHECK"
-    echo "Please check the config file."
-    exit 1
+    proceed_yes_no
 fi
 
 (cd $LINUXDIR; make O=$OUTDIR -j"$NPROC" "$@")
