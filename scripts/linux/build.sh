@@ -80,7 +80,7 @@ then
    proceed_yes_no
 fi
 
-__CHECK="KFENCE"
+__CHECK="KFENCE STACKPROTECTOR KASAN_STACK"
 __CONFLICT_CONFIGS=$(__check_config "$OUTDIR/.config" \
                                     "$__CHECK")
 _a=$(count_item "$__CHECK")

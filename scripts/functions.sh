@@ -115,5 +115,5 @@ __check_config() {
 }
 
 count_item() {
-   echo $(IFS=' '; set -f -- $1; echo $#)
+   echo $(set -f -- $1; echo $#)
 }
