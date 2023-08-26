@@ -168,6 +168,9 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 
 		p.MutateScheduleFromCandidate(proc.rnd, cand)
 		p.MutateFlushVectorFromCandidate(proc.rnd, cand)
+		// XXX: For easy debugging
+		log.Logf(2, "some inst1: %v", cand.DelayingInst)
+		log.Logf(2, "some inst2: %v", cand.SomeInst)
 
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
 		proc.execute(proc.execOptsCollide, p, ProgNormal, StatSchedule)

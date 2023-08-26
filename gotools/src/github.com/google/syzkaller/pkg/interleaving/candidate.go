@@ -2,6 +2,7 @@ package interleaving
 
 type Candidate struct {
 	DelayingInst []Access
+	SomeInst     []Access
 	CriticalComm Communication
 }
 

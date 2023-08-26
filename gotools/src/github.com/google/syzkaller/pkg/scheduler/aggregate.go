@@ -44,6 +44,7 @@ func constructCandidate(critComm interleaving.Communication, segs []interleaving
 	// someComm, and someInst. When we understand that, rename thus
 	// variables.
 	someInst := []interleaving.Access{}
+	someInst2 := []interleaving.Access{}
 	for _, seg := range segs {
 		knot, ok := seg.(interleaving.Knot)
 		if !ok {
@@ -51,9 +52,11 @@ func constructCandidate(critComm interleaving.Communication, segs []interleaving
 		}
 		someComm := knot[0]
 		someInst = append(someInst, someComm.Former())
+		someInst2 = append(someInst2, someComm.Latter())
 	}
 	return interleaving.Candidate{
 		DelayingInst: someInst,
+		SomeInst:     someInst2,
 		CriticalComm: critComm,
 	}
 }
