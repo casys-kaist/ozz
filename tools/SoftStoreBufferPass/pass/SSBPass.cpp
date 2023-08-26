@@ -663,7 +663,6 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
 
 void SoftStoreBuffer::instrumentHelper(Instruction *I, FunctionCallee callback,
                                        bool requireReturnAddress) {
-  return;
   BasicBlock *ThenBlock = SSBDoEmulateHelper(I);
   IRBuilder<> IRBThen(ThenBlock->getFirstNonPHI());
 
