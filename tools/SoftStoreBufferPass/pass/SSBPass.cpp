@@ -202,7 +202,8 @@ private:
   bool isIRQEntryOfTargetArch(Function &F);
   bool isSyscallEntryOfTargetArch(Function &F);
   BasicBlock *SSBDoEmulateHelper(Instruction *I);
-  void instrumentHelper(Instruction *I, FunctionCallee callback);
+  void instrumentHelper(Instruction *I, FunctionCallee callback,
+                        bool requireReturnAddress);
   void SetNoSanitizeMetadata(Instruction *I) {
     I->setMetadata(I->getModule()->getMDKindID("nosanitize"),
                    MDNode::get(I->getContext(), None));
@@ -660,32 +661,30 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
   return true;
 }
 
+void SoftStoreBuffer::instrumentHelper(Instruction *I, FunctionCallee callback,
+                                       bool requireReturnAddress) {
+  return;
+  BasicBlock *ThenBlock = SSBDoEmulateHelper(I);
+  IRBuilder<> IRBThen(ThenBlock->getFirstNonPHI());
+
+  auto Args = SmallVector<Value *, 8>();
+  if (requireReturnAddress) {
+    Value *ReturnAddress = IRBThen.CreateCall(
+        Intrinsic::getDeclaration(I->getModule(), Intrinsic::returnaddress),
+        IRBThen.getInt32(0));
+    Args.push_back(ReturnAddress);
+  }
+  IRBThen.CreateCall(callback, Args);
+}
+
 bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
   if (!ClInstrumentFlush)
     return false;
 
   LLVM_DEBUG(dbgs() << "Instrumenting a membarrier callback at " << *I << "\n");
   NumInstrumentedFlushes++;
-
-  BasicBlock *ThenBlock = SSBDoEmulateHelper(I);
-  // ThenBlock -- slowpath (store buffer emulation)
-  IRBuilder<> IRBThen(ThenBlock->getFirstNonPHI());
-  IRBThen.CreateCall(SSBFlush);
+  instrumentHelper(I, SSBFlush, false);
   return true;
-}
-
-void SoftStoreBuffer::instrumentHelper(Instruction *I,
-                                       FunctionCallee callback) {
-  BasicBlock *ThenBlock = SSBDoEmulateHelper(I);
-  IRBuilder<> IRBThen(ThenBlock->getFirstNonPHI());
-
-  Value *ReturnAddress = IRBThen.CreateCall(
-      Intrinsic::getDeclaration(I->getModule(), Intrinsic::returnaddress),
-      IRBThen.getInt32(0));
-
-  auto Args = SmallVector<Value *, 8>();
-  Args.push_back(ReturnAddress);
-  IRBThen.CreateCall(callback, Args);
 }
 
 bool SoftStoreBuffer::instrumentRetCheck(Instruction *I) {
@@ -694,7 +693,7 @@ bool SoftStoreBuffer::instrumentRetCheck(Instruction *I) {
     return false;
   LLVM_DEBUG(dbgs() << "Instrumenting a retchk callback at " << *I << "\n");
   NumInstrumentedRetCheck++;
-  instrumentHelper(I, SSBRetCheck);
+  instrumentHelper(I, SSBRetCheck, true);
   return true;
 }
 
@@ -706,7 +705,7 @@ bool SoftStoreBuffer::instrumentFuncEntry(Instruction *I) {
   LLVM_DEBUG(dbgs() << "Instrumenting an function-entry callback at " << *I
                     << "\n");
   NumInstrumentedFuncEntry++;
-  instrumentHelper(I, SSBFuncEntry);
+  instrumentHelper(I, SSBFuncEntry, true);
   return true;
 }
 
