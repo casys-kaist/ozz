@@ -158,6 +158,7 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 		p.MutateScheduleFromCandidate(proc.rnd, cand)
 		p.MutateFlushVectorFromCandidate(proc.rnd, cand)
 		// XXX: For easy debugging the kernel
+		log.Logf(0, "crit comm: %v --> %v", cand.CriticalComm.Former(), cand.CriticalComm.Latter())
 		log.Logf(0, "some inst1: %v", cand.DelayingInst)
 		log.Logf(0, "some inst2: %v", cand.SomeInst)
 
