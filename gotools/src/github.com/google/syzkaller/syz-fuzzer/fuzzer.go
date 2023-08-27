@@ -674,20 +674,8 @@ func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.Concurre
 		if len(tp.Hint) != 0 {
 			return tp
 		}
-		fuzzer.removeCandidateAt(idx)
 	}
 	return nil
-}
-
-func (fuzzer *FuzzerSnapshot) removeCandidateAt(idx int) {
-	log.Logf(2, "remove a schedule guide")
-	fuzzer.fuzzer.corpusMu.Lock()
-	ln := len(fuzzer.concurrentCalls)
-	fuzzer.fuzzer.concurrentCalls[idx] = fuzzer.fuzzer.concurrentCalls[ln-1]
-	fuzzer.fuzzer.concurrentCalls = fuzzer.fuzzer.concurrentCalls[:ln-1]
-	fuzzer.fuzzer.corpusMu.Unlock()
-	fuzzer.fuzzer.subCollection(CollectionConcurrentCalls, 1)
-	*fuzzer = fuzzer.fuzzer.snapshot()
 }
 
 func (fuzzer *Fuzzer) __addInputToCorpus(p *prog.Prog, sig hash.Sig, prio int64) {
@@ -738,6 +726,7 @@ func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, sign interleaving.S
 }
 
 func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
+	fuzzer.removeExhaustedConcurrentCalls()
 	fuzzer.corpusMu.RLock()
 	defer fuzzer.corpusMu.RUnlock()
 	return FuzzerSnapshot{
@@ -747,6 +736,26 @@ func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
 		fuzzer.sumPrios,
 		fuzzer,
 	}
+}
+
+func (fuzzer *Fuzzer) removeExhaustedConcurrentCalls() {
+	fuzzer.corpusMu.Lock()
+	removed := uint64(0)
+	ln := len(fuzzer.concurrentCalls)
+	for i := 0; i < ln; {
+		c := fuzzer.concurrentCalls[i]
+		if len(c.Hint) != 0 {
+			i++
+			continue
+		}
+		// remove the exhausted concurrent call
+		fuzzer.concurrentCalls[i] = fuzzer.concurrentCalls[ln-1]
+		fuzzer.concurrentCalls = fuzzer.concurrentCalls[:ln-1]
+		ln--
+	}
+	fuzzer.corpusMu.Unlock()
+	log.Logf(2, "removed %d concurrent calls", removed)
+	fuzzer.subCollection(CollectionConcurrentCalls, removed)
 }
 
 func (fuzzer *Fuzzer) addMaxSignal(sign signal.Signal) {
