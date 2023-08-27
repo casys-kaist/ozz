@@ -92,11 +92,7 @@ func (proc *Proc) loop() {
 		generatePeriod = 2
 	}
 	for i := 0; ; i++ {
-		proc.relieveMemoryPressure()
-		proc.balancer.print()
-		if i%100 == 0 {
-			proc.powerSchedule()
-		}
+		proc.powerSchedule(i%100 == 0)
 
 		item := proc.fuzzer.workQueue.dequeue()
 		if item != nil {
@@ -135,13 +131,6 @@ func (proc *Proc) loop() {
 	}
 }
 
-func (proc *Proc) needScheduling() bool {
-	if len(proc.fuzzer.concurrentCalls) == 0 {
-		return false
-	}
-	return proc.balancer.needScheduling(proc.rnd)
-}
-
 func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 	// NOTE: proc.scheduleInput() does not queue additional works, so
 	// executing proc.scheduleInput() does not cause the workqueues
@@ -168,9 +157,9 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 
 		p.MutateScheduleFromCandidate(proc.rnd, cand)
 		p.MutateFlushVectorFromCandidate(proc.rnd, cand)
-		// XXX: For easy debugging
-		log.Logf(2, "some inst1: %v", cand.DelayingInst)
-		log.Logf(2, "some inst2: %v", cand.SomeInst)
+		// XXX: For easy debugging the kernel
+		log.Logf(0, "some inst1: %v", cand.DelayingInst)
+		log.Logf(0, "some inst2: %v", cand.SomeInst)
 
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
 		proc.execute(proc.execOptsCollide, p, ProgNormal, StatSchedule)

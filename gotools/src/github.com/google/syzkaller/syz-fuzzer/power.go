@@ -10,7 +10,7 @@ import (
 	"github.com/google/syzkaller/pkg/log"
 )
 
-var flagMonitor = flag.Bool("monitor-memory-usage", false, "moniro memory usage")
+var flagMonitor = flag.Bool("monitor-memory-usage", false, "monitor memory usage")
 
 func MonitorMemUsage() {
 	// ReadMemStats is very heavy, so unless we want, do not monitor
@@ -30,28 +30,39 @@ func MonitorMemUsage() {
 	log.Logf(0, "\tNumGC = %v\n", m.NumGC)
 }
 
-func (proc *Proc) relieveMemoryPressure() {
-	needSchedule := proc.fuzzer.spillScheduling()
-	needThreading := proc.fuzzer.spillThreading()
-	if !needSchedule && !needThreading {
-		return
+func (proc *Proc) powerSchedule(adjustPlug bool) {
+	// Most of computation in proc.loop() is used to handle workqueue
+	// items. So proc.loop() has a little bit low chance to go fuzz
+	// (i.e., gen, fuzz, sched). To compensate it, execute
+	// scheduleInput() more.
+	proc.relieveMemoryPressure()
+	proc.investComputingToSchedule()
+	proc.balancer.print()
+	if adjustPlug {
+		proc.adjustPlug()
 	}
+}
+
+func (proc *Proc) relieveMemoryPressure() {
 	MonitorMemUsage()
+	needSchedule, needThreading := proc.fuzzer.spillScheduling(), proc.fuzzer.spillThreading()
+	fuzzerSnapshot := proc.fuzzer.snapshot()
 	for cnt := 0; (needSchedule || needThreading) && cnt < 10; cnt++ {
 		log.Logf(2, "Relieving memory pressure schedule=%v threading=%v", needSchedule, needThreading)
 		if needSchedule {
-			fuzzerSnapshot := proc.fuzzer.snapshot()
 			proc.scheduleInput(fuzzerSnapshot)
 		} else if item := proc.fuzzer.workQueue.dequeueThreading(); item != nil {
 			proc.threadingInput(item)
 		}
-		needSchedule = proc.fuzzer.spillScheduling()
-		needThreading = proc.fuzzer.spillThreading()
-		if !needSchedule && !needThreading {
-			break
-		}
+		needSchedule, needThreading = proc.fuzzer.spillScheduling(), proc.fuzzer.spillThreading()
 	}
-	return
+}
+
+func (proc *Proc) investComputingToSchedule() {
+	fuzzerSnapshot := proc.fuzzer.snapshot()
+	for cnt := 0; proc.needScheduling() && cnt < 3; cnt++ {
+		proc.scheduleInput(fuzzerSnapshot)
+	}
 }
 
 func (fuzzer *Fuzzer) spillCollection(collection Collection, threshold uint64) bool {
@@ -70,7 +81,7 @@ func (fuzzer *Fuzzer) spillScheduling() bool {
 	return fuzzer.spillCollection(CollectionScheduleHint, spillThreshold)
 }
 
-func (proc *Proc) powerSchedule() {
+func (proc *Proc) adjustPlug() {
 	if proc.threadingPlugged {
 		proc.unplugThreading()
 	} else {
@@ -117,6 +128,13 @@ func (bal *balancer) count(stat Stat) {
 	if stat == StatSchedule || stat == StatThreading {
 		bal.scheduled++
 	}
+}
+
+func (proc *Proc) needScheduling() bool {
+	if len(proc.fuzzer.concurrentCalls) == 0 {
+		return false
+	}
+	return proc.balancer.needScheduling(proc.rnd)
 }
 
 func (bal balancer) needScheduling(r *rand.Rand) bool {
