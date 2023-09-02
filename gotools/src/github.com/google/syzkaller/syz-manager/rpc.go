@@ -475,6 +475,9 @@ func (serv *RPCServer) SendUsedKnots(a *rpctype.SendUsedKnotsArg, r *int) error 
 			{{Inst: insts[0]}, {Inst: insts[1]}},
 			{{Inst: insts[2]}, {Inst: insts[3]}},
 		}
+		// XXX: corpusInterleaving is not intended to count the number
+		// of used hints. whatever.
+		serv.stats.corpusInterleaving.inc()
 		serv.mgr.recordKnot(knot)
 	}
 	return nil
