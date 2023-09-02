@@ -247,6 +247,7 @@ func RunManager(cfg *mgrconfig.Config) {
 
 	mgr.loadInterleavingCoverage()
 	mgr.openDebuggingFiles()
+	mgr.keepKernelBinary()
 
 	if cfg.DashboardAddr != "" {
 		mgr.dash, err = dashapi.New(cfg.DashboardClient, cfg.DashboardAddr, cfg.DashboardKey)
@@ -743,6 +744,28 @@ func (mgr *Manager) openDebuggingFiles() {
 		panic(err)
 	}
 	mgr.usedKnotFile = f
+}
+
+func (mgr *Manager) keepKernelBinary() {
+	// Keep kernel binaries for the kernel debugging purpose
+	kernelDir := filepath.Join(mgr.cfg.Workdir, fmt.Sprintf("kernel"))
+	osutil.MkdirAll(kernelDir)
+	copyBinary := func(fn0 string) {
+		base := filepath.Base(fn0)
+		fn := fmt.Sprintf("%s-%v",
+			filepath.Join(kernelDir, base),
+			hex.EncodeToString(mgr.kernelHash),
+		)
+		if osutil.IsExist(fn) {
+			return
+		}
+		osutil.CopyFile(fn0, fn)
+	}
+	vmlinux := filepath.Join(mgr.cfg.KernelObj, "vmlinux")
+	copyBinary(vmlinux)
+	// TODO: Use config.vm.kernel
+	bzImage := filepath.Join(mgr.cfg.KernelObj, "arch/x86/boot", "bzImage")
+	copyBinary(bzImage)
 }
 
 func (mgr *Manager) loadCorpus() {
