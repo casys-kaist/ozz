@@ -60,7 +60,7 @@ func (proc *Proc) relieveMemoryPressure() {
 
 func (proc *Proc) investComputingToSchedule() {
 	fuzzerSnapshot := proc.fuzzer.snapshot()
-	for cnt := 0; proc.needScheduling() && cnt < 3; cnt++ {
+	for cnt := 0; proc.needScheduling() && cnt < 5; cnt++ {
 		proc.scheduleInput(fuzzerSnapshot)
 	}
 }
