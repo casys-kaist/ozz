@@ -15,7 +15,7 @@
 
 void *th1(void *_arg) {
   pin(1);
-  hypercall(HCALL_INSTALL_BP, 0xffffffff81c34331, 0, 0);
+  hypercall(HCALL_INSTALL_BP, 0xffffffff81bb0431, 0, 0);
   activate_bp_sync();
   syscall(SYS_SSB_SWITCH);
   syscall(SYS_TSO_THREAD1);
