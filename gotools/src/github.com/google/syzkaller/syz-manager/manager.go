@@ -686,6 +686,9 @@ func (mgr *Manager) preloadCorpus() {
 		// We are testing a fuzzer with a specific bug. It's okay with
 		// one crash
 		*flagOneShot = true
+		// and we don't generate and load corpus
+		*flagGen = false
+		*flagCorpus = false
 	}
 	seedDir := mgr.seedDir(seedType)
 
