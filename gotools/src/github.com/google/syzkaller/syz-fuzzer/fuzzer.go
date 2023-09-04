@@ -754,8 +754,10 @@ func (fuzzer *Fuzzer) removeExhaustedConcurrentCalls() {
 		ln--
 	}
 	fuzzer.corpusMu.Unlock()
-	log.Logf(2, "removed %d concurrent calls", removed)
-	fuzzer.subCollection(CollectionConcurrentCalls, removed)
+	if removed != 0 {
+		log.Logf(2, "removed %d concurrent calls", removed)
+		fuzzer.subCollection(CollectionConcurrentCalls, removed)
+	}
 }
 
 func (fuzzer *Fuzzer) addMaxSignal(sign signal.Signal) {

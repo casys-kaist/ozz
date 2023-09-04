@@ -44,8 +44,11 @@ func (proc *Proc) powerSchedule(adjustPlug bool) {
 }
 
 func (proc *Proc) relieveMemoryPressure() {
-	MonitorMemUsage()
 	needSchedule, needThreading := proc.fuzzer.spillScheduling(), proc.fuzzer.spillThreading()
+	if !needSchedule && !needThreading {
+		return
+	}
+	MonitorMemUsage()
 	fuzzerSnapshot := proc.fuzzer.snapshot()
 	for cnt := 0; (needSchedule || needThreading) && cnt < 10; cnt++ {
 		log.Logf(2, "Relieving memory pressure schedule=%v threading=%v", needSchedule, needThreading)
