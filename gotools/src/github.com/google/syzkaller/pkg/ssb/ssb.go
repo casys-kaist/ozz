@@ -16,6 +16,10 @@ type FlushVector struct {
 	vector []uint32
 }
 
+func (vec FlushVector) Valid() bool {
+	return len(vec.table) == 0 || len(vec.vector) == 0
+}
+
 func (vec *FlushVector) AddTableEntry(inst uint64, value int) {
 	entry := tableEntry{inst: inst, value: value}
 	vec.table = append(vec.table, entry)

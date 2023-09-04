@@ -494,6 +494,9 @@ func (p *parser) parseFlushVector(prog *Prog) error {
 			break
 		}
 	}
+	if !prog.FlushVector.Valid() {
+		return fmt.Errorf("flush vector is not valid %v", prog.FlushVector)
+	}
 	return nil
 }
 
