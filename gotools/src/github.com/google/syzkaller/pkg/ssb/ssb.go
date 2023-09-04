@@ -16,6 +16,15 @@ type FlushVector struct {
 	vector []uint32
 }
 
+func (vec *FlushVector) AddTableEntry(inst uint64, value int) {
+	entry := tableEntry{inst: inst, value: value}
+	vec.table = append(vec.table, entry)
+}
+
+func (vec *FlushVector) AddVectorEntry(v uint32) {
+	vec.vector = append(vec.vector, v)
+}
+
 func (vec FlushVector) SerializeVector() []uint32 {
 	return vec.vector
 }
@@ -50,7 +59,7 @@ func generateFlushVectorForCandidate(cand interleaving.Candidate) FlushVector {
 	}
 	table := []tableEntry{}
 	ht := make(map[uint32]struct{})
-	_add_entry := func (i uint32, v int) {
+	_add_entry := func(i uint32, v int) {
 		if _, ok := ht[i]; ok {
 			return
 		}
