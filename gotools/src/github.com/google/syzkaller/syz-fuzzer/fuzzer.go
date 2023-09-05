@@ -207,7 +207,7 @@ func main() {
 		flagRawCover         = flag.Bool("raw_cover", false, "fetch raw coverage")
 		flagGen              = flag.Bool("gen", true, "generate/mutate inputs")
 		flagShifter          = flag.String("shifter", "./shifter", "path to the shifter")
-		flagRandomReordering = flag.Bool("-random-reordering", false, "")
+		flagRandomReordering = flag.Bool("random-reordering", false, "")
 	)
 	defer tool.Init()()
 	outputType := parseOutputType(*flagOutput)

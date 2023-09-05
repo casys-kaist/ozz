@@ -55,7 +55,7 @@ var (
 	flagNewKernel        = flag.Bool("new-kernel", false, "set true if using a new kernel version")
 	flagDumpCoverage     = flag.Bool("dump-coverage", false, "for experiments. dump both coverages periodically")
 	flagOneShot          = flag.Bool("one-shot", false, "quit after a crash occurs")
-	flagRandomReordering = flag.Bool("-random-reordering", false, "")
+	flagRandomReordering = flag.Bool("random-reordering", false, "")
 )
 
 type Manager struct {
