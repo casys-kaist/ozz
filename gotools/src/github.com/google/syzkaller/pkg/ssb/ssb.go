@@ -41,9 +41,9 @@ func (vec FlushVector) SerializeTable() []uint64 {
 	return r
 }
 
-func GenerateFlushVector(r *rand.Rand, cand interleaving.Candidate) FlushVector {
+func GenerateFlushVector(r *rand.Rand, cand interleaving.Candidate, randomReordering bool) FlushVector {
 	doRandom := func() bool {
-		if r == nil {
+		if r == nil || !randomReordering {
 			return false
 		}
 		// 0.5%

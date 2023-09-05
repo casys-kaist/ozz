@@ -132,6 +132,7 @@ func (proc *Proc) loop() {
 }
 
 func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
+	randomReordering := proc.fuzzer.randomReordering
 	// NOTE: proc.scheduleInput() does not queue additional works, so
 	// executing proc.scheduleInput() does not cause the workqueues
 	// exploding.
@@ -156,7 +157,7 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 		proc.inspectUsedKnots(used)
 
 		p.MutateScheduleFromCandidate(proc.rnd, cand)
-		p.MutateFlushVectorFromCandidate(proc.rnd, cand)
+		p.MutateFlushVectorFromCandidate(proc.rnd, cand, randomReordering)
 		// XXX: For easy debugging the kernel
 		log.Logf(0, "crit comm: %v --> %v", cand.CriticalComm.Former(), cand.CriticalComm.Latter())
 		log.Logf(0, "some inst1: %v", cand.DelayingInst)

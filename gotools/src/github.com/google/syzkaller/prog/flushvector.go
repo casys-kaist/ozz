@@ -7,8 +7,8 @@ import (
 	"github.com/google/syzkaller/pkg/ssb"
 )
 
-func (p *Prog) MutateFlushVectorFromCandidate(r *rand.Rand, cand interleaving.Candidate) {
-	vec := ssb.GenerateFlushVector(r, cand)
+func (p *Prog) MutateFlushVectorFromCandidate(r *rand.Rand, cand interleaving.Candidate, randomReordering bool) {
+	vec := ssb.GenerateFlushVector(r, cand, randomReordering)
 	p.AttachFlushVector(vec)
 }
 

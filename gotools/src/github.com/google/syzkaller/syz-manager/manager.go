@@ -46,15 +46,16 @@ import (
 )
 
 var (
-	flagConfig       = flag.String("config", "", "configuration file")
-	flagDebug        = flag.Bool("debug", false, "dump all VM output to console")
-	flagBench        = flag.String("bench", "", "write execution statistics into this file periodically")
-	flagSeed         = flag.String("seed", "normal", "seed type (normal, threaded-cve, cve, test, reorderings)")
-	flagGen          = flag.Bool("gen", true, "generate/mutate inputs")
-	flagCorpus       = flag.Bool("load-corpus", true, "load corpus")
-	flagNewKernel    = flag.Bool("new-kernel", false, "set true if using a new kernel version")
-	flagDumpCoverage = flag.Bool("dump-coverage", false, "for experiments. dump both coverages periodically")
-	flagOneShot      = flag.Bool("one-shot", false, "quit after a crash occurs")
+	flagConfig           = flag.String("config", "", "configuration file")
+	flagDebug            = flag.Bool("debug", false, "dump all VM output to console")
+	flagBench            = flag.String("bench", "", "write execution statistics into this file periodically")
+	flagSeed             = flag.String("seed", "normal", "seed type (normal, threaded-cve, cve, test, reorderings)")
+	flagGen              = flag.Bool("gen", true, "generate/mutate inputs")
+	flagCorpus           = flag.Bool("load-corpus", true, "load corpus")
+	flagNewKernel        = flag.Bool("new-kernel", false, "set true if using a new kernel version")
+	flagDumpCoverage     = flag.Bool("dump-coverage", false, "for experiments. dump both coverages periodically")
+	flagOneShot          = flag.Bool("one-shot", false, "quit after a crash occurs")
+	flagRandomReordering = flag.Bool("-random-reordering", false, "")
 )
 
 type Manager struct {
@@ -983,22 +984,23 @@ func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Re
 	defer atomic.AddUint32(&mgr.numFuzzing, ^uint32(0))
 
 	args := &instance.FuzzerCmdArgs{
-		Fuzzer:    fuzzerBin,
-		Executor:  executorBin,
-		Name:      instanceName,
-		Shifter:   shifterPath,
-		OS:        mgr.cfg.TargetOS,
-		Arch:      mgr.cfg.TargetArch,
-		FwdAddr:   fwdAddr,
-		Sandbox:   mgr.cfg.Sandbox,
-		Procs:     procs,
-		Verbosity: fuzzerV,
-		Cover:     mgr.cfg.Cover,
-		Debug:     *flagDebug,
-		Test:      false,
-		Runtest:   false,
-		Generate:  *flagGen,
-		Pinning:   true,
+		Fuzzer:           fuzzerBin,
+		Executor:         executorBin,
+		Name:             instanceName,
+		Shifter:          shifterPath,
+		OS:               mgr.cfg.TargetOS,
+		Arch:             mgr.cfg.TargetArch,
+		FwdAddr:          fwdAddr,
+		Sandbox:          mgr.cfg.Sandbox,
+		Procs:            procs,
+		Verbosity:        fuzzerV,
+		Cover:            mgr.cfg.Cover,
+		Debug:            *flagDebug,
+		Test:             false,
+		Runtest:          false,
+		Generate:         *flagGen,
+		Pinning:          true,
+		RandomReordering: *flagRandomReordering,
 		Optional: &instance.OptionalFuzzerArgs{
 			Slowdown:   mgr.cfg.Timeouts.Slowdown,
 			RawCover:   mgr.cfg.RawCover,

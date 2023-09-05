@@ -451,23 +451,24 @@ type OptionalFuzzerArgs struct {
 }
 
 type FuzzerCmdArgs struct {
-	Fuzzer    string
-	Executor  string
-	Name      string
-	Shifter   string
-	OS        string
-	Arch      string
-	FwdAddr   string
-	Sandbox   string
-	Procs     int
-	Verbosity int
-	Cover     bool
-	Debug     bool
-	Test      bool
-	Runtest   bool
-	Generate  bool
-	Pinning   bool
-	Optional  *OptionalFuzzerArgs
+	Fuzzer           string
+	Executor         string
+	Name             string
+	Shifter          string
+	OS               string
+	Arch             string
+	FwdAddr          string
+	Sandbox          string
+	Procs            int
+	Verbosity        int
+	Cover            bool
+	Debug            bool
+	Test             bool
+	Runtest          bool
+	Generate         bool
+	Pinning          bool
+	RandomReordering bool
+	Optional         *OptionalFuzzerArgs
 }
 
 func FuzzerCmd(args *FuzzerCmdArgs) string {
@@ -502,9 +503,10 @@ func FuzzerCmd(args *FuzzerCmdArgs) string {
 	// Monitor memory usage if debug mode
 	monitor := args.Debug
 	return fmt.Sprintf("%v %v -executor=%v -shifter=%v -name=%v -arch=%v%v -manager=%v -sandbox=%v"+
-		" -procs=%v -cover=%v -debug=%v -test=%v%v%v%v -gen=%v -monitor-memory-usage=%v",
+		" -procs=%v -cover=%v -debug=%v -test=%v%v%v%v -gen=%v -monitor-memory-usage=%v -random-reordering=%v",
 		taskset, args.Fuzzer, args.Executor, args.Shifter, args.Name, args.Arch, osArg, args.FwdAddr, args.Sandbox,
-		args.Procs, args.Cover, args.Debug, args.Test, runtestArg, verbosityArg, optionalArg, args.Generate, monitor)
+		args.Procs, args.Cover, args.Debug, args.Test, runtestArg, verbosityArg, optionalArg, args.Generate, monitor,
+		args.RandomReordering)
 }
 
 func OldFuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox string, sandboxArg, procs int,
