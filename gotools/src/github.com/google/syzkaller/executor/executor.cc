@@ -154,14 +154,6 @@ static void receive_handshake();
 static void reply_handshake();
 #endif
 
-#define turn_onoff_kssb_switch()                    \
-	do {                                        \
-		if (syscall(kSSBSwitch))            \
-			fail("kssb switch failed"); \
-	} while (0)
-#define turn_on_kssb_switch turn_onoff_kssb_switch
-#define turn_off_kssb_switch turn_onoff_kssb_switch
-
 #if SYZ_EXECUTOR_USES_SHMEM
 // The output region is the only thing in executor process for which consistency matters.
 // If it is corrupted ipc package will fail to parse its contents and panic.
@@ -175,8 +167,10 @@ const uint64 kOutputBase = 0x1b2bc20000ull;
 // Allocating (and forking) virtual memory for each executed process is expensive, so we only mmap
 // the amount we might possibly need for the specific received prog.
 const int kMaxOutputComparisons = 14 << 20; // executions with comparsions enabled are usually < 1% of all executions
-const int kMaxOutputCoverage = 6 << 20; // coverage is needed in ~ up to 1/3 of all executions (depending on corpus rotation)
-const int kMaxOutputSignal = 4 << 20;
+// XXX: memcov consumes more memory, so we increase the the amount of
+// memory.
+const int kMaxOutputCoverage = 6 << 20 << 2; // coverage is needed in ~ up to 1/3 of all executions (depending on corpus rotation)
+const int kMaxOutputSignal = 4 << 20 << 2;
 const int kMinOutput = 256 << 10; // if we don't need to send signal, the output is rather short.
 const int kInitialOutput = kMinOutput; // the minimal size to be allocated in the parent process
 #else
@@ -225,6 +219,8 @@ static bool flag_collect_signal;
 static bool flag_dedup_cover;
 static bool flag_threaded;
 static bool flag_coverage_filter;
+
+static bool flag_turn_on_kssb;
 
 // If true, then executor should write the comparisons data to fuzzer.
 static bool flag_comparisons;
@@ -448,6 +444,12 @@ struct feature_t {
 	void (*setup)();
 };
 
+struct kssb_flush_table_entry {
+	unsigned long inst;
+	int value;
+	void *pad1, *pad2;
+};
+
 static thread_t* get_thread(int thread);
 static void prepare_thread(thread_t* th, int call_index, int call_num, uint64 copyout_index, uint64 num_args, uint64* args, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos, call_props_t call_props);
 static thread_t* schedule_call(int call_index, int call_num, uint64 copyout_index, uint64 num_args, uint64* args, uint64 thread, uint64 epoch, uint64 num_sched, schedule_t* sched, uint64* pos, call_props_t call_props);
@@ -478,7 +480,18 @@ static void setup_features(char** enable, int n);
 static void setup_affinity_mask(int mask);
 static bool __run_in_epoch(uint32 epoch, uint32 global);
 static bool run_in_epoch(thread_t* th);
-static void feed_flush_vector(int* vector, int size);
+static void feed_flush_vector(int* vector, int vector_size, struct kssb_flush_table_entry* table, int table_size);
+
+#define turn_onoff_kssb_switch()                            \
+	do {                                                \
+		if (flag_turn_on_kssb) {                    \
+			if (syscall(kSSBSwitch))            \
+				fail("kssb switch failed"); \
+		}                                           \
+	} while (0)
+
+#define turn_on_kssb_switch turn_onoff_kssb_switch
+#define turn_off_kssb_switch turn_onoff_kssb_switch
 
 #include "syscalls.h"
 
@@ -775,12 +788,16 @@ void receive_execute()
 	// NOTE: We always enable flag_threaded
 	flag_threaded = true;
 	flag_coverage_filter = req.exec_flags & (1 << 5);
+	flag_turn_on_kssb = req.exec_flags & (1 << 10);
+	if (flag_turn_on_kssb)
+		// Enabling kssb makes syscalls about 10x slower.
+		slowdown_scale *= 10;
 
 	debug("[%llums] exec opts: procid=%llu threaded=%d cover=%d comps=%d dedup=%d signal=%d"
-	      " timeouts=%llu/%llu/%llu prog=%llu filter=%d\n",
+	      " timeouts=%llu/%llu/%llu prog=%llu filter=%d kssb=%d\n",
 	      current_time_ms() - start_time_ms, procid, flag_threaded, flag_collect_cover,
 	      flag_comparisons, flag_dedup_cover, flag_collect_signal, syscall_timeout_ms,
-	      program_timeout_ms, slowdown_scale, req.prog_size, flag_coverage_filter);
+	      program_timeout_ms, slowdown_scale, req.prog_size, flag_coverage_filter, flag_turn_on_kssb);
 	if (syscall_timeout_ms == 0 || program_timeout_ms <= syscall_timeout_ms || slowdown_scale == 0)
 		failmsg("bad timeouts", "syscall=%llu, program=%llu, scale=%llu",
 			syscall_timeout_ms, program_timeout_ms, slowdown_scale);
@@ -984,11 +1001,14 @@ void execute_one()
 	uint64 prog_extra_cover_timeout = 0;
 	call_props_t call_props;
 	memset(&call_props, 0, sizeof(call_props));
-	int filter_size, vector_size;
+	int filter_size, vector_size, table_size;
 	int filter[kMaxSchedule] = {
 	    0,
 	};
 	int vector[kMaxVector] = {
+	    0,
+	};
+	struct kssb_flush_table_entry table[kMaxVector] = {
 	    0,
 	};
 
@@ -1005,7 +1025,13 @@ void execute_one()
 	vector_size = (int)read_input(&input_pos);
 	for (int i = 0; i < vector_size; i++)
 		vector[i] = (int)read_input(&input_pos);
-	feed_flush_vector(vector, vector_size);
+	table_size = (int)read_input(&input_pos) / 2;
+	for (int i = 0; i < table_size; i++) {
+		unsigned long inst = read_input(&input_pos);
+		int value = read_input(&input_pos);
+		table[i] = {.inst = inst, .value = value};
+	}
+	feed_flush_vector(vector, vector_size, table, table_size);
 
 	for (;;) {
 		uint64 call_num = read_input(&input_pos);
@@ -1206,17 +1232,32 @@ void execute_one()
 	}
 }
 
-void feed_flush_vector(int* vector, int size)
+void feed_flush_vector(int* vector, int vector_size, struct kssb_flush_table_entry* table, int table_size)
 {
+	// XXX: Not sure we don't have to do this
+	if (vector_size == 0 && table_size != 0) {
+		vector_size = 1;
+		vector[0] = 1;
+	}
 #define SYS_FEEDINPUT 500
-	debug("flush vector: %d [", size);
-	for (int i = 0; i < size; i++) {
+#define DEBUG_FLUSH_VECTOR
+#ifdef DEBUG_FLUSH_VECTOR
+	debug("vector: %d [", vector_size);
+	for (int i = 0; i < vector_size; i++) {
 		if (i != 0)
 			debug_noprefix(", ");
 		debug_noprefix("%d", vector[i]);
 	}
 	debug_noprefix("]\n");
-	if (syscall(SYS_FEEDINPUT, vector, size))
+	debug("table: %d [", table_size);
+	for (int i = 0; i < table_size; i++) {
+		if (i != 0)
+			debug_noprefix(", ");
+		debug_noprefix("%lx: %d", table[i].inst, table[i].value);
+	}
+	debug_noprefix("]\n");
+#endif
+	if (syscall(SYS_FEEDINPUT, vector, vector_size, table, table_size))
 		fail("feedinput failed");
 }
 
@@ -1596,6 +1637,7 @@ void write_extra_output()
 void thread_create(thread_t* th, int id, bool need_coverage)
 {
 	debug("creating a thread %d (need_coverage: %d)\n", id, need_coverage);
+	disable_kssb();
 	th->created = true;
 	th->id = id;
 	th->executing = false;
@@ -1613,6 +1655,7 @@ void thread_create(thread_t* th, int id, bool need_coverage)
 	event_set(&th->done);
 	if (flag_threaded)
 		thread_start(worker_thread, th);
+	enable_kssb();
 }
 
 void thread_mmap_cover(cover_t* cov)
@@ -1703,7 +1746,7 @@ void execute_call(thread_t* th)
 	if (th->res == (intptr_t)-1)
 		debug_noprefix(" errno=%d", th->reserrno);
 	if (flag_coverage)
-		debug_noprefix("cover=%u rfcov=%u", th->cov.size, th->rfcov.size);
+		debug_noprefix(" cover=%u rfcov=%u", th->cov.size, th->rfcov.size);
 	if (th->call_props.fail_nth > 0)
 		debug_noprefix(" fault=%d", th->fault_injected);
 	if (th->call_props.rerun > 0)

@@ -20,7 +20,7 @@ static void __init_itimerspec(struct itimerspec *its)
 {
     memset(&its->it_interval, 0, sizeof(its->it_interval));
     its->it_value =
-        (struct timespec){.tv_sec = 0, .tv_nsec = 200 * 1000 * 1000};
+        (struct timespec){.tv_sec = 0, .tv_nsec = 350 * 1000 * 1000};
 }
 
 void qcsched_arm_selfescape_timer(CPUState *cpu)

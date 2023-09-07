@@ -22,15 +22,36 @@ void blocker_kidnap_task(CPUState *cpu)
 {
     struct qcsched_blocker_info *blocker = get_blocker_info(cpu);
     blocker->blocked = true;
+    blocker->waking_up = false;
 }
 
 void blocker_resume_task(CPUState *cpu)
 {
     struct qcsched_blocker_info *blocker = get_blocker_info(cpu);
     blocker->blocked = false;
+    blocker->waking_up = false;
+    cpu->qcsched_force_wakeup = false;
+    // XXX: As with trampoline_resume_task(), I reset info->kicked
+    // without knowing that this is correct.
+    struct qcsched_exec_info *info = (struct qcsched_exec_info *)blocker;
+    info->kicked = false;
 }
 
 void blocker_wake_cpu_up(CPUState *cpu, CPUState *wakeup)
 {
-    blocker_resume_task(wakeup);
+    struct qcsched_blocker_info *blocker = get_blocker_info(wakeup);
+    blocker->waking_up = true;
+}
+
+bool blocker_want_to_wake_up(CPUState *cpu)
+{
+    struct qcsched_blocker_info *blocker = get_blocker_info(cpu);
+    return blocker->waking_up;
+}
+
+void blocker_reset(CPUState *cpu)
+{
+    struct qcsched_blocker_info *blocker = get_blocker_info(cpu);
+    blocker->waking_up = false;
+    blocker->blocked = false;
 }

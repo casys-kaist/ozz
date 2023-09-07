@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -397,6 +398,9 @@ func (p *parser) postProcess(prog *Prog) error {
 	if err := p.inspectThreaded(prog); err != nil {
 		return err
 	}
+	if err := p.parseFlushVector(prog); err != nil {
+		return err
+	}
 	if err := prog.sanitizeRazzer(); err != nil {
 		return err
 	}
@@ -468,6 +472,67 @@ func (p *parser) parseSchedule(prog *Prog) error {
 	}
 	prog.Schedule = s
 	prog.Comments = new
+	return nil
+}
+
+func (p *parser) parseFlushVector(prog *Prog) error {
+	re := regexp.MustCompile(`\[[0-9{}\s]*\]`)
+	for _, comment := range prog.Comments {
+		const str = "flush vector:"
+		if strings.HasPrefix(comment, str) {
+			vector := comment[len(str):]
+			arrs := re.FindAll([]byte(vector), -1)
+			if arrs == nil || len(arrs) != 2 {
+				return fmt.Errorf("invalid flush vector: %v", vector)
+			}
+			if err := p.parseFlushTable(prog, arrs[0]); err != nil {
+				return fmt.Errorf("failed to parse flush table: %v", err)
+			}
+			if err := p.parseFlushVectorVector(prog, arrs[1]); err != nil {
+				return fmt.Errorf("failed to parse flush vector: %v", err)
+			}
+			break
+		}
+	}
+	if !prog.FlushVector.Valid() {
+		return fmt.Errorf("flush vector is not valid %v", prog.FlushVector)
+	}
+	return nil
+}
+
+func (p *parser) parseFlushTable(prog *Prog, rawTable []byte) error {
+	re := regexp.MustCompile(`{[0-9\s]*}`)
+	entries := re.FindAll(rawTable, -1)
+	for _, entry := range entries {
+		// trim {,}
+		entry = entry[1 : len(entry)-1]
+		toks := strings.Fields(string(entry))
+		if len(toks) != 2 {
+			return fmt.Errorf("invalid table entry: %v", entry)
+		}
+		addr, err := strconv.ParseUint(toks[0], 0, 64)
+		if err != nil {
+			return fmt.Errorf("failed to parse a number: %v", entry)
+		}
+		val, err := strconv.ParseUint(toks[1], 0, 64)
+		if err != nil {
+			return fmt.Errorf("failed to parse a number: %v", entry)
+		}
+		prog.AddTableEntry(addr, int(val))
+	}
+	return nil
+}
+
+func (p *parser) parseFlushVectorVector(prog *Prog, rawVector []byte) error {
+	rawVector = rawVector[1 : len(rawVector)-1]
+	toks := strings.Fields(string(rawVector))
+	for _, tok := range toks {
+		v, err := strconv.ParseUint(tok, 0, 64)
+		if err != nil {
+			return fmt.Errorf("failed to parse a number: %v", rawVector)
+		}
+		prog.AddVectorEntry(uint32(v))
+	}
 	return nil
 }
 

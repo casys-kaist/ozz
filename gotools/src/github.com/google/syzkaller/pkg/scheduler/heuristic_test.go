@@ -71,7 +71,7 @@ func TestChunknize(t *testing.T) {
 	}
 }
 
-func TestComputePotentialBuggyKnotsPSO(t *testing.T) {
+func TestComputeCandidatePSO(t *testing.T) {
 	pso_tests := []T{
 		{
 			filename: "pso_test",
@@ -86,10 +86,10 @@ func TestComputePotentialBuggyKnotsPSO(t *testing.T) {
 				{{Inst: 0x81ad9a84, Size: 4, Typ: interleaving.TypeStore, Timestamp: 102}, {Inst: 0x81f82be8, Size: 4, Typ: interleaving.TypeLoad, Thread: 1, Timestamp: 191}}},
 		},
 	}
-	testComputePotentialBuggyKnots(t, pso_tests, "PSO")
+	testComputeCandidate(t, pso_tests, "PSO")
 }
 
-func TestComputePotentialBuggyKnotsTSO(t *testing.T) {
+func TestComputeCandidateTSO(t *testing.T) {
 	tso_tests := []T{
 		{
 			filename: "tso_test",
@@ -99,13 +99,13 @@ func TestComputePotentialBuggyKnotsTSO(t *testing.T) {
 			},
 		},
 	}
-	testComputePotentialBuggyKnots(t, tso_tests, "TSO")
+	testComputeCandidate(t, tso_tests, "TSO")
 }
 
-func testComputePotentialBuggyKnots(t *testing.T, tests []T, model string) {
+func testComputeCandidate(t *testing.T, tests []T, model string) {
 	for _, test := range tests {
 		seq := loadTestdata(t, []string{test.filename}, nil)[0]
-		res := ComputePotentialBuggyKnots(seq[:])
+		res := ComputeCandidate(seq[:])
 		knots := []interleaving.Knot{}
 		for _, knot0 := range res {
 			knots = append(knots, knot0.(interleaving.Knot))

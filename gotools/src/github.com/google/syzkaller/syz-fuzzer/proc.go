@@ -5,7 +5,6 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"math/rand"
 	"runtime/debug"
 	"sync/atomic"
@@ -19,7 +18,6 @@ import (
 	"github.com/google/syzkaller/pkg/rpctype"
 	"github.com/google/syzkaller/pkg/scheduler"
 	"github.com/google/syzkaller/pkg/signal"
-	"github.com/google/syzkaller/pkg/ssb"
 	"github.com/google/syzkaller/prog"
 )
 
@@ -32,7 +30,6 @@ type Proc struct {
 	execOpts        *ipc.ExecOpts
 	execOptsCollide *ipc.ExecOpts
 	execOptsCover   *ipc.ExecOpts
-	execOptsComps   *ipc.ExecOpts
 
 	knotterOptsPreThreading scheduler.KnotterOpts
 	knotterOptsThreading    scheduler.KnotterOpts
@@ -41,8 +38,7 @@ type Proc struct {
 	// To give a half of computing power for scheduling. We don't use
 	// proc.fuzzer.Stats and proc.env.StatExec as it is periodically
 	// set to 0.
-	executed  uint64
-	scheduled uint64
+	balancer balancer
 	// If scheduled is too large, we block Proc.pickupThreadingWorks()
 	// to give more chance to sequential-fuzzing.
 	threadingPlugged bool
@@ -55,11 +51,11 @@ func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
 	}
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano() + int64(pid)*1e12))
 	execOptsCollide := *fuzzer.execOpts
+	execOptsCollide.Flags |= ipc.FlagCollectCover
 	execOptsCollide.Flags &= ^ipc.FlagCollectSignal
+	execOptsCollide.Flags |= ipc.FlagTurnOnKSSB
 	execOptsCover := *fuzzer.execOpts
 	execOptsCover.Flags |= ipc.FlagCollectCover
-	execOptsComps := *fuzzer.execOpts
-	execOptsComps.Flags |= ipc.FlagCollectComps
 
 	defaultKnotterOpts := scheduler.KnotterOpts{
 		Signal: &fuzzer.maxInterleaving,
@@ -79,8 +75,8 @@ func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
 		env:                     env,
 		rnd:                     rnd,
 		execOpts:                fuzzer.execOpts,
+		execOptsCollide:         &execOptsCollide,
 		execOptsCover:           &execOptsCover,
-		execOptsComps:           &execOptsComps,
 		knotterOptsPreThreading: knotterOptsPreThreading,
 		knotterOptsThreading:    knotterOptsThreading,
 		knotterOptsSchedule:     knotterOptsSchedule,
@@ -96,11 +92,7 @@ func (proc *Proc) loop() {
 		generatePeriod = 2
 	}
 	for i := 0; ; i++ {
-		proc.relieveMemoryPressure()
-		if i%100 == 0 {
-			log.Logf(3, "executed=%v scheduled=%v", proc.executed, proc.scheduled)
-			proc.powerSchedule()
-		}
+		proc.powerSchedule(i%100 == 0)
 
 		item := proc.fuzzer.workQueue.dequeue()
 		if item != nil {
@@ -139,21 +131,8 @@ func (proc *Proc) loop() {
 	}
 }
 
-func (proc *Proc) needScheduling() bool {
-	if len(proc.fuzzer.candidates) == 0 {
-		return false
-	}
-
-	// prob = 1 / (1 + exp(-25 * (-x + 0.25))) where x = (scheduled/executed)
-	x := float64(proc.scheduled) / float64(proc.executed)
-	prob1000 := int(1 / (1 + math.Exp(-30*(-1*x+0.25))) * 1000)
-	if prob1000 < 50 {
-		prob1000 = 50
-	}
-	return prob1000 >= proc.rnd.Intn(1000)
-}
-
 func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
+	randomReordering := proc.fuzzer.randomReordering
 	// NOTE: proc.scheduleInput() does not queue additional works, so
 	// executing proc.scheduleInput() does not cause the workqueues
 	// exploding.
@@ -164,25 +143,36 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 		}
 		p, hint := tp.P.Clone(), proc.pruneHint(tp.Hint)
 
-		ok, used, remaining := p.MutateScheduleFromHint(proc.rnd, hint)
-		proc.setHint(tp, remaining)
+		cand, used, remaining := scheduler.GenerateCandidates(proc.rnd, hint)
 		// We exclude used knots from tp.Hint even if the schedule
 		// mutation fails.
-		if !ok {
+		proc.setHint(tp, remaining)
+		if !canSchedule(p, cand) {
+			// TODO: We may want to generate random scheduling points
 			continue
 		}
+		// NOTE: This may not be necessary, but as we are exploring
+		// new research problems, we wanna know what knots are used
+		// and understand how the fuzzer can be improved futher.
+		proc.inspectUsedKnots(used)
 
-		flushVector := ssb.GenerateFlushVector(proc.rnd, used)
-		p.AttachFlushVector(flushVector)
-
-		proc.countUsedInstructions(used)
+		p.MutateScheduleFromCandidate(proc.rnd, cand)
+		p.MutateFlushVectorFromCandidate(proc.rnd, cand, randomReordering)
+		// XXX: For easy debugging the kernel
+		log.Logf(0, "crit comm: %v --> %v", cand.CriticalComm.Former(), cand.CriticalComm.Latter())
+		log.Logf(0, "some inst1: %v", cand.DelayingInst)
+		log.Logf(0, "some inst2: %v", cand.SomeInst)
 
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
-		proc.execute(proc.execOpts, p, ProgNormal, StatSchedule)
+		proc.execute(proc.execOptsCollide, p, ProgNormal, StatSchedule)
 		if !proc.needScheduling() {
 			break
 		}
 	}
+}
+
+func canSchedule(p *prog.Prog, cand interleaving.Candidate) bool {
+	return len(p.Contenders()) == 2 && !cand.Invalid()
 }
 
 func (proc *Proc) pruneHint(hint []interleaving.Segment) []interleaving.Segment {
@@ -196,7 +186,7 @@ func (proc *Proc) pruneHint(hint []interleaving.Segment) []interleaving.Segment 
 	return pruned
 }
 
-func (proc *Proc) setHint(tp *prog.Candidate, remaining []interleaving.Segment) {
+func (proc *Proc) setHint(tp *prog.ConcurrentCalls, remaining []interleaving.Segment) {
 	debugHint(tp, remaining)
 	used := len(tp.Hint) - len(remaining)
 	proc.fuzzer.subCollection(CollectionScheduleHint, uint64(used))
@@ -205,9 +195,20 @@ func (proc *Proc) setHint(tp *prog.Candidate, remaining []interleaving.Segment) 
 	tp.Hint = remaining
 }
 
+func (proc *Proc) inspectUsedKnots(used []interleaving.Segment) {
+	proc.sendUsedKnots(used)
+	proc.countUsedInstructions(used)
+}
+
+func (proc *Proc) sendUsedKnots(used []interleaving.Segment) {
+	// XXX: This may degrade the runtime performance as it keeps
+	// invoking RPC calls. Not sure we want to keep this.
+	proc.fuzzer.sendUsedKnots(used)
+}
+
 func (proc *Proc) countUsedInstructions(used []interleaving.Segment) {
-	proc.fuzzer.signalMu.RLock()
-	defer proc.fuzzer.signalMu.RUnlock()
+	proc.fuzzer.signalMu.Lock()
+	defer proc.fuzzer.signalMu.Unlock()
 	for _, _knot := range used {
 		knot := _knot.(interleaving.Knot)
 		proc.fuzzer.countInstructionInKnot(knot)
@@ -330,9 +331,6 @@ func (proc *Proc) smashInput(item *WorkSmash) {
 	if proc.fuzzer.faultInjectionEnabled && item.call != -1 {
 		proc.failCall(item.p, item.call)
 	}
-	if proc.fuzzer.comparisonTracingEnabled && item.call != -1 {
-		proc.executeHintSeed(item.p, item.call)
-	}
 	fuzzerSnapshot := proc.fuzzer.snapshot()
 	for i := 0; i < 30; i++ {
 		p := item.p.Clone()
@@ -370,9 +368,14 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 }
 
 func (proc *Proc) executeThreading(p *prog.Prog) []interleaving.Segment {
-	inf := proc.executeRaw(proc.execOpts, p, StatThreading)
-	seq := proc.sequentialAccesses(inf, p.Contender)
-	return scheduler.ComputePotentialBuggyKnots(seq)
+	hints := []interleaving.Segment{}
+	for i := 0; i < 2; i++ {
+		inf := proc.executeRaw(proc.execOpts, p, StatThreading)
+		seq := proc.sequentialAccesses(inf, p.Contender)
+		hints = append(hints, scheduler.ComputeHints(seq)...)
+		p.Reverse()
+	}
+	return hints
 }
 
 func (proc *Proc) failCall(p *prog.Prog, call int) {
@@ -385,23 +388,6 @@ func (proc *Proc) failCall(p *prog.Prog, call int) {
 			break
 		}
 	}
-}
-
-func (proc *Proc) executeHintSeed(p *prog.Prog, call int) {
-	log.Logf(1, "#%v: collecting comparisons", proc.pid)
-	// First execute the original program to dump comparisons from KCOV.
-	info := proc.execute(proc.execOptsComps, p, ProgNormal, StatSeed)
-	if info == nil {
-		return
-	}
-
-	// Then mutate the initial program for every match between
-	// a syscall argument and a comparison operand.
-	// Execute each of such mutants to check if it gives new coverage.
-	p.MutateWithHints(call, info.Calls[call].Comps, func(p *prog.Prog) {
-		log.Logf(1, "#%v: executing comparison hint", proc.pid)
-		proc.execute(proc.execOpts, p, ProgNormal, StatHint)
-	})
 }
 
 func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes, stat Stat) (info *ipc.ProgInfo) {
@@ -441,23 +427,24 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 		return
 	}
 
-	maxIntermediateCalls := 10
-	intermediateCalls := func(c1, c2 int) int {
-		return c2 - c1 - 1
+	notTooFar := func(c1, c2 int) bool {
+		maxIntermediateCalls := 5
+		dist := (c2 - c1 - 1)
+		return dist < maxIntermediateCalls
 	}
 	for c1 := 0; c1 < len(p.Calls); c1++ {
-		for c2 := c1 + 1; c2 < len(p.Calls) && intermediateCalls(c1, c2) < maxIntermediateCalls; c2++ {
+		for c2 := c1 + 1; c2 < len(p.Calls) && notTooFar(c1, c2); c2++ {
 			if proc.fuzzer.shutOffThreading(p) {
 				return
 			}
-
 			cont := prog.Contender{Calls: []int{c1, c2}}
-			knots, comms := proc.extractKnotsAndComms(info, cont, proc.knotterOptsPreThreading)
-			if len(knots) == 0 && len(comms) == 0 {
+			seq := proc.sequentialAccesses(info, cont)
+			hints := scheduler.ComputeHints0(seq)
+			if len(hints) == 0 {
 				continue
 			}
-			if newKnots, newComms := proc.fuzzer.getNewKnot(knots), proc.fuzzer.getNewCommunication(comms); len(newKnots) != 0 || len(newComms) != 0 {
-				proc.enqueueThreading(p, cont, newKnots)
+			if newHints := proc.fuzzer.getNewKnot(hints); len(newHints) != 0 {
+				proc.enqueueThreading(p, cont, newHints)
 			}
 		}
 	}
@@ -489,21 +476,21 @@ func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.Pro
 	return info
 }
 
-func (proc *Proc) extractKnotsAndComms(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) ([]interleaving.Segment, []interleaving.Segment) {
+func (proc *Proc) extractHints(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) []interleaving.Segment {
 	knotter := scheduler.GetKnotter(opts)
 
 	seq := proc.sequentialAccesses(info, calls)
 	if !knotter.AddSequentialTrace(seq) {
-		return nil, nil
+		return nil
 	}
 	knotter.ExcavateKnots()
 
-	return knotter.GetKnots(), knotter.GetCommunications()
+	return knotter.GetKnots()
 }
 
 func (proc *Proc) extractKnots(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) []interleaving.Segment {
-	knots, _ := proc.extractKnotsAndComms(info, calls, opts)
-	return knots
+	// TODO: IMPLEMENT
+	return nil
 }
 
 func (proc *Proc) sequentialAccesses(info *ipc.ProgInfo, calls prog.Contender) (seq []interleaving.SerialAccess) {
@@ -531,6 +518,12 @@ func (proc *Proc) sequentialAccesses(info *ipc.ProgInfo, calls prog.Contender) (
 }
 
 func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int, info ipc.CallInfo) {
+	if !proc.fuzzer.generate {
+		// XXX: fuzzer.generate is mostly for debugging, and if we
+		// turn off generate, triage is also pretty meaningless.
+		return
+	}
+
 	// info.Signal points to the output shmem region, detach it before queueing.
 	info.Signal = append([]uint32{}, info.Signal...)
 	// None of the caller use Cover, so just nil it instead of detaching.
@@ -546,15 +539,8 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 
 func (proc *Proc) executeAndCollide(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes, stat Stat) {
 	proc.execute(execOpts, p, flags, stat)
-
-	if proc.execOptsCollide.Flags&ipc.FlagThreaded == 0 {
-		// We cannot collide syscalls without being in the threaded mode.
-		return
-	}
-	const collideIterations = 2
-	for i := 0; i < collideIterations; i++ {
-		proc.executeRaw(proc.execOptsCollide, proc.randomCollide(p), StatCollide)
-	}
+	// We do not want to run programs in the collide mode
+	return
 }
 
 func (proc *Proc) randomCollide(origP *prog.Prog) *prog.Prog {
@@ -582,10 +568,7 @@ func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, knots []i
 }
 
 func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.ProgInfo {
-	proc.executed++
-	if stat == StatSchedule || stat == StatThreading {
-		proc.scheduled++
-	}
+	proc.balancer.count(stat)
 	proc.fuzzer.checkDisabledCalls(p)
 
 	// Limit concurrency window and do leak checking once in a while.
@@ -616,7 +599,6 @@ func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.P
 		proc.shiftAccesses(info)
 
 		retry := needRetry(p, info)
-		proc.logResult(p, info, hanged, retry)
 		log.Logf(2, "result hanged=%v retry=%v: %s", hanged, retry, output)
 		if retry {
 			filter := buildScheduleFilter(p, info)

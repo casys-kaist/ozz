@@ -62,7 +62,7 @@ void *read_thread(void *arg) {
 void *ketctl_set_timeout_thread(void *arg) {
   pin(1);
 
-  hypercall(HCALL_INSTALL_BP, 0xffffffff81ad9364, 0, 0);
+  hypercall(HCALL_INSTALL_BP, 0xffffffff81c3a6d4, 0, 0);
 
   activate_bp_sync();
 

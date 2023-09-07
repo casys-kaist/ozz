@@ -46,15 +46,16 @@ import (
 )
 
 var (
-	flagConfig       = flag.String("config", "", "configuration file")
-	flagDebug        = flag.Bool("debug", false, "dump all VM output to console")
-	flagBench        = flag.String("bench", "", "write execution statistics into this file periodically")
-	flagSeed         = flag.String("seed", "normal", "seed type (normal, threaded-cve, cve, test, reorderings)")
-	flagGen          = flag.Bool("gen", true, "generate/mutate inputs")
-	flagCorpus       = flag.Bool("load-corpus", true, "load corpus")
-	flagNewKernel    = flag.Bool("new-kernel", false, "set true if using a new kernel version")
-	flagDumpCoverage = flag.Bool("dump-coverage", false, "for experiments. dump both coverages periodically")
-	flagOneShot      = flag.Bool("one-shot", false, "quit after a crash occurs")
+	flagConfig           = flag.String("config", "", "configuration file")
+	flagDebug            = flag.Bool("debug", false, "dump all VM output to console")
+	flagBench            = flag.String("bench", "", "write execution statistics into this file periodically")
+	flagSeed             = flag.String("seed", "normal", "seed type (normal, threaded-cve, cve, test, reorderings)")
+	flagGen              = flag.Bool("gen", true, "generate/mutate inputs")
+	flagCorpus           = flag.Bool("load-corpus", true, "load corpus")
+	flagNewKernel        = flag.Bool("new-kernel", false, "set true if using a new kernel version")
+	flagDumpCoverage     = flag.Bool("dump-coverage", false, "for experiments. dump both coverages periodically")
+	flagOneShot          = flag.Bool("one-shot", false, "quit after a crash occurs")
+	flagRandomReordering = flag.Bool("random-reordering", false, "")
 )
 
 type Manager struct {
@@ -117,6 +118,7 @@ type Manager struct {
 	modulesInitialized bool
 
 	assetStorage *asset.Storage
+	usedKnotFile *os.File
 }
 
 type CorpusItemUpdate struct {
@@ -245,6 +247,8 @@ func RunManager(cfg *mgrconfig.Config) {
 	}
 
 	mgr.loadInterleavingCoverage()
+	mgr.openDebuggingFiles()
+	mgr.keepKernelBinary()
 
 	if cfg.DashboardAddr != "" {
 		mgr.dash, err = dashapi.New(cfg.DashboardClient, cfg.DashboardAddr, cfg.DashboardKey)
@@ -683,6 +687,9 @@ func (mgr *Manager) preloadCorpus() {
 		// We are testing a fuzzer with a specific bug. It's okay with
 		// one crash
 		*flagOneShot = true
+		// and we don't generate and load corpus
+		*flagGen = false
+		*flagCorpus = false
 	}
 	seedDir := mgr.seedDir(seedType)
 
@@ -728,6 +735,38 @@ func (mgr *Manager) loadInterleavingCoverage() {
 	}
 	mgr.interleavingCovPath = fn
 	mgr.interleavingCovFile = f
+}
+
+func (mgr *Manager) openDebuggingFiles() {
+	// XXX: Piggybacking here. Need to
+	fn := filepath.Join(mgr.cfg.Workdir, fmt.Sprintf("used_knots"))
+	f, err := os.OpenFile(fn, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		panic(err)
+	}
+	mgr.usedKnotFile = f
+}
+
+func (mgr *Manager) keepKernelBinary() {
+	// Keep kernel binaries for the kernel debugging purpose
+	kernelDir := filepath.Join(mgr.cfg.Workdir, fmt.Sprintf("kernel"))
+	osutil.MkdirAll(kernelDir)
+	copyBinary := func(fn0 string) {
+		base := filepath.Base(fn0)
+		fn := fmt.Sprintf("%s-%v",
+			filepath.Join(kernelDir, base),
+			hex.EncodeToString(mgr.kernelHash),
+		)
+		if osutil.IsExist(fn) {
+			return
+		}
+		osutil.CopyFile(fn0, fn)
+	}
+	vmlinux := filepath.Join(mgr.cfg.KernelObj, "vmlinux")
+	copyBinary(vmlinux)
+	// TODO: Use config.vm.kernel
+	bzImage := filepath.Join(mgr.cfg.KernelObj, "arch/x86/boot", "bzImage")
+	copyBinary(bzImage)
 }
 
 func (mgr *Manager) loadCorpus() {
@@ -942,22 +981,23 @@ func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Re
 	defer atomic.AddUint32(&mgr.numFuzzing, ^uint32(0))
 
 	args := &instance.FuzzerCmdArgs{
-		Fuzzer:    fuzzerBin,
-		Executor:  executorBin,
-		Name:      instanceName,
-		Shifter:   shifterPath,
-		OS:        mgr.cfg.TargetOS,
-		Arch:      mgr.cfg.TargetArch,
-		FwdAddr:   fwdAddr,
-		Sandbox:   mgr.cfg.Sandbox,
-		Procs:     procs,
-		Verbosity: fuzzerV,
-		Cover:     mgr.cfg.Cover,
-		Debug:     *flagDebug,
-		Test:      false,
-		Runtest:   false,
-		Generate:  *flagGen,
-		Pinning:   true,
+		Fuzzer:           fuzzerBin,
+		Executor:         executorBin,
+		Name:             instanceName,
+		Shifter:          shifterPath,
+		OS:               mgr.cfg.TargetOS,
+		Arch:             mgr.cfg.TargetArch,
+		FwdAddr:          fwdAddr,
+		Sandbox:          mgr.cfg.Sandbox,
+		Procs:            procs,
+		Verbosity:        fuzzerV,
+		Cover:            mgr.cfg.Cover,
+		Debug:            *flagDebug,
+		Test:             false,
+		Runtest:          false,
+		Generate:         *flagGen,
+		Pinning:          true,
+		RandomReordering: *flagRandomReordering,
 		Optional: &instance.OptionalFuzzerArgs{
 			Slowdown:   mgr.cfg.Timeouts.Slowdown,
 			RawCover:   mgr.cfg.RawCover,
@@ -1614,7 +1654,6 @@ func (mgr *Manager) collectUsedFiles() {
 	}
 	cfg := mgr.cfg
 	addUsedFile(cfg.FuzzerBin)
-	addUsedFile(cfg.ExecprogBin)
 	addUsedFile(cfg.ExecutorBin)
 	addUsedFile(cfg.SSHKey)
 	if vmlinux := filepath.Join(cfg.KernelObj, mgr.sysTarget.KernelObject); osutil.IsExist(vmlinux) {
@@ -1733,11 +1772,6 @@ func (mgr *Manager) serializeCoverage() (bytes.Buffer, bytes.Buffer, bytes.Buffe
 		hintcov.WriteString(fmt.Sprintf("%x\n", k))
 	}
 
-	comm := mgr.serv.maxCommunication
-	for k := range comm {
-		commcov.WriteString(fmt.Sprintf("%x\n", k))
-	}
-
 	log.Logf(0, "Serializing coverage takes %v", time.Since(start))
 
 	return codecov, intcov, hintcov, commcov
@@ -1764,6 +1798,14 @@ func (mgr *Manager) dumpCoverageToFile(dir, filename string, cov bytes.Buffer) {
 	if _, err := codef.Write(cov.Bytes()); err != nil {
 		log.Fatalf("failed to write coverage to file (%s): %v", filename, err)
 	}
+}
+
+func (mgr *Manager) recordKnot(knot interleaving.Knot) {
+	// XXX: Tentative implementation. Definitely terrible.
+	mgr.usedKnotFile.WriteString(
+		fmt.Sprintf("%x --> %x\n%x --> %x\n---------------------",
+			knot[0].Former().Inst, knot[0].Latter().Inst,
+			knot[1].Former().Inst, knot[1].Latter().Inst))
 }
 
 func publicWebAddr(addr string) string {

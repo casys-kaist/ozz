@@ -62,6 +62,18 @@ static bool __vmi_scheduling_subject(struct qcsched_vmi_task *t)
     return false;
 }
 
+bool qcsched_vmi_running_context_being_scheduled(CPUState *cpu, bool task_only)
+{
+    struct qcsched_vmi_task running;
+    bool ret;
+    qcsched_vmi_task(cpu, &running);
+    ret = __vmi_scheduling_subject(&running);
+    if (task_only)
+        ret = ret && qcsched_vmi_in_task(cpu);
+    return ret;
+}
+
+#ifdef CONFIG_QCSCHED_TRAMPOLINE
 static bool
 qcsched_vmi_lock_info_duplicated(struct qcsched_vmi_lock_info *lock_info,
                                  struct qcsched_vmi_lock *vmi_lock)
@@ -72,17 +84,6 @@ qcsched_vmi_lock_info_duplicated(struct qcsched_vmi_lock_info *lock_info,
             return true;
     }
     return false;
-}
-
-bool qcsched_vmi_running_context_being_scheduled(CPUState *cpu, bool task_only)
-{
-    struct qcsched_vmi_task running;
-    bool ret;
-    qcsched_vmi_task(cpu, &running);
-    ret = __vmi_scheduling_subject(&running);
-    if (task_only)
-        ret = ret && qcsched_vmi_in_task(cpu);
-    return ret;
 }
 
 static bool qcsched_vmi_lockdep_whitelisted(target_ulong lockdep_addr)
@@ -186,6 +187,16 @@ static void qcsched_vmi_lock_release(CPUState *cpu, target_ulong lockdep_addr)
         }
     }
 }
+#else
+static void qcsched_vmi_lock_acquire(CPUState *cpu, target_ulong lockdep_addr,
+                                     int trylock, int read, target_ulong ip)
+{
+}
+
+static void qcsched_vmi_lock_release(CPUState *cpu, target_ulong lockdep_addr)
+{
+}
+#endif
 
 static void qcsched_vmi_lockdep_whitelist(CPUState *cpu, unsigned long addr)
 {

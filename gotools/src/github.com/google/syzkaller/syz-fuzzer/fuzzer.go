@@ -59,13 +59,14 @@ type Fuzzer struct {
 	faultInjectionEnabled    bool
 	comparisonTracingEnabled bool
 	fetchRawCover            bool
+	randomReordering         bool
 
-	corpusMu     sync.RWMutex
-	corpus       []*prog.Prog
-	corpusHashes map[hash.Sig]struct{}
-	corpusPrios  []int64
-	sumPrios     int64
-	candidates   []*prog.Candidate
+	corpusMu        sync.RWMutex
+	corpus          []*prog.Prog
+	corpusHashes    map[hash.Sig]struct{}
+	corpusPrios     []int64
+	sumPrios        int64
+	concurrentCalls []*prog.ConcurrentCalls
 
 	signalMu     sync.RWMutex
 	corpusSignal signal.Signal // signal of inputs in corpus
@@ -77,9 +78,6 @@ type Fuzzer struct {
 	corpusInterleaving interleaving.Signal
 	maxInterleaving    interleaving.Signal
 	newInterleaving    interleaving.Signal
-
-	maxCommunication interleaving.Signal
-	newCommunication interleaving.Signal
 
 	instCount     map[uint32]uint32
 	instBlacklist map[uint32]struct{}
@@ -93,11 +91,11 @@ type Fuzzer struct {
 }
 
 type FuzzerSnapshot struct {
-	corpus      []*prog.Prog
-	candidates  []*prog.Candidate
-	corpusPrios []int64
-	sumPrios    int64
-	fuzzer      *Fuzzer
+	corpus          []*prog.Prog
+	concurrentCalls []*prog.ConcurrentCalls
+	corpusPrios     []int64
+	sumPrios        int64
+	fuzzer          *Fuzzer
 }
 
 type Collection int
@@ -106,18 +104,18 @@ const (
 	// Stats of collected data
 	CollectionScheduleHint Collection = iota
 	CollectionThreadingHint
-	CollectionCandidate
+	CollectionConcurrentCalls
 	CollectionPlug
 	CollectionUnplug
 	CollectionCount
 )
 
 var collectionNames = [CollectionCount]string{
-	CollectionScheduleHint:  "schedule hint",
-	CollectionThreadingHint: "threading hint",
-	CollectionCandidate:     "candidate",
-	CollectionPlug:          "plug",
-	CollectionUnplug:        "unplug",
+	CollectionScheduleHint:    "schedule hint",
+	CollectionThreadingHint:   "threading hint",
+	CollectionConcurrentCalls: "concurrent calls",
+	CollectionPlug:            "plug",
+	CollectionUnplug:          "unplug",
 }
 
 type Stat int
@@ -198,17 +196,18 @@ func main() {
 	debug.SetGCPercent(50)
 
 	var (
-		flagName     = flag.String("name", "test", "unique name for manager")
-		flagOS       = flag.String("os", runtime.GOOS, "target OS")
-		flagArch     = flag.String("arch", runtime.GOARCH, "target arch")
-		flagManager  = flag.String("manager", "", "manager rpc address")
-		flagProcs    = flag.Int("procs", 1, "number of parallel test processes")
-		flagOutput   = flag.String("output", "stdout", "write programs to none/stdout/dmesg/file")
-		flagTest     = flag.Bool("test", false, "enable image testing mode")      // used by syz-ci
-		flagRunTest  = flag.Bool("runtest", false, "enable program testing mode") // used by pkg/runtest
-		flagRawCover = flag.Bool("raw_cover", false, "fetch raw coverage")
-		flagGen      = flag.Bool("gen", true, "generate/mutate inputs")
-		flagShifter  = flag.String("shifter", "./shifter", "path to the shifter")
+		flagName             = flag.String("name", "test", "unique name for manager")
+		flagOS               = flag.String("os", runtime.GOOS, "target OS")
+		flagArch             = flag.String("arch", runtime.GOARCH, "target arch")
+		flagManager          = flag.String("manager", "", "manager rpc address")
+		flagProcs            = flag.Int("procs", 1, "number of parallel test processes")
+		flagOutput           = flag.String("output", "stdout", "write programs to none/stdout/dmesg/file")
+		flagTest             = flag.Bool("test", false, "enable image testing mode")      // used by syz-ci
+		flagRunTest          = flag.Bool("runtest", false, "enable program testing mode") // used by pkg/runtest
+		flagRawCover         = flag.Bool("raw_cover", false, "fetch raw coverage")
+		flagGen              = flag.Bool("gen", true, "generate/mutate inputs")
+		flagShifter          = flag.String("shifter", "./shifter", "path to the shifter")
+		flagRandomReordering = flag.Bool("random-reordering", false, "")
 	)
 	defer tool.Init()()
 	outputType := parseOutputType(*flagOutput)
@@ -337,18 +336,16 @@ func main() {
 		maxInterleaving:    make(interleaving.Signal),
 		newInterleaving:    make(interleaving.Signal),
 
-		maxCommunication: make(interleaving.Signal),
-		newCommunication: make(interleaving.Signal),
-
 		instCount:     make(map[uint32]uint32),
 		instBlacklist: make(map[uint32]struct{}),
 
 		checkResult: r.CheckResult,
 		generate:    *flagGen,
 
-		fetchRawCover: *flagRawCover,
-		noMutate:      r.NoMutateCalls,
-		stats:         make([]uint64, StatCount),
+		fetchRawCover:    *flagRawCover,
+		randomReordering: *flagRandomReordering,
+		noMutate:         r.NoMutateCalls,
+		stats:            make([]uint64, StatCount),
 	}
 	gateCallback := fuzzer.useBugFrames(r, *flagProcs)
 	fuzzer.gate = ipc.NewGate(2**flagProcs, gateCallback)
@@ -538,13 +535,12 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 		log.Logf(0, "Poll takes %v", time.Since(start))
 	}()
 	a := &rpctype.PollArgs{
-		Name:             fuzzer.name,
-		NeedCandidates:   needCandidates,
-		MaxSignal:        fuzzer.grabNewSignal().Serialize(),
-		MaxInterleaving:  fuzzer.grabNewInterleaving().Serialize(),
-		MaxCommunication: fuzzer.grabNewCommunication().Serialize(),
-		Stats:            stats,
-		Collections:      collections,
+		Name:            fuzzer.name,
+		NeedCandidates:  needCandidates,
+		MaxSignal:       fuzzer.grabNewSignal().Serialize(),
+		MaxInterleaving: fuzzer.grabNewInterleaving().Serialize(),
+		Stats:           stats,
+		Collections:     collections,
 
 		InstCount: fuzzer.serializeInstCount(&fuzzer.instCount),
 	}
@@ -558,7 +554,6 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 	}
 	maxSignal := r.MaxSignal.Deserialize()
 	maxInterleaving := r.MaxInterleaving.Deserialize()
-	maxCommunication := r.MaxCommunication.Deserialize()
 	log.Logf(1, "poll: candidates=%v inputs=%v signal=%v interleaving=%v",
 		len(r.Candidates), len(r.NewInputs), maxSignal.Len(), maxInterleaving.Len())
 
@@ -570,7 +565,6 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 
 	fuzzer.addMaxSignal(maxSignal)
 	fuzzer.addMaxInterleaving(maxInterleaving)
-	fuzzer.addMaxCommunication(maxCommunication)
 	for _, inp := range r.NewInputs {
 		fuzzer.addInputFromAnotherFuzzer(inp)
 	}
@@ -674,29 +668,17 @@ func (fuzzer *FuzzerSnapshot) chooseProgram(r *rand.Rand) *prog.Prog {
 	return fuzzer.corpus[idx]
 }
 
-func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.Candidate {
+func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.ConcurrentCalls {
 	// TODO: Prioritize inputs according to the number of
 	// hints.
-	for retry := 0; len(fuzzer.candidates) != 0 && retry < 100; retry++ {
-		idx := r.Intn(len(fuzzer.candidates))
-		tp := fuzzer.candidates[idx]
+	for retry := 0; len(fuzzer.concurrentCalls) != 0 && retry < 100; retry++ {
+		idx := r.Intn(len(fuzzer.concurrentCalls))
+		tp := fuzzer.concurrentCalls[idx]
 		if len(tp.Hint) != 0 {
 			return tp
 		}
-		fuzzer.removeCandidateAt(idx)
 	}
 	return nil
-}
-
-func (fuzzer *FuzzerSnapshot) removeCandidateAt(idx int) {
-	log.Logf(2, "remove a schedule guide")
-	fuzzer.fuzzer.corpusMu.Lock()
-	ln := len(fuzzer.candidates)
-	fuzzer.fuzzer.candidates[idx] = fuzzer.fuzzer.candidates[ln-1]
-	fuzzer.fuzzer.candidates = fuzzer.fuzzer.candidates[:ln-1]
-	fuzzer.fuzzer.corpusMu.Unlock()
-	fuzzer.fuzzer.subCollection(CollectionCandidate, 1)
-	*fuzzer = fuzzer.fuzzer.snapshot()
 }
 
 func (fuzzer *Fuzzer) __addInputToCorpus(p *prog.Prog, sig hash.Sig, prio int64) {
@@ -727,10 +709,10 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hint []interleaving.Segment) {
 	log.Logf(2, "book a schedule guide")
 	fuzzer.addCollection(CollectionScheduleHint, uint64(len(hint)))
-	fuzzer.addCollection(CollectionCandidate, 1)
+	fuzzer.addCollection(CollectionConcurrentCalls, 1)
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()
-	fuzzer.candidates = append(fuzzer.candidates, &prog.Candidate{
+	fuzzer.concurrentCalls = append(fuzzer.concurrentCalls, &prog.ConcurrentCalls{
 		P:    p,
 		Hint: hint,
 	})
@@ -747,9 +729,38 @@ func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, sign interleaving.S
 }
 
 func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
+	fuzzer.removeExhaustedConcurrentCalls()
 	fuzzer.corpusMu.RLock()
 	defer fuzzer.corpusMu.RUnlock()
-	return FuzzerSnapshot{fuzzer.corpus, fuzzer.candidates, fuzzer.corpusPrios, fuzzer.sumPrios, fuzzer}
+	return FuzzerSnapshot{
+		fuzzer.corpus,
+		fuzzer.concurrentCalls,
+		fuzzer.corpusPrios,
+		fuzzer.sumPrios,
+		fuzzer,
+	}
+}
+
+func (fuzzer *Fuzzer) removeExhaustedConcurrentCalls() {
+	fuzzer.corpusMu.Lock()
+	removed := uint64(0)
+	ln := len(fuzzer.concurrentCalls)
+	for i := 0; i < ln; {
+		c := fuzzer.concurrentCalls[i]
+		if len(c.Hint) != 0 {
+			i++
+			continue
+		}
+		// remove the exhausted concurrent call
+		fuzzer.concurrentCalls[i] = fuzzer.concurrentCalls[ln-1]
+		fuzzer.concurrentCalls = fuzzer.concurrentCalls[:ln-1]
+		ln--
+	}
+	fuzzer.corpusMu.Unlock()
+	if removed != 0 {
+		log.Logf(2, "removed %d concurrent calls", removed)
+		fuzzer.subCollection(CollectionConcurrentCalls, removed)
+	}
 }
 
 func (fuzzer *Fuzzer) addMaxSignal(sign signal.Signal) {
@@ -768,15 +779,6 @@ func (fuzzer *Fuzzer) addMaxInterleaving(sign interleaving.Signal) {
 	fuzzer.signalMu.Lock()
 	defer fuzzer.signalMu.Unlock()
 	fuzzer.maxInterleaving.Merge(sign)
-}
-
-func (fuzzer *Fuzzer) addMaxCommunication(sign interleaving.Signal) {
-	if sign.Len() == 0 {
-		return
-	}
-	fuzzer.signalMu.Lock()
-	defer fuzzer.signalMu.Unlock()
-	fuzzer.maxCommunication.Merge(sign)
 }
 
 func (fuzzer *Fuzzer) grabNewSignal() signal.Signal {
@@ -798,17 +800,6 @@ func (fuzzer *Fuzzer) grabNewInterleaving() interleaving.Signal {
 		return nil
 	}
 	fuzzer.newInterleaving = nil
-	return sign
-}
-
-func (fuzzer *Fuzzer) grabNewCommunication() interleaving.Signal {
-	fuzzer.signalMu.Lock()
-	defer fuzzer.signalMu.Unlock()
-	sign := fuzzer.newCommunication
-	if sign.Empty() {
-		return nil
-	}
-	fuzzer.newCommunication = nil
 	return sign
 }
 
@@ -863,19 +854,6 @@ func (fuzzer *Fuzzer) getNewKnot(knots []interleaving.Segment) []interleaving.Se
 	return diff
 }
 
-func (fuzzer *Fuzzer) getNewCommunication(comms []interleaving.Segment) []interleaving.Segment {
-	diff := fuzzer.newSegment(&fuzzer.maxCommunication, comms)
-	if len(diff) == 0 {
-		return nil
-	}
-	sign := interleaving.FromCoverToSignal(diff)
-	fuzzer.signalMu.Lock()
-	fuzzer.maxCommunication.Merge(sign)
-	fuzzer.newCommunication.Merge(sign)
-	fuzzer.signalMu.Unlock()
-	return diff
-}
-
 func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog) bool {
 	const maxThreadingKnots = 500000
 	// So the threading queue may explode very quickly when starting a
@@ -915,6 +893,28 @@ func (fuzzer *Fuzzer) countInstructionInKnot(knot interleaving.Knot) {
 		for _, acc := range comm {
 			fuzzer.instCount[acc.Inst]++
 		}
+	}
+}
+
+func (fuzzer *Fuzzer) sendUsedKnots(used []interleaving.Segment) {
+	// XXX: At this point, we knot that instructions in thread0 were
+	// executed before instructions in thread1. As we want to track
+	// instruction addresses only, flatten the knot in a simple way.
+	a := rpctype.SendUsedKnotsArg{}
+	// XXX: Also we know that len(used) == 1 for now.
+	for _, knot0 := range used {
+		knot, ok := knot0.(interleaving.Knot)
+		if !ok {
+			panic("wrong")
+		}
+		insts := []uint32{}
+		for _, comm := range knot {
+			insts = append(insts, comm.Former().Inst, comm.Latter().Inst)
+		}
+		a.Insts = append(a.Insts, insts)
+	}
+	if err := fuzzer.manager.Call("Manager.SendUsedKnots", a, nil); err != nil {
+		log.Fatalf("failed to call Manager.Connect(): %v ", err)
 	}
 }
 

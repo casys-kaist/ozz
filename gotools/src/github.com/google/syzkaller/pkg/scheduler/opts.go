@@ -20,8 +20,8 @@ const (
 	FlagWantParallel
 	FlagWantMessagePassing
 	FlagDifferentAccessTypeOnly
-	FlagWantStrictMessagePassing
 	FlagWantOOTA // out-of-thin-air
+	FlagMultiVariableOnly
 )
 
 func (opts KnotterOpts) flagSet(flag KnotterFlags) bool {

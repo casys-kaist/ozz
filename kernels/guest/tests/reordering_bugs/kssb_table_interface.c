@@ -15,7 +15,7 @@
 
 void *th1(void *_arg) {
   pin(1);
-  hypercall(HCALL_INSTALL_BP, 0xffffffff81bac3e7, 0, 0);
+  hypercall(HCALL_INSTALL_BP, 0xffffffff81b6ade2, 0, 0);
   activate_bp_sync();
   syscall(SYS_SSB_SWITCH);
   syscall(SYS_PSO_WRITER, 0, 0, 0);
@@ -50,8 +50,22 @@ void run() {
   hypercall(HCALL_RESET, 0, 0, 0);
 }
 
+struct kssb_flush_table_entry {
+  unsigned long inst;
+  int value;
+  void *pad1, *pad2;
+};
+
 int main(void) {
   pin(0);
-  do_test(true);
+  hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
+  int vec[1] = {1};
+  struct kssb_flush_table_entry table[2] = {
+      {0xffffffff81b6adb6, 0},
+      {0xffffffff81b6ade2, 1},
+  };
+  syscall(SYS_SSB_FEEDINPUT, &vec, 1, &table, 2);
+  run();
+  hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
   return 0;
 }

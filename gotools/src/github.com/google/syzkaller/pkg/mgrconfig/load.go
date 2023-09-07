@@ -260,7 +260,6 @@ func (cfg *Config) completeBinaries() error {
 		return filepath.Join(cfg.Syzkaller, "bin", cfg.TargetOS+"_"+arch, name+exe)
 	}
 	cfg.FuzzerBin = targetBin("syz-fuzzer", cfg.TargetVMArch)
-	cfg.ExecprogBin = targetBin("syz-execprog", cfg.TargetVMArch)
 	cfg.ExecutorBin = targetBin("syz-executor", cfg.TargetArch)
 	// If the target already provides an executor binary, we don't need to copy it.
 	if cfg.SysTarget.ExecutorBin != "" {
@@ -268,9 +267,6 @@ func (cfg *Config) completeBinaries() error {
 	}
 	if !osutil.IsExist(cfg.FuzzerBin) {
 		return fmt.Errorf("bad config syzkaller param: can't find %v", cfg.FuzzerBin)
-	}
-	if !osutil.IsExist(cfg.ExecprogBin) {
-		return fmt.Errorf("bad config syzkaller param: can't find %v", cfg.ExecprogBin)
 	}
 	if cfg.ExecutorBin != "" && !osutil.IsExist(cfg.ExecutorBin) {
 		return fmt.Errorf("bad config syzkaller param: can't find %v", cfg.ExecutorBin)

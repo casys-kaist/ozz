@@ -27,7 +27,7 @@ __git_am() {
 	GIT="${GIT:-git}"
 	_LOCAL=$(realpath $1)
 	_PATCH_DIR=$(realpath $2)
-	for _PATCH in `find $_PATCH_DIR -name "*.patch"`;
+	for _PATCH in `find $_PATCH_DIR -name "*.patch" | sort`;
 	do
 		(cd $_LOCAL; git am $_PATCH)
 	done
@@ -88,4 +88,32 @@ __check_installed() {
 	DIR="$PROJECT_HOME/.installed"
 	mkdir -p $DIR
 	[ -z "$2" -a -f "$DIR/$1" ]
+}
+
+## Usage: __contains STRING SUBSTRING
+## Ref: https://stackoverflow.com/questions/2829613/how-do-you-tell-if-a-string-contains-another-string-in-posix-sh
+__contains() {
+    string="$1"
+    substring="$2"
+    if [ "${string#*"$substring"}" != "$string" ]; then
+        echo 1    # $substring is in $string
+    else
+        echo 0    # $substring is not in $string
+    fi
+}
+
+__check_config() {
+	config_file="$1"
+	configs_to_check="$2"
+	for _o in $(echo $configs_to_check)
+	do
+		o="CONFIG_$_o=y"
+		if ! grep -q "$o" "$config_file"; then
+			printf '%s\n' "$o"
+		fi
+	done
+}
+
+count_item() {
+   echo $(set -f -- $1; echo $#)
 }

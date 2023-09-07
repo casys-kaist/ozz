@@ -38,10 +38,7 @@ func GetKnotter(opts KnotterOpts) Knotter {
 	if !opts.flagSet(FlagWantParallel) {
 		opts.Flags &= ^FlagWantMessagePassing
 	}
-	if !opts.flagSet(FlagWantMessagePassing) {
-		opts.Flags &= ^FlagWantStrictMessagePassing
-	}
-	if opts.flagSet(FlagWantStrictMessagePassing) {
+	if opts.flagSet(FlagWantMessagePassing) {
 		opts.Flags |= FlagDifferentAccessTypeOnly
 	}
 	if opts.flagSet(FlagWantOOTA) && opts.flagSet(FlagWantMessagePassing) {
@@ -368,10 +365,8 @@ func (knotter *Knotter) doFormKnots() bool {
 	}
 
 	if knotter.opts.flagSet(FlagWantParallel) {
-		// RelRazzer
 		knotter.doFormKnotsParallel()
 	} else {
-		// SegFuzz
 		knotter.doFormKnotsNotParallel()
 	}
 	return len(knotter.knots) < thresholdKnots
@@ -390,11 +385,6 @@ func (knotter *Knotter) doFormKnotsNotParallel() {
 
 func (knotter *Knotter) doFormKnotsParallel() {
 	knotter.doFormKnotsinThread(knotter.comms0)
-	if knotter.opts.flagSet(FlagWantOOTA) {
-		// NOTE: For OOTA, forming knots in both directions will make
-		// dupped knots without any new interesting knots.
-		return
-	}
 	knotter.doFormKnotsinThread(knotter.comms1)
 }
 
@@ -448,8 +438,15 @@ func sanitizeKnotSingle(comm0, comm1 interleaving.Communication, opts KnotterOpt
 		if !isMessagePassing(comm0, comm1) {
 			return false
 		}
-		if opts.flagSet(FlagWantStrictMessagePassing) &&
-			(comm1.Former().Typ != interleaving.TypeStore || comm0.Former().Addr == comm1.Former().Addr) {
+	}
+	if opts.flagSet(FlagMultiVariableOnly) {
+		if comm0.Former().Addr == comm1.Former().Addr {
+			return false
+		}
+	}
+	if opts.flagSet(FlagWantParallel) {
+		// We want twisted knots only for relrazzer
+		if comm0.Latter().Timestamp < comm1.Latter().Timestamp {
 			return false
 		}
 	}
@@ -457,7 +454,8 @@ func sanitizeKnotSingle(comm0, comm1 interleaving.Communication, opts KnotterOpt
 }
 
 func isMessagePassing(c0, c1 interleaving.Communication) bool {
-	return (c0.Former().Typ == c1.Former().Typ &&
+	return (c0.Former().Typ == interleaving.TypeStore &&
+		c0.Former().Typ == c1.Former().Typ &&
 		c0.Latter().Typ == c1.Latter().Typ &&
 		c0.Former().Typ != c0.Latter().Typ)
 }
