@@ -13,9 +13,15 @@
 #define SYS_PSO_READER 502
 #define SYS_PSO_CLEAR 504
 
+// without rmb
+#define INST_STORE_VAL 0xffffffff81bad6e4
+#define INST_STORE_FLAG 0xffffffff81bad797
+#define INST_LOAD_VAL 0xffffffff81badafa
+#define INST_LOAD_FLAG 0xffffffff81bada4c
+
 void *th1(void *_arg) {
   pin(1);
-  hypercall(HCALL_INSTALL_BP, 0xffffffff81b6ade2, 0, 0);
+  hypercall(HCALL_INSTALL_BP, INST_STORE_FLAG, 0, 0);
   activate_bp_sync();
   syscall(SYS_SSB_SWITCH);
   syscall(SYS_PSO_WRITER, 0, 0, 0);
@@ -60,11 +66,13 @@ int main(void) {
   pin(0);
   hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
   int vec[1] = {1};
-  struct kssb_flush_table_entry table[2] = {
-      {0xffffffff81b6adb6, 0},
-      {0xffffffff81b6ade2, 1},
+  struct kssb_flush_table_entry table[4] = {
+      {INST_STORE_VAL, 0}, // reordered (buffer)
+      {INST_STORE_FLAG, 1}, // not reordered
+      {INST_LOAD_VAL, 0}, // reordered (prefetched)
+      {INST_LOAD_FLAG, 1}, // not reordered
   };
-  syscall(SYS_SSB_FEEDINPUT, &vec, 1, &table, 2);
+  syscall(SYS_SSB_FEEDINPUT, &vec, 1, &table, 4);
   run();
   hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
   return 0;
