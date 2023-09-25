@@ -1,6 +1,7 @@
 package ssb
 
 import (
+	"fmt"
 	"math/rand"
 
 	"github.com/google/syzkaller/pkg/interleaving"
@@ -14,6 +15,22 @@ type tableEntry struct {
 type FlushVector struct {
 	table  []tableEntry
 	vector []uint32
+}
+
+func (e tableEntry) String() string {
+	return fmt.Sprintf("{0x%x %d}", e.inst, e.value)
+}
+
+func (vec FlushVector) String() string {
+	t := "["
+	for i, e := range vec.table {
+		if i != 0 {
+			t += " "
+		}
+		t += e.String()
+	}
+	t += "]"
+	return fmt.Sprintf("{%s %v}", t, vec.vector)
 }
 
 func (vec FlushVector) Valid() bool {
