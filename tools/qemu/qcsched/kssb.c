@@ -28,6 +28,24 @@ static bool qcsched_rw__ssb_do_emulate(CPUState *cpu, char enable)
     return true;
 }
 
+static bool is_vcpu_deactivated(CPUState *cpu) {
+    return qcsched_check_cpu_state(cpu, qcsched_cpu_deactivated);
+}
+
+static bool is_all_vcpus_deactivated(CPUState *cpu)
+{
+    CPUState *cpu0;
+
+    CPU_FOREACH(cpu0)
+    {
+        if (!is_vcpu_deactivated(cpu0)) {
+            DRPRINTF(cpu, "CPU #%d is not deactivated\n", cpu0->cpu_index);
+            return false;
+        }
+    }
+    return true;
+}
+
 target_ulong qcsched_enable_kssb(CPUState *cpu)
 {
     bool ok;
@@ -39,7 +57,13 @@ target_ulong qcsched_enable_kssb(CPUState *cpu)
 target_ulong qcsched_disable_kssb(CPUState *cpu)
 {
     bool ok;
+
     DRPRINTF(cpu, "Disabling kssb\n");
+    if (!is_all_vcpus_deactivated(cpu)) {
+        DRPRINTF(cpu, "Failed to disable kssb\n");
+        return -EAGAIN;
+    }
+
     vm_stop(RUN_STATE_PAUSED);
     ok = qcsched_rw__ssb_do_emulate(cpu, 0);
     // TODO: I don't think this is a correct way to use
