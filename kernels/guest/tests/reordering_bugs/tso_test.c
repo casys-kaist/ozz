@@ -15,7 +15,7 @@
 
 void *th1(void *_arg) {
   pin(1);
-  hypercall(HCALL_INSTALL_BP, 0xffffffff81bd6c51, 0, 0);
+  hypercall(HCALL_INSTALL_BP, 0xffffffff81bd6d24, 0, 0);
   activate_bp_sync();
   syscall(SYS_SSB_SWITCH);
   syscall(SYS_TSO_THREAD1);
@@ -39,6 +39,8 @@ void run() {
 
   pthread_t pth1, pth2;
 
+  hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
+
   pthread_create(&pth1, NULL, th1, NULL);
   pthread_create(&pth2, NULL, th2, NULL);
 
@@ -46,6 +48,8 @@ void run() {
   pthread_join(pth2, NULL);
 
   syscall(SYS_TSO_CHECK);
+
+  hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
 
   hypercall(HCALL_RESET, 0, 0, 0);
 }

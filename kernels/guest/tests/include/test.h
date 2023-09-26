@@ -44,9 +44,7 @@ struct vec_t {
 
 void run();
 
-void do_test(bool enable_kssb) {
-  if (enable_kssb)
-    hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
+void do_test() {
   for (int i = 0; i < sizeof(flush_vectors) / sizeof(flush_vectors[0]); i++) {
     struct vec_t *v = &flush_vectors[i];
     printf("Flush vector:\n");
@@ -56,8 +54,6 @@ void do_test(bool enable_kssb) {
     syscall(SYS_SSB_FEEDINPUT, v->vec, v->size);
     run();
   }
-  if (enable_kssb)
-    hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
 }
 
 void pin(int cpu) {

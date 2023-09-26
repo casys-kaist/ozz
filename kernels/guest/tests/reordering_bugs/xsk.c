@@ -20,7 +20,7 @@ int sk;
 void *th1(void *unused) {
   pin(1);
 
-  hypercall(HCALL_INSTALL_BP, 0xffffffff8f34f204, 0, 0);
+  hypercall(HCALL_INSTALL_BP, 0xffffffff8f34f2c4, 0, 0);
 
   activate_bp_sync();
 
@@ -49,6 +49,8 @@ void run() {
   hypercall(HCALL_RESET, 0, 0, 0);
   hypercall(HCALL_PREPARE, 2, 2, 0);
 
+  hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
+
   sk = socket(AF_XDP, SOCK_RAW, 0);
 
   pthread_t pth1, pth2;
@@ -60,6 +62,8 @@ void run() {
   pthread_join(pth2, NULL);
 
   close(sk);
+
+  hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
 
   hypercall(HCALL_RESET, 0, 0, 0);
 }
