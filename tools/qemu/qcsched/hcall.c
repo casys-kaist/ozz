@@ -116,6 +116,9 @@ static void qcsched_reset(CPUState *cpu)
     sched.nr_cpus = 0;
     memset(&sched.entries, 0, sizeof(struct qcsched_entry) * MAX_SCHEDPOINTS);
     memset(warn_once, 0, sizeof(warn_once));
+
+    // Trying to disable kssb after resetting all vCPUs
+    qcsched_disable_kssb(cpu);
 }
 
 static target_ulong qcsched_prepare(CPUState *cpu, unsigned int nr_bps,

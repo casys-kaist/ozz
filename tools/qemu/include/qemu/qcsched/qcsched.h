@@ -42,7 +42,8 @@ struct qcsched {
     int total, current;
     int orig_nr_bps;
     int nr_cpus;
-    bool activated;
+    bool kssb_enabled; // indicating kssb is enabled in the kernel
+    bool activated;    // indicating the schedule is activated in QEMU
     bool used;
 };
 
