@@ -30,7 +30,8 @@ static bool qcsched_rw__ssb_do_emulate(CPUState *cpu, char enable)
 
 static bool is_vcpu_deactivated(CPUState *cpu)
 {
-    return qcsched_check_cpu_state(cpu, qcsched_cpu_deactivated);
+    return !qcsched_check_cpu_state(cpu, qcsched_cpu_ready) ||
+           qcsched_check_cpu_state(cpu, qcsched_cpu_deactivated);
 }
 
 static bool is_all_vcpus_deactivated(CPUState *cpu)
@@ -40,7 +41,8 @@ static bool is_all_vcpus_deactivated(CPUState *cpu)
     CPU_FOREACH(cpu0)
     {
         if (!is_vcpu_deactivated(cpu0)) {
-            DRPRINTF(cpu, "CPU #%d is not deactivated\n", cpu0->cpu_index);
+            DRPRINTF(cpu, "CPU #%d is not deactivated (state: %d)\n",
+                     cpu0->cpu_index, sched.cpu_state[cpu0->cpu_index]);
             return false;
         }
     }
