@@ -68,16 +68,6 @@ NORETURN void doexit_thread(int status)
 
 #include "hypercall.h"
 
-static void enable_kssb(void)
-{
-	hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
-}
-
-static void disable_kssb(void)
-{
-	hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
-}
-
 #if SYZ_EXECUTOR || SYZ_MULTI_PROC || SYZ_REPEAT && SYZ_CGROUPS ||         \
     SYZ_NET_DEVICES || __NR_syz_mount_image || __NR_syz_read_part_table || \
     __NR_syz_usb_connect || __NR_syz_usb_connect_ath9k ||                  \
@@ -638,6 +628,22 @@ static void reply_handshake();
 #endif
 
 // #define __DEBUG_THROUGHPUT
+
+static void enable_kssb(void)
+{
+	hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
+}
+
+static void disable_kssb(void)
+{
+	unsigned long res;
+	for (int i = 0; i < 3; i++) {
+		res = hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
+		if (res == 0)
+			break;
+		sleep_ms(100);
+	}
+}
 
 static void loop(void)
 {
