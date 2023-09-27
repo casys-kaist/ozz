@@ -1,5 +1,5 @@
 {
-    "name": "kssb",
+	"name": "kssb",
 	"target": "linux/amd64",
 	"http": "127.0.0.1:56741",
 	"workdir": "$PWD/workdir",
@@ -17,5 +17,6 @@
 		"cpu": 4,
 		"mem": 4096
 	},
-	"disable_syscalls": ["execveat",  "clone", "exit", "execve"]
+	"suppressions": ["INFO: rcu detected stall", "INFO: task hung", "SYZFATAL"],
+	"disable_syscalls": ["execveat", "clone", "exit", "execve"]
 }

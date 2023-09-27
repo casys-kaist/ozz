@@ -62,7 +62,7 @@ void *read_thread(void *arg) {
 void *ketctl_set_timeout_thread(void *arg) {
   pin(1);
 
-  hypercall(HCALL_INSTALL_BP, 0xffffffff81c3a6d4, 0, 0);
+  hypercall(HCALL_INSTALL_BP, 0xffffffff81c60edd, 0, 0);
 
   activate_bp_sync();
 
@@ -76,6 +76,8 @@ void *ketctl_set_timeout_thread(void *arg) {
 void run() {
   hypercall(HCALL_RESET, 0, 0, 0);
   hypercall(HCALL_PREPARE, 2, 2, 0);
+
+  hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
 
   key = add_key("cifs.spnego", "syz", 0, 0, KEY_SPEC_USER_KEYRING);
   if (key == -1) {
@@ -107,11 +109,12 @@ void run() {
   pthread_join(pth1, NULL);
   pthread_join(pth2, NULL);
 
+  hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
   hypercall(HCALL_RESET, 0, 0, 0);
 }
 
 int main(int argc, char *argv[]) {
   pin(0);
-  do_test(true);
+  do_test();
   return 0;
 }

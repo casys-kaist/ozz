@@ -101,3 +101,12 @@ if [ -n "$_DEDUP" ]; then
     sort "$FN" | uniq -u > "$TN"
     mv "$TN" "$FN"
 fi
+
+# record kernel hash
+REV=$(cd $KERNELS_DIR/linux; git rev-parse HEAD)
+HSH=$(cd $KERNELS_DIR/guest/builds/x86_64; md5sum vmlinux | cut -d' ' -f1)
+HIS_FN="$KERNELS_DIR/guest/BUILD_HISTORY"
+if [ ! -f "$HIS_FN" ]; then
+echo "Revision                                    vmlinux hash" > $HIS_FN
+fi
+echo "$REV    $HSH" >> $HIS_FN

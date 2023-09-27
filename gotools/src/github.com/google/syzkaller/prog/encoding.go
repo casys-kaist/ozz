@@ -476,7 +476,7 @@ func (p *parser) parseSchedule(prog *Prog) error {
 }
 
 func (p *parser) parseFlushVector(prog *Prog) error {
-	re := regexp.MustCompile(`\[[0-9{}\s]*\]`)
+	re := regexp.MustCompile(`\[[0-9x{}\s]*\]`)
 	for _, comment := range prog.Comments {
 		const str = "flush vector:"
 		if strings.HasPrefix(comment, str) {
@@ -501,7 +501,7 @@ func (p *parser) parseFlushVector(prog *Prog) error {
 }
 
 func (p *parser) parseFlushTable(prog *Prog, rawTable []byte) error {
-	re := regexp.MustCompile(`{[0-9\s]*}`)
+	re := regexp.MustCompile(`{[0-9x\s]*}`)
 	entries := re.FindAll(rawTable, -1)
 	for _, entry := range entries {
 		// trim {,}

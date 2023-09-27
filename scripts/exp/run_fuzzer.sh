@@ -40,6 +40,8 @@ fi
 
 WORKDIR=$(cat $CONFIG | grep --extended-regexp "\"workdir\": \"(.*)\"" --only-matching | cut --delimiter=":" --fields=2 | sed s/\"//g)
 WORKDIR=${WORKDIR## }
+HSH=$(cd $KERNELS_DIR/guest/builds/x86_64; md5sum vmlinux | cut -d' ' -f1)
+echo "$HSH" > "$WORKDIR/running"
 
 if [ -n "$DEBUG" ]; then
 	_DEBUG="-debug"

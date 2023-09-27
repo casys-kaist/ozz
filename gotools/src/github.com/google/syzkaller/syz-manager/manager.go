@@ -52,7 +52,6 @@ var (
 	flagSeed             = flag.String("seed", "normal", "seed type (normal, threaded-cve, cve, test, reorderings)")
 	flagGen              = flag.Bool("gen", true, "generate/mutate inputs")
 	flagCorpus           = flag.Bool("load-corpus", true, "load corpus")
-	flagNewKernel        = flag.Bool("new-kernel", false, "set true if using a new kernel version")
 	flagDumpCoverage     = flag.Bool("dump-coverage", false, "for experiments. dump both coverages periodically")
 	flagOneShot          = flag.Bool("one-shot", false, "quit after a crash occurs")
 	flagRandomReordering = flag.Bool("random-reordering", false, "")
@@ -194,7 +193,9 @@ func RunManager(cfg *mgrconfig.Config) {
 		}
 	}
 
-	crashdir := filepath.Join(cfg.Workdir, "crashes")
+	hsh := calculateKernelHash(cfg)
+
+	crashdir := filepath.Join(cfg.Workdir, fmt.Sprintf("crashes-%v", hex.EncodeToString(hsh)))
 	osutil.MkdirAll(crashdir)
 
 	reporter, err := report.NewReporter(cfg)
@@ -210,6 +211,7 @@ func RunManager(cfg *mgrconfig.Config) {
 
 	mgr := &Manager{
 		cfg:              cfg,
+		kernelHash:       hsh,
 		vmPool:           vmPool,
 		target:           cfg.Target,
 		sysTarget:        cfg.SysTarget,
@@ -646,24 +648,22 @@ func (mgr *Manager) buildShifter() {
 	}
 }
 
-func (mgr *Manager) checkKernelVersion() {
-	fn := filepath.Join(mgr.cfg.KernelObj, "vmlinux")
+func calculateKernelHash(cfg *mgrconfig.Config) []byte {
+	fn := filepath.Join(cfg.KernelObj, "vmlinux")
 	hsh, err := osutil.BinaryHash(fn)
 	if err != nil {
 		log.Fatalf("Failed to hash %v", fn)
 	}
-	mgr.kernelHash = hsh
-	if *flagNewKernel {
-		mgr.newKernel = true
-		log.Logf(0, "Using a new kernel version")
-		log.Logf(0, "  Current  %v", hex.EncodeToString(hsh))
-	}
-	if rec, ok := mgr.corpusDB.Records[versionKey]; ok && !bytes.Equal(hsh, rec.Val) {
+	return hsh
+}
+
+func (mgr *Manager) checkKernelVersion() {
+	if rec, ok := mgr.corpusDB.Records[versionKey]; ok && !bytes.Equal(mgr.kernelHash, rec.Val) {
 		// Kernel version has been changed.
 		mgr.newKernel = true
 		log.Logf(0, "Kernel version has been changed")
 		log.Logf(0, "  Previous %v", hex.EncodeToString(rec.Val))
-		log.Logf(0, "  Current  %v", hex.EncodeToString(hsh))
+		log.Logf(0, "  Current  %v", hex.EncodeToString(mgr.kernelHash))
 	}
 }
 
