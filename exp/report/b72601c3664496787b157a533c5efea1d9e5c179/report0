@@ -1,0 +1,57 @@
+notifier_subscriptions 0000000000000000
+numa_next_scan 4295163434 numa_scan_offset 0 numa_scan_seq 0
+tlb_flush_pending 0
+def_flags: 0x0()
+------------[ cut here ]------------
+kernel BUG at mm/mmap.c:328!
+invalid opcode: 0000 [#1] PREEMPT SMP KASAN
+CPU: 2 PID: 16281 Comm: syz-executor.0 Not tainted 6.6.0-rc2-g307d711bbe07 #5
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
+RIP: 0010:validate_mm+0x6e2/0x710 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/mmap.c:328
+Code: 74 2a 48 c7 c7 e0 9d a0 8f 89 de 44 89 e2 31 c0 e8 b3 7f 6f 0d 48 8b 7c 24 10 e8 39 2d f7 ff 41 80 3f 01 75 05 e8 8e 8d d4 ff <0f> 0b e8 87 8d d4 ff eb cf 89 d9 80 e1 07 80 c1 03 38 c1 0f 8c 5c
+RSP: 0018:ffffc900063d79c8 EFLAGS: 00010286
+RAX: ffff888062300000 RBX: 0000000000000017 RCX: 0000000000027cdb
+RDX: 00000000000003ff RSI: 0000000000000000 RDI: 0000000000000000
+RBP: 00007fff68bed000 R08: ffffffff81731a29 R09: 0000000006b081e3
+R10: 0000000000000000 R11: 0000000000000002 R12: 0000000000000016
+R13: 0000000000000000 R14: dffffc0000000000 R15: ffffffff9752fbb0
+FS:  00007fe682702700(0000) GS:ffff888062300000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00005576381051d8 CR3: 000000002354c000 CR4: 00000000003506e0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+Call Trace:
+ <TASK>
+ do_vmi_align_munmap+0x1bf0/0x1f10 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/mmap.c:2560
+ do_vmi_munmap+0x2d7/0x3e0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/mmap.c:2623
+ mmap_region+0x816/0x41d0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/mmap.c:2673
+ do_mmap+0xa9d/0x1400 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/mmap.c:1354
+ vm_mmap_pgoff+0x1c6/0x330 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/util.c:546
+ ksys_mmap_pgoff+0x550/0x930 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/mmap.c:1400
+ do_syscall_x64 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:51 [inline]
+ do_syscall_64+0x50/0xa0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:82
+ entry_SYSCALL_64_after_hwframe+0x63/0xcd
+RIP: 0033:0x47b089
+Code: 00 00 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 44 00 00 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 b8 ff ff ff f7 d8 64 89 01 48
+RSP: 002b:00007fe682701bc8 EFLAGS: 00000246 ORIG_RAX: 0000000000000009
+RAX: ffffffffffffffda RBX: 00000000007a1428 RCX: 000000000047b089
+RDX: 0000000000000000 RSI: 0000000000800000 RDI: 0000000020800000
+RBP: 0000000000000000 R08: 0000000000000004 R09: 0000000000000000
+R10: 0000000000000012 R11: 0000000000000246 R12: 0000000000000000
+R13: 00000000007a1434 R14: 00000000007a1428 R15: 00007fff68bb6770
+ </TASK>
+Modules linked in:
+---[ end trace 0000000000000000 ]---
+RIP: 0010:validate_mm+0x6e2/0x710 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/mm/mmap.c:328
+Code: 74 2a 48 c7 c7 e0 9d a0 8f 89 de 44 89 e2 31 c0 e8 b3 7f 6f 0d 48 8b 7c 24 10 e8 39 2d f7 ff 41 80 3f 01 75 05 e8 8e 8d d4 ff <0f> 0b e8 87 8d d4 ff eb cf 89 d9 80 e1 07 80 c1 03 38 c1 0f 8c 5c
+RSP: 0018:ffffc900063d79c8 EFLAGS: 00010286
+RAX: ffff888062300000 RBX: 0000000000000017 RCX: 0000000000027cdb
+RDX: 00000000000003ff RSI: 0000000000000000 RDI: 0000000000000000
+RBP: 00007fff68bed000 R08: ffffffff81731a29 R09: 0000000006b081e3
+R10: 0000000000000000 R11: 0000000000000002 R12: 0000000000000016
+R13: 0000000000000000 R14: dffffc0000000000 R15: ffffffff9752fbb0
+FS:  00007fe682702700(0000) GS:ffff888062300000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00007f0f84023000 CR3: 000000002354c000 CR4: 00000000003506e0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
