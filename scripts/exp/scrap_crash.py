@@ -59,6 +59,12 @@ def scrap_crash(crash, exp_dir, kernels_dir):
     except:
         pass
 
+    misc = "misc"
+    misc_file = os.path.join(report_dir, misc)
+    if os.path.isfile(misc_file):
+        dst = os.path.join(outdir, misc)
+        shutil.copyfile(misc_file, dst)
+
 
 def scrap_crashes(crashes):
     exp_dir = os.environ["EXP_DIR"]
