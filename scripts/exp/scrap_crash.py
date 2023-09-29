@@ -12,6 +12,7 @@ def get_kernel_hash(crash):
         kernel_hsh = crashes_dir[len(PREFIX) :]
     else:
         kernel_hsh = "unknown"
+    print(kernel_hsh)
 
     return kernel_hsh
 
@@ -28,8 +29,9 @@ def get_kernel_info(crash, kernels_dir):
 
     kernel_info = ""
     kernel_info += build_history[0]
+    print(kernel_info)
     for h in build_history[1:]:
-        if h.find(kernel_hsh):
+        if h.find(kernel_hsh) != -1:
             kernel_info += h
     return kernel_info
 
