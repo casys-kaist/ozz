@@ -63,7 +63,7 @@ func (proc *Proc) relieveMemoryPressure() {
 
 func (proc *Proc) investComputingToSchedule() {
 	fuzzerSnapshot := proc.fuzzer.snapshot()
-	for cnt := 0; proc.needScheduling() && cnt < 5; cnt++ {
+	for cnt := 0; proc.needScheduling() && cnt < 10; cnt++ {
 		proc.scheduleInput(fuzzerSnapshot)
 	}
 }
@@ -141,9 +141,9 @@ func (proc *Proc) needScheduling() bool {
 }
 
 func (bal balancer) needScheduling(r *rand.Rand) bool {
-	// prob = 1 / (1 + exp(-25 * (-x + 0.25))) where x = (scheduled/executed)
+	// prob = 1 / (1 + exp(-30 * (-x + 0.5))) where x = (scheduled/executed)
 	x := float64(bal.scheduled) / float64(bal.executed)
-	prob1000 := int(1 / (1 + math.Exp(-30*(-1*x+0.25))) * 1000)
+	prob1000 := int(1 / (1 + math.Exp(-30*(-1*x+0.5))) * 1000)
 	if prob1000 < 50 {
 		prob1000 = 50
 	}
