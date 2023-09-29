@@ -5,12 +5,19 @@ import shutil
 import sys
 
 
-def get_kernel_info(exp_dir, kernels_dir):
-    try:
-        with open(os.path.join(exp_dir, "x86_64", "workdir", "running")) as f:
-            kernel_hsh = f.read().strip()
-    except:
+def get_kernel_hash(crash):
+    crashes_dir = os.path.basename(os.path.dirname(crash))
+    PREFIX = "crashes-"
+    if crashes_dir.startswith(PREFIX):
+        kernel_hsh = crashes_dir[len(PREFIX) :]
+    else:
         kernel_hsh = "unknown"
+
+    return kernel_hsh
+
+
+def get_kernel_info(crash, kernels_dir):
+    kernel_hsh = get_kernel_hash(crash)
 
     try:
         with open(os.path.join(kernels_dir, "guest", "BUILD_HISTORY")) as f:
@@ -28,11 +35,13 @@ def get_kernel_info(exp_dir, kernels_dir):
 
 
 def scrap_crash(crash, exp_dir, kernels_dir):
+    crash = os.path.normpath(crash)
+
     report_dir = os.path.join(exp_dir, "report")
 
-    crash_hash = os.path.basename(os.path.normpath(crash))
+    crash_hash = os.path.basename(crash)
     outdir = os.path.join(report_dir, crash_hash)
-    os.makedirs(outdir)
+    os.makedirs(outdir, exist_ok=True)
     for root, _, files in os.walk(crash):
         for file in files:
             if file.startswith("machineInfo"):
@@ -41,7 +50,7 @@ def scrap_crash(crash, exp_dir, kernels_dir):
             dst = os.path.join(outdir, file)
             shutil.copyfile(src, dst)
 
-    kernel_info = get_kernel_info(exp_dir, kernels_dir)
+    kernel_info = get_kernel_info(crash, kernels_dir)
     try:
         with open(os.path.join(outdir, "kernel_info"), "w") as f:
             f.write(kernel_info)
