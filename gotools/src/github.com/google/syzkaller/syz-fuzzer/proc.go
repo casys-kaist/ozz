@@ -39,9 +39,6 @@ type Proc struct {
 	// proc.fuzzer.Stats and proc.env.StatExec as it is periodically
 	// set to 0.
 	balancer balancer
-	// If scheduled is too large, we block Proc.pickupThreadingWorks()
-	// to give more chance to sequential-fuzzing.
-	threadingPlugged bool
 }
 
 func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
@@ -92,7 +89,7 @@ func (proc *Proc) loop() {
 		generatePeriod = 2
 	}
 	for i := 0; ; i++ {
-		proc.powerSchedule(i%100 == 0)
+		proc.powerSchedule()
 
 		item := proc.fuzzer.workQueue.dequeue()
 		if item != nil {
@@ -423,10 +420,6 @@ func (proc *Proc) postExecute(p *prog.Prog, flags ProgTypes, info *ipc.ProgInfo)
 }
 
 func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
-	if proc.threadingPlugged {
-		return
-	}
-
 	notTooFar := func(c1, c2 int) bool {
 		maxIntermediateCalls := 5
 		dist := (c2 - c1 - 1)

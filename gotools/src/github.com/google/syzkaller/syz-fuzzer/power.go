@@ -30,7 +30,7 @@ func MonitorMemUsage() {
 	log.Logf(0, "\tNumGC = %v\n", m.NumGC)
 }
 
-func (proc *Proc) powerSchedule(adjustPlug bool) {
+func (proc *Proc) powerSchedule() {
 	// Most of computation in proc.loop() is used to handle workqueue
 	// items. So proc.loop() has a little bit low chance to go fuzz
 	// (i.e., gen, fuzz, sched). To compensate it, execute
@@ -38,9 +38,6 @@ func (proc *Proc) powerSchedule(adjustPlug bool) {
 	proc.relieveMemoryPressure()
 	proc.investComputingToSchedule()
 	proc.balancer.print()
-	if adjustPlug {
-		proc.adjustPlug()
-	}
 }
 
 func (proc *Proc) relieveMemoryPressure() {
@@ -82,28 +79,6 @@ func (fuzzer *Fuzzer) spillThreading() bool {
 
 func (fuzzer *Fuzzer) spillScheduling() bool {
 	return fuzzer.spillCollection(CollectionScheduleHint, spillThreshold)
-}
-
-func (proc *Proc) adjustPlug() {
-	if proc.threadingPlugged {
-		proc.unplugThreading()
-	} else {
-		proc.plugThreading()
-	}
-}
-
-func (proc *Proc) unplugThreading() {
-	if proc.balancer.scheduled < uint64(float64(proc.balancer.executed)*0.4) {
-		proc.fuzzer.addCollection(CollectionUnplug, 1)
-		proc.threadingPlugged = false
-	}
-}
-
-func (proc *Proc) plugThreading() {
-	if proc.balancer.scheduled > uint64(float64(proc.balancer.executed)*0.7) {
-		proc.fuzzer.addCollection(CollectionPlug, 1)
-		proc.threadingPlugged = true
-	}
 }
 
 type balancer struct {
