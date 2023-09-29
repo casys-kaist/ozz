@@ -30,7 +30,7 @@ def get_kernel_info(exp_dir, kernels_dir):
 def scrap_crash(crash, exp_dir, kernels_dir):
     report_dir = os.path.join(exp_dir, "report")
 
-    crash_hash = os.path.basename(crash)
+    crash_hash = os.path.basename(os.path.normpath(crash))
     outdir = os.path.join(report_dir, crash_hash)
     os.makedirs(outdir)
     for root, _, files in os.walk(crash):
