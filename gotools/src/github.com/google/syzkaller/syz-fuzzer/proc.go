@@ -421,7 +421,7 @@ func (proc *Proc) postExecute(p *prog.Prog, flags ProgTypes, info *ipc.ProgInfo)
 
 func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 	notTooFar := func(c1, c2 int) bool {
-		maxIntermediateCalls := 5
+		maxIntermediateCalls := 10
 		dist := (c2 - c1 - 1)
 		return dist < maxIntermediateCalls
 	}
