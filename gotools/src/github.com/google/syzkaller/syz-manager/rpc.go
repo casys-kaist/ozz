@@ -448,7 +448,7 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 }
 
 func (serv *RPCServer) accumulateInstCount(a *rpctype.PollArgs) {
-	const thold = 100000
+	const thold = 10000
 	for i := 0; i < len(a.InstCount); i += 2 {
 		k, v := a.InstCount[i], a.InstCount[i+1]
 		serv.instCount[k] += v
