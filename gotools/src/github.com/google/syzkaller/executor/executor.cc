@@ -975,11 +975,30 @@ bool run_in_epoch(thread_t* th)
 	return __run_in_epoch(th->epoch, global_epoch);
 }
 
+void prepare_kssb(void)
+{
+	int num_th = (flag_turn_on_kssb ? 2 : 1);
+	// After enabling kssb, syscalls can be slow down 10x, meaning
+	// creating threads also takes so much time. Preparew worker
+	// threads to reduce the thread-creating latency.
+	for (int i = 0; i < num_th; i++) {
+		thread_t* th = get_thread(i);
+		if (!th->created)
+			thread_create(th, i, cover_collection_required());
+	}
+	WARN_ON_NOT_NULL(hypercall(HCALL_RESET, 0, 0, 0), "HCALL_RESET");
+	enable_kssb();
+}
+
+void finalize_kssb(void)
+{
+	disable_kssb();
+}
+
 // execute_one executes program stored in input_data.
 void execute_one()
 {
-	WARN_ON_NOT_NULL(hypercall(HCALL_RESET, 0, 0, 0), "HCALL_RESET");
-	enable_kssb();
+	prepare_kssb();
 #if SYZ_EXECUTOR_USES_SHMEM
 	realloc_output_data();
 	output_pos = output_data;
@@ -1231,7 +1250,7 @@ void execute_one()
 		sleep_ms(kSleepMs);
 		write_extra_output();
 	}
-	disable_kssb();
+	finalize_kssb();
 }
 
 void feed_flush_vector(int* vector, int vector_size, struct kssb_flush_table_entry* table, int table_size)
