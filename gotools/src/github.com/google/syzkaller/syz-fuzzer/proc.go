@@ -420,15 +420,14 @@ func (proc *Proc) postExecute(p *prog.Prog, flags ProgTypes, info *ipc.ProgInfo)
 }
 
 func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
-	notTooFar := func(c1, c2 int) bool {
-		maxIntermediateCalls := 10
-		dist := (c2 - c1 - 1)
-		return dist < maxIntermediateCalls
-	}
-	for c1 := 0; c1 < len(p.Calls); c1++ {
-		for c2 := c1 + 1; c2 < len(p.Calls) && notTooFar(c1, c2); c2++ {
-			if proc.fuzzer.shutOffThreading(p) {
-				return
+	const maxDist = 10
+	start := time.Now()
+	log.Logf(0, "pick up threading works at %v", start)
+	for dist := 1; dist < maxDist; dist++ {
+		for c1 := 0; c1 < len(p.Calls); c1++ {
+			c2 := c1 + dist
+			if c2 >= len(p.Calls) {
+				break
 			}
 			cont := prog.Contender{Calls: []int{c1, c2}}
 			seq := proc.sequentialAccesses(info, cont)
@@ -438,6 +437,14 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 			}
 			if newHints := proc.fuzzer.getNewKnot(hints); len(newHints) != 0 {
 				proc.enqueueThreading(p, cont, newHints)
+			}
+			if time.Since(start) > 10*time.Minute {
+				// At this point computing hints can be very slow and
+				// I suspect that it can cause "no output from test
+				// machine". Stop calculating hints if it takes too
+				// long time.
+				atomic.AddUint64(&proc.fuzzer.stats[StatThreadWorkTimeout], 1)
+				return
 			}
 		}
 	}

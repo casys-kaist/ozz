@@ -129,22 +129,24 @@ const (
 	StatBufferTooSmall
 	StatThreading
 	StatSchedule
+	StatThreadWorkTimeout
 	StatCount
 )
 
 var statNames = [StatCount]string{
-	StatGenerate:       "exec gen",
-	StatFuzz:           "exec fuzz",
-	StatCandidate:      "exec candidate",
-	StatTriage:         "exec triage",
-	StatMinimize:       "exec minimize",
-	StatSmash:          "exec smash",
-	StatHint:           "exec hints",
-	StatSeed:           "exec seeds",
-	StatCollide:        "exec collide",
-	StatThreading:      "exec threadings",
-	StatSchedule:       "exec schedulings",
-	StatBufferTooSmall: "buffer too small",
+	StatGenerate:          "exec gen",
+	StatFuzz:              "exec fuzz",
+	StatCandidate:         "exec candidate",
+	StatTriage:            "exec triage",
+	StatMinimize:          "exec minimize",
+	StatSmash:             "exec smash",
+	StatHint:              "exec hints",
+	StatSeed:              "exec seeds",
+	StatCollide:           "exec collide",
+	StatThreading:         "exec threadings",
+	StatSchedule:          "exec schedulings",
+	StatBufferTooSmall:    "buffer too small",
+	StatThreadWorkTimeout: "threading work timeout",
 }
 
 type OutputType int
