@@ -197,6 +197,11 @@ func RunManager(cfg *mgrconfig.Config) {
 
 	crashdir := filepath.Join(cfg.Workdir, fmt.Sprintf("crashes-%v", hex.EncodeToString(hsh)))
 	osutil.MkdirAll(crashdir)
+	crashSym := filepath.Join(cfg.Workdir, fmt.Sprintf("crashes"))
+	if _, err := os.Lstat(crashSym); err == nil {
+		os.Remove(crashSym)
+	}
+	os.Symlink(crashdir, crashSym)
 
 	reporter, err := report.NewReporter(cfg)
 	if err != nil {
