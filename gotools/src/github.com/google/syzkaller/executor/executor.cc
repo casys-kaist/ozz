@@ -979,6 +979,7 @@ bool run_in_epoch(thread_t* th)
 void execute_one()
 {
 	WARN_ON_NOT_NULL(hypercall(HCALL_RESET, 0, 0, 0), "HCALL_RESET");
+	enable_kssb();
 #if SYZ_EXECUTOR_USES_SHMEM
 	realloc_output_data();
 	output_pos = output_data;
@@ -1230,6 +1231,7 @@ void execute_one()
 		sleep_ms(kSleepMs);
 		write_extra_output();
 	}
+	disable_kssb();
 }
 
 void feed_flush_vector(int* vector, int vector_size, struct kssb_flush_table_entry* table, int table_size)
