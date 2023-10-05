@@ -420,7 +420,7 @@ func (proc *Proc) postExecute(p *prog.Prog, flags ProgTypes, info *ipc.ProgInfo)
 }
 
 func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
-	const maxDist = 10
+	const maxDist = 5
 	start := time.Now()
 	log.Logf(0, "pick up threading works at %v", start)
 	for dist := 1; dist < maxDist; dist++ {
