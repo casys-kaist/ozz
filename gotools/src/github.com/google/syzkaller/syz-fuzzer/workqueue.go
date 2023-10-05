@@ -80,6 +80,14 @@ func newWorkQueue(procs int, needCandidates chan struct{}) *WorkQueue {
 	}
 }
 
+func (wq *WorkQueue) stats() (uint64, uint64, uint64, uint64, uint64) {
+	return uint64(len(wq.triageCandidate)),
+		uint64(len(wq.candidate)),
+		uint64(len(wq.triage)),
+		uint64(len(wq.smash)),
+		uint64(len(wq.threading))
+}
+
 func (wq *WorkQueue) enqueue(item interface{}) {
 	wq.mu.Lock()
 	defer wq.mu.Unlock()

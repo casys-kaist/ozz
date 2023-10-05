@@ -293,6 +293,7 @@ func (proc *Proc) triageInput(item *WorkTriage) {
 
 	if item.flags&ProgSmashed == 0 && proc.fuzzer.generate {
 		proc.fuzzer.workQueue.enqueue(&WorkSmash{item.p, item.call})
+		proc.fuzzer.collectionWorkqueue(proc.fuzzer.workQueue.stats())
 	}
 }
 
@@ -535,6 +536,7 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 		info:  info,
 		flags: flags,
 	})
+	proc.fuzzer.collectionWorkqueue(proc.fuzzer.workQueue.stats())
 }
 
 func (proc *Proc) executeAndCollide(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes, stat Stat) {
@@ -565,6 +567,7 @@ func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, knots []i
 		calls: calls,
 		knots: knots,
 	})
+	proc.fuzzer.collectionWorkqueue(proc.fuzzer.workQueue.stats())
 }
 
 func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.ProgInfo {

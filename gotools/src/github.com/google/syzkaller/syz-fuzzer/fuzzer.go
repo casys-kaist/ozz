@@ -105,13 +105,23 @@ const (
 	CollectionScheduleHint Collection = iota
 	CollectionThreadingHint
 	CollectionConcurrentCalls
+	CollectionWQTriage
+	CollectionWQTriageCandidate
+	CollectionWQCandidate
+	CollectionWQSmash
+	CollectionWQThreading
 	CollectionCount
 )
 
 var collectionNames = [CollectionCount]string{
-	CollectionScheduleHint:    "schedule hint",
-	CollectionThreadingHint:   "threading hint",
-	CollectionConcurrentCalls: "concurrent calls",
+	CollectionScheduleHint:      "schedule hint",
+	CollectionThreadingHint:     "threading hint",
+	CollectionConcurrentCalls:   "concurrent calls",
+	CollectionWQTriage:          "workqueue triage",
+	CollectionWQTriageCandidate: "workqueue triage candidate",
+	CollectionWQCandidate:       "workqueue candidate",
+	CollectionWQSmash:           "workqueue smash",
+	CollectionWQThreading:       "workqueue threading",
 }
 
 type Stat int
@@ -621,6 +631,7 @@ func (fuzzer *Fuzzer) addCandidateInput(candidate rpctype.Candidate) {
 		p:     p,
 		flags: flags,
 	})
+	fuzzer.collectionWorkqueue(fuzzer.workQueue.stats())
 }
 
 func (fuzzer *Fuzzer) deserializeInput(inp []byte) *prog.Prog {
@@ -914,6 +925,16 @@ func (fuzzer *Fuzzer) sendUsedKnots(used []interleaving.Segment) {
 	if err := fuzzer.manager.Call("Manager.SendUsedKnots", a, nil); err != nil {
 		log.Fatalf("failed to call Manager.Connect(): %v ", err)
 	}
+}
+
+func (fuzzer *Fuzzer) collectionWorkqueue(tricand, cand, tri, smash, thr uint64) {
+	fuzzer.corpusMu.Lock()
+	defer fuzzer.corpusMu.Unlock()
+	fuzzer.collection[CollectionWQTriageCandidate] = tricand
+	fuzzer.collection[CollectionWQCandidate] = cand
+	fuzzer.collection[CollectionWQTriage] = tri
+	fuzzer.collection[CollectionWQSmash] = smash
+	fuzzer.collection[CollectionWQThreading] = thr
 }
 
 func signalPrio(p *prog.Prog, info *ipc.CallInfo, call int) (prio uint8) {
