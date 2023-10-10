@@ -116,6 +116,8 @@ type Manager struct {
 	coverFilterBitmap  []byte
 	modulesInitialized bool
 
+	durations []int64
+
 	assetStorage *asset.Storage
 	usedKnotFile *os.File
 }
@@ -238,6 +240,7 @@ func RunManager(cfg *mgrconfig.Config) {
 		usedFiles:        make(map[string]time.Time),
 		saturatedCalls:   make(map[string]bool),
 		seedType:         *flagSeed,
+		durations:        make([]int64, 10),
 		binImage:         binImage,
 	}
 
@@ -1808,7 +1811,7 @@ func (mgr *Manager) dumpCoverageToFile(dir, filename string, cov bytes.Buffer) {
 func (mgr *Manager) recordKnot(knot interleaving.Knot) {
 	// XXX: Tentative implementation. Definitely terrible.
 	mgr.usedKnotFile.WriteString(
-		fmt.Sprintf("%x --> %x\n%x --> %x\n---------------------",
+		fmt.Sprintf("%x --> %x\n%x --> %x\n---------------------\n",
 			knot[0].Former().Inst, knot[0].Latter().Inst,
 			knot[1].Former().Inst, knot[1].Latter().Inst))
 }

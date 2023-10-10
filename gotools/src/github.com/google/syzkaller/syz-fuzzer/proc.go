@@ -88,19 +88,25 @@ func (proc *Proc) loop() {
 		// because fallback signal is weak.
 		generatePeriod = 2
 	}
-	for i := 0; ; i++ {
-		proc.powerSchedule()
 
+	for i := 0; ; i++ {
+		proc.fuzzer.m.end()
+		proc.powerSchedule()
+		proc.fuzzer.m.start()
 		item := proc.fuzzer.workQueue.dequeue()
 		if item != nil {
 			switch item := item.(type) {
 			case *WorkTriage:
+				proc.fuzzer.m.mark(triage)
 				proc.triageInput(item)
 			case *WorkCandidate:
+				proc.fuzzer.m.mark(candidate)
 				proc.executeCandidate(item)
 			case *WorkSmash:
+				proc.fuzzer.m.mark(smash)
 				proc.smashInput(item)
 			case *WorkThreading:
+				proc.fuzzer.m.mark(threading)
 				proc.threadingInput(item)
 			default:
 				log.Fatalf("unknown work type: %#v", item)
@@ -111,17 +117,20 @@ func (proc *Proc) loop() {
 		ct := proc.fuzzer.choiceTable
 		fuzzerSnapshot := proc.fuzzer.snapshot()
 		if (len(fuzzerSnapshot.corpus) == 0 || i%generatePeriod == 0) && proc.fuzzer.generate {
+			proc.fuzzer.m.mark(gen)
 			// Generate a new prog.
 			p := proc.fuzzer.target.Generate(proc.rnd, prog.RecommendedCalls, ct)
 			log.Logf(1, "#%v: generated", proc.pid)
 			proc.executeAndCollide(proc.execOpts, p, ProgNormal, StatGenerate)
 		} else if i%2 == 1 && proc.fuzzer.generate {
+			proc.fuzzer.m.mark(fuzz)
 			// Mutate an existing prog.
 			p := fuzzerSnapshot.chooseProgram(proc.rnd).Clone()
 			p.Mutate(proc.rnd, prog.RecommendedCalls, ct, proc.fuzzer.noMutate, fuzzerSnapshot.corpus)
 			log.Logf(1, "#%v: mutated", proc.pid)
 			proc.executeAndCollide(proc.execOpts, p, ProgNormal, StatFuzz)
 		} else {
+			proc.fuzzer.m.mark(schedule)
 			// Mutate a schedule of an existing prog.
 			proc.scheduleInput(fuzzerSnapshot)
 		}
@@ -184,7 +193,6 @@ func (proc *Proc) pruneHint(hint []interleaving.Segment) []interleaving.Segment 
 }
 
 func (proc *Proc) setHint(tp *prog.ConcurrentCalls, remaining []interleaving.Segment) {
-	debugHint(tp, remaining)
 	used := len(tp.Hint) - len(remaining)
 	proc.fuzzer.subCollection(CollectionScheduleHint, uint64(used))
 	proc.fuzzer.corpusMu.Lock()

@@ -1,35 +1,12 @@
 package main
 
 import (
+	"sync"
+	"time"
+
 	"github.com/google/syzkaller/pkg/interleaving"
 	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/prog"
 )
-
-func debugHint(tp *prog.ConcurrentCalls, remaining []interleaving.Segment) {
-	if !_debug {
-		return
-	}
-	before := testingHints(tp.Hint)
-	after := testingHints(remaining)
-	if before && !after {
-		log.Logf(0, "This input should crash")
-	}
-}
-
-// XXX: For the dedug purpose
-func testingHints(hint []interleaving.Segment) bool {
-	var answer = interleaving.Knot{
-		{{Inst: 0x81f9ebf6, Size: 4, Typ: interleaving.TypeStore}, {Inst: 0x81f9f2e8, Size: 4, Typ: interleaving.TypeLoad}},
-		{{Inst: 0x8d576644, Size: 4, Typ: interleaving.TypeStore}, {Inst: 0x8d5924a3, Size: 4, Typ: interleaving.TypeLoad}}}
-	for _, knot0 := range hint {
-		knot := knot0.(interleaving.Knot)
-		if knot.Same(answer) {
-			return true
-		}
-	}
-	return false
-}
 
 func printSeq(seq []interleaving.SerialAccess) {
 	for i, serial := range seq {
@@ -38,6 +15,72 @@ func printSeq(seq []interleaving.SerialAccess) {
 			log.Logf(0, "%v", acc)
 		}
 	}
+}
+
+const (
+	idle = iota
+	triage
+	candidate
+	smash
+	threading
+	gen
+	fuzz
+	schedule
+	total
+	count
+)
+
+type monitor struct {
+	ts    time.Time
+	typ   int
+	rec   [count]time.Duration
+	total time.Duration
+	sync.RWMutex
+}
+
+func (m *monitor) start() {
+	if !_debug {
+		return
+	}
+	m.Lock()
+	defer m.Unlock()
+	m.ts = time.Now()
+	// To make end() panic if mark is not executed
+	m.typ = total
+}
+
+func (m *monitor) end() {
+	if !_debug || m.typ == idle {
+		return
+	}
+	m.Lock()
+	defer m.Unlock()
+	e := time.Since(m.ts)
+	if !(0 < m.typ && m.typ < total) {
+		panic("debug wrong")
+	}
+	m.rec[m.typ] += e
+	m.rec[total] += e
+	m.typ = idle
+}
+
+func (m *monitor) mark(t int) {
+	if !_debug {
+		return
+	}
+	m.Lock()
+	defer m.Unlock()
+	m.typ = t
+}
+
+func (m *monitor) get() map[Collection]uint64 {
+	m.Lock()
+	defer m.Unlock()
+	res := make(map[Collection]uint64)
+	for i := 1; i < count; i++ {
+		res[CollectionDurationTriage+Collection(i)-1] = uint64(m.rec[i].Nanoseconds())
+	}
+	return res
 }
 
 var _debug bool = true

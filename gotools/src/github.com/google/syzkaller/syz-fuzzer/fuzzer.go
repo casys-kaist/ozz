@@ -86,6 +86,8 @@ type Fuzzer struct {
 	// procs do not generate/mutate inputs but schedule.
 	generate bool
 
+	m monitor
+
 	checkResult *rpctype.CheckArgs
 	logMu       sync.Mutex
 }
@@ -110,6 +112,14 @@ const (
 	CollectionWQCandidate
 	CollectionWQSmash
 	CollectionWQThreading
+	CollectionDurationTriage
+	CollectionDurationCandidate
+	CollectionDurationSmash
+	CollectionDurationThreading
+	CollectionDurationGen
+	CollectionDurationFuzz
+	CollectionDurationSchedule
+	CollectionDurationTotal
 	CollectionCount
 )
 
@@ -122,6 +132,14 @@ var collectionNames = [CollectionCount]string{
 	CollectionWQCandidate:       "workqueue candidate",
 	CollectionWQSmash:           "workqueue smash",
 	CollectionWQThreading:       "workqueue threading",
+	CollectionDurationTriage:    "duration triage",
+	CollectionDurationCandidate: "duration candidate",
+	CollectionDurationSmash:     "duration smash",
+	CollectionDurationThreading: "duration threading",
+	CollectionDurationGen:       "duration gen",
+	CollectionDurationFuzz:      "duration fuzz",
+	CollectionDurationSchedule:  "duration schedule",
+	CollectionDurationTotal:     "duration total",
 }
 
 type Stat int
@@ -519,6 +537,10 @@ func (fuzzer *Fuzzer) pollLoop() {
 				v := atomic.LoadUint64(&fuzzer.collection[collection])
 				collections[name] = v
 			}
+			for c, v := range fuzzer.m.get() {
+				name := fuzzer.name + "-" + collectionNames[c]
+				collections[name] = v / 1000 / 1000 / 1000 // ns -> s
+			}
 			if !fuzzer.poll(needCandidates, stats, collections) {
 				lastPoll = time.Now()
 			}
@@ -549,8 +571,7 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 		MaxInterleaving: fuzzer.grabNewInterleaving().Serialize(),
 		Stats:           stats,
 		Collections:     collections,
-
-		InstCount: fuzzer.serializeInstCount(&fuzzer.instCount),
+		InstCount:       fuzzer.serializeInstCount(&fuzzer.instCount),
 	}
 	if len(fuzzer.instCount) != 0 {
 		panic("wrong")
