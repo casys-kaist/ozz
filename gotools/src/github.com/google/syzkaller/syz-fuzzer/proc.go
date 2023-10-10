@@ -92,21 +92,20 @@ func (proc *Proc) loop() {
 	for i := 0; ; i++ {
 		proc.fuzzer.m.end()
 		proc.powerSchedule()
-		proc.fuzzer.m.start()
 		item := proc.fuzzer.workQueue.dequeue()
 		if item != nil {
 			switch item := item.(type) {
 			case *WorkTriage:
-				proc.fuzzer.m.mark(triage)
+				proc.fuzzer.m.start(triage)
 				proc.triageInput(item)
 			case *WorkCandidate:
-				proc.fuzzer.m.mark(candidate)
+				proc.fuzzer.m.start(candidate)
 				proc.executeCandidate(item)
 			case *WorkSmash:
-				proc.fuzzer.m.mark(smash)
+				proc.fuzzer.m.start(smash)
 				proc.smashInput(item)
 			case *WorkThreading:
-				proc.fuzzer.m.mark(threading)
+				proc.fuzzer.m.start(threading)
 				proc.threadingInput(item)
 			default:
 				log.Fatalf("unknown work type: %#v", item)
@@ -117,20 +116,20 @@ func (proc *Proc) loop() {
 		ct := proc.fuzzer.choiceTable
 		fuzzerSnapshot := proc.fuzzer.snapshot()
 		if (len(fuzzerSnapshot.corpus) == 0 || i%generatePeriod == 0) && proc.fuzzer.generate {
-			proc.fuzzer.m.mark(gen)
+			proc.fuzzer.m.start(gen)
 			// Generate a new prog.
 			p := proc.fuzzer.target.Generate(proc.rnd, prog.RecommendedCalls, ct)
 			log.Logf(1, "#%v: generated", proc.pid)
 			proc.executeAndCollide(proc.execOpts, p, ProgNormal, StatGenerate)
 		} else if i%2 == 1 && proc.fuzzer.generate {
-			proc.fuzzer.m.mark(fuzz)
+			proc.fuzzer.m.start(fuzz)
 			// Mutate an existing prog.
 			p := fuzzerSnapshot.chooseProgram(proc.rnd).Clone()
 			p.Mutate(proc.rnd, prog.RecommendedCalls, ct, proc.fuzzer.noMutate, fuzzerSnapshot.corpus)
 			log.Logf(1, "#%v: mutated", proc.pid)
 			proc.executeAndCollide(proc.execOpts, p, ProgNormal, StatFuzz)
 		} else {
-			proc.fuzzer.m.mark(schedule)
+			proc.fuzzer.m.start(schedule)
 			// Mutate a schedule of an existing prog.
 			proc.scheduleInput(fuzzerSnapshot)
 		}
@@ -359,6 +358,12 @@ func (proc *Proc) threadingInput(item *WorkThreading) {
 		return
 	}
 
+	prev := proc.fuzzer.m.end()
+	proc.fuzzer.m.start(calc2)
+	defer func() {
+		proc.fuzzer.m.end()
+		proc.fuzzer.m.start(prev)
+	}()
 	// newly found knots during threading work
 	newKnots := proc.fuzzer.getNewKnot(knots)
 	// knots that actually occurred among speculated knots
@@ -377,9 +382,13 @@ func (proc *Proc) executeThreading(p *prog.Prog) []interleaving.Segment {
 	hints := []interleaving.Segment{}
 	for i := 0; i < 2; i++ {
 		inf := proc.executeRaw(proc.execOpts, p, StatThreading)
+		prev := proc.fuzzer.m.end()
+		proc.fuzzer.m.start(calc2)
 		seq := proc.sequentialAccesses(inf, p.Contender)
 		hints = append(hints, scheduler.ComputeHints(seq)...)
 		p.Reverse()
+		proc.fuzzer.m.end()
+		proc.fuzzer.m.start(prev)
 	}
 	return hints
 }
@@ -429,6 +438,12 @@ func (proc *Proc) postExecute(p *prog.Prog, flags ProgTypes, info *ipc.ProgInfo)
 }
 
 func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
+	prev := proc.fuzzer.m.end()
+	proc.fuzzer.m.start(calc1)
+	defer func() {
+		proc.fuzzer.m.end()
+		proc.fuzzer.m.start(prev)
+	}()
 	const maxDist = 5
 	start := time.Now()
 	log.Logf(0, "pick up threading works at %v", start)

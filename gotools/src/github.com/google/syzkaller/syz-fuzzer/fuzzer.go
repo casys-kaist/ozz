@@ -119,6 +119,8 @@ const (
 	CollectionDurationGen
 	CollectionDurationFuzz
 	CollectionDurationSchedule
+	CollectionDurationCalc1
+	CollectionDurationCalc2
 	CollectionDurationTotal
 	CollectionCount
 )
@@ -139,6 +141,8 @@ var collectionNames = [CollectionCount]string{
 	CollectionDurationGen:       "duration gen",
 	CollectionDurationFuzz:      "duration fuzz",
 	CollectionDurationSchedule:  "duration schedule",
+	CollectionDurationCalc1:     "duration calc1",
+	CollectionDurationCalc2:     "duration calc2",
 	CollectionDurationTotal:     "duration total",
 }
 

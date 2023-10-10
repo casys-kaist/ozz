@@ -26,6 +26,8 @@ const (
 	gen
 	fuzz
 	schedule
+	calc1
+	calc2
 	total
 	count
 )
@@ -38,20 +40,19 @@ type monitor struct {
 	sync.RWMutex
 }
 
-func (m *monitor) start() {
+func (m *monitor) start(t int) {
 	if !_debug {
 		return
 	}
 	m.Lock()
 	defer m.Unlock()
 	m.ts = time.Now()
-	// To make end() panic if mark is not executed
-	m.typ = total
+	m.typ = t
 }
 
-func (m *monitor) end() {
+func (m *monitor) end() int {
 	if !_debug || m.typ == idle {
-		return
+		return idle
 	}
 	m.Lock()
 	defer m.Unlock()
@@ -61,16 +62,9 @@ func (m *monitor) end() {
 	}
 	m.rec[m.typ] += e
 	m.rec[total] += e
+	r := m.typ
 	m.typ = idle
-}
-
-func (m *monitor) mark(t int) {
-	if !_debug {
-		return
-	}
-	m.Lock()
-	defer m.Unlock()
-	m.typ = t
+	return r
 }
 
 func (m *monitor) get() map[Collection]uint64 {

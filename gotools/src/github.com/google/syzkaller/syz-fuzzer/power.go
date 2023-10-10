@@ -50,13 +50,11 @@ func (proc *Proc) relieveMemoryPressure() {
 	for cnt := 0; (needSchedule || needThreading) && cnt < 10; cnt++ {
 		log.Logf(2, "Relieving memory pressure schedule=%v threading=%v", needSchedule, needThreading)
 		if needSchedule {
-			proc.fuzzer.m.start()
-			proc.fuzzer.m.mark(schedule)
+			proc.fuzzer.m.start(schedule)
 			proc.scheduleInput(fuzzerSnapshot)
 			proc.fuzzer.m.end()
 		} else if item := proc.fuzzer.workQueue.dequeueThreading(); item != nil {
-			proc.fuzzer.m.start()
-			proc.fuzzer.m.mark(threading)
+			proc.fuzzer.m.start(threading)
 			proc.threadingInput(item)
 			proc.fuzzer.m.end()
 		}
@@ -68,14 +66,12 @@ func (proc *Proc) investComputingToSchedule() {
 	fuzzerSnapshot := proc.fuzzer.snapshot()
 	if len(fuzzerSnapshot.concurrentCalls) == 0 {
 		if item := proc.fuzzer.workQueue.dequeueThreading(); item != nil {
-			proc.fuzzer.m.start()
-			proc.fuzzer.m.mark(threading)
+			proc.fuzzer.m.start(threading)
 			proc.threadingInput(item)
 			proc.fuzzer.m.end()
 		}
 	} else {
-		proc.fuzzer.m.start()
-		proc.fuzzer.m.mark(threading)
+		proc.fuzzer.m.start(schedule)
 		proc.scheduleInput(fuzzerSnapshot)
 		proc.fuzzer.m.end()
 	}
