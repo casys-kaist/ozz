@@ -561,6 +561,9 @@ func (fuzzer *Fuzzer) serializeInstCount(instCount *map[uint32]uint32) []uint32 
 		ret = append(ret, k, v)
 	}
 	*instCount = make(map[uint32]uint32)
+	if len(fuzzer.instCount) != 0 {
+		panic("wrong")
+	}
 	return ret
 }
 
@@ -577,9 +580,6 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 		Stats:           stats,
 		Collections:     collections,
 		InstCount:       fuzzer.serializeInstCount(&fuzzer.instCount),
-	}
-	if len(fuzzer.instCount) != 0 {
-		panic("wrong")
 	}
 
 	r := &rpctype.PollRes{}
