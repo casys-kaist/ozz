@@ -74,7 +74,8 @@ def pack_corpus(raw_corpus, outdir):
 
     corpus_filename = "corpus.db"
     corpus_path = os.path.join(outdir, corpus_filename)
-    cmd = ["syz-db", "pack", raw_corpus, corpus_path]
+    curver = 4
+    cmd = ["syz-db", "--version={}".format(curver), "pack", raw_corpus, corpus_path]
     subprocess.run(cmd)
 
 
