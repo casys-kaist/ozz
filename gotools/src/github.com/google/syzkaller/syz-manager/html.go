@@ -119,6 +119,14 @@ func (mgr *Manager) collectStats() []UIStat {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
+	phaseNames := []string{
+		"Initialized",
+		"Loaded corpus",
+		"Triaged corpus",
+		"Quaried hub",
+		"Triaged hub",
+	}
+
 	configName := mgr.cfg.Name
 	if configName == "" {
 		configName = "config"
@@ -127,6 +135,7 @@ func (mgr *Manager) collectStats() []UIStat {
 	head := prog.GitRevisionBase
 	stats := []UIStat{
 		{Name: "revision", Value: fmt.Sprint(head[:8]), Link: vcs.LogLink(vcs.SyzkallerRepo, head)},
+		{Name: "phase", Value: phaseNames[mgr.phase]},
 		{Name: "config", Value: configName, Link: "/config"},
 		{Name: "uptime", Value: fmt.Sprint(time.Since(mgr.startTime) / 1e9 * 1e9)},
 		{Name: "fuzzing", Value: fmt.Sprint(mgr.fuzzingTime / 60e9 * 60e9)},
