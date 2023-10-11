@@ -81,6 +81,12 @@ func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
 	return proc, nil
 }
 
+func (proc *Proc) startCollectingAccess() {
+	proc.execOpts.Flags |= ipc.FlagCollectAccess
+	proc.execOptsCollide.Flags |= ipc.FlagCollectAccess
+	proc.execOptsCover.Flags |= ipc.FlagCollectAccess
+}
+
 func (proc *Proc) loop() {
 	generatePeriod := 100
 	if proc.fuzzer.config.Flags&ipc.FlagSignal == 0 {
@@ -434,7 +440,7 @@ func (proc *Proc) postExecute(p *prog.Prog, flags ProgTypes, info *ipc.ProgInfo)
 	if extra {
 		proc.enqueueCallTriage(p, flags, -1, info.Extra)
 	}
-	if proc.fuzzer.canSchedule() {
+	if proc.fuzzer.schedule {
 		proc.pickupThreadingWorks(p, info)
 	}
 	return info

@@ -221,6 +221,7 @@ static bool flag_threaded;
 static bool flag_coverage_filter;
 
 static bool flag_turn_on_kssb;
+static bool flag_collect_access;
 
 // If true, then executor should write the comparisons data to fuzzer.
 static bool flag_comparisons;
@@ -789,6 +790,7 @@ void receive_execute()
 	flag_threaded = true;
 	flag_coverage_filter = req.exec_flags & (1 << 5);
 	flag_turn_on_kssb = req.exec_flags & (1 << 10);
+	flag_collect_access = req.exec_flags & (1 << 11);
 	if (flag_turn_on_kssb)
 		// Enabling kssb makes syscalls about 10x slower.
 		slowdown_scale *= 10;
@@ -987,12 +989,14 @@ void prepare_kssb(void)
 			thread_create(th, i, cover_collection_required());
 	}
 	WARN_ON_NOT_NULL(hypercall(HCALL_RESET, 0, 0, 0), "HCALL_RESET");
-	enable_kssb();
+	if (flag_collect_access)
+		enable_kssb();
 }
 
 void finalize_kssb(void)
 {
-	disable_kssb();
+	if (flag_collect_access)
+		disable_kssb();
 }
 
 // execute_one executes program stored in input_data.

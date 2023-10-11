@@ -594,6 +594,9 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 	const phaseTriagedCorpus = 2
 	if r.ManagerPhase >= phaseTriagedCorpus {
 		fuzzer.schedule = true
+		for _, proc := range fuzzer.procs {
+			proc.startCollectingAccess()
+		}
 	}
 
 	fuzzer.signalMu.Lock()
@@ -966,10 +969,6 @@ func (fuzzer *Fuzzer) collectionWorkqueue(tricand, cand, tri, smash, thr uint64)
 	fuzzer.collection[CollectionWQTriage] = tri
 	fuzzer.collection[CollectionWQSmash] = smash
 	fuzzer.collection[CollectionWQThreading] = thr
-}
-
-func (fuzzer *Fuzzer) canSchedule() bool {
-	return fuzzer.schedule
 }
 
 func signalPrio(p *prog.Prog, info *ipc.CallInfo, call int) (prio uint8) {
