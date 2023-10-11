@@ -85,6 +85,7 @@ type Fuzzer struct {
 	// Mostly for debugging scheduling mutation. If generate is false,
 	// procs do not generate/mutate inputs but schedule.
 	generate bool
+	schedule bool
 
 	m monitor
 
@@ -589,6 +590,11 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 	maxInterleaving := r.MaxInterleaving.Deserialize()
 	log.Logf(1, "poll: candidates=%v inputs=%v signal=%v interleaving=%v",
 		len(r.Candidates), len(r.NewInputs), maxSignal.Len(), maxInterleaving.Len())
+
+	const phaseTriagedCorpus = 2
+	if r.ManagerPhase >= phaseTriagedCorpus {
+		fuzzer.schedule = true
+	}
 
 	fuzzer.signalMu.Lock()
 	for _, inst := range r.InstBlacklist {

@@ -419,8 +419,11 @@ func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes,
 
 	if !p.Threaded {
 		return proc.postExecute(p, flags, info)
-	} else {
+	} else if proc.fuzzer.schedule {
+		// We run concurrent calls only after triaging corpus
 		return proc.postExecuteThreaded(p, info)
+	} else {
+		return info
 	}
 }
 
