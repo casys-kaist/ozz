@@ -1798,6 +1798,10 @@ func (mgr *Manager) serializeInstInfo() (bytes.Buffer, bytes.Buffer) {
 	return instCount, instBlacklist
 }
 
+func (mgr *Manager) getPhase() int {
+	return mgr.phase
+}
+
 func (mgr *Manager) dumpCoverageToFile(dir, filename string, cov bytes.Buffer) {
 	codef, err := os.OpenFile(filepath.Join(dir, filename), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, osutil.DefaultFilePerm)
 	if err != nil {

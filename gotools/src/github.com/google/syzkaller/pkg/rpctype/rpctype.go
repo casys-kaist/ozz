@@ -99,6 +99,7 @@ type PollRes struct {
 	MaxSignal       signal.Serial
 	MaxInterleaving interleaving.SerialSignal
 	InstBlacklist   []uint32
+	ManagerPhase    int
 }
 
 type RunnerConnectArgs struct {

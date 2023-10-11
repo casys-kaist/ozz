@@ -73,6 +73,7 @@ type RPCManagerView interface {
 	newScheduledInput(inp rpctype.ScheduledInput, signal interleaving.Signal) bool
 	candidateBatch(size int) []rpctype.Candidate
 	rotateCorpus() bool
+	getPhase() int
 	recordKnot(knot interleaving.Knot)
 }
 
@@ -413,6 +414,7 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 		// Let rotated VMs run in isolation, don't send them anything.
 		return nil
 	}
+	r.ManagerPhase = serv.mgr.getPhase()
 	r.MaxSignal = f.newMaxSignal.Split(2000).Serialize()
 	r.MaxInterleaving = f.newMaxInterleaving.Split(2000).Serialize()
 	for inst := range f.instBlacklist {
