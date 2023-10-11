@@ -968,6 +968,10 @@ func (fuzzer *Fuzzer) collectionWorkqueue(tricand, cand, tri, smash, thr uint64)
 	fuzzer.collection[CollectionWQThreading] = thr
 }
 
+func (fuzzer *Fuzzer) canSchedule() bool {
+	return fuzzer.schedule
+}
+
 func signalPrio(p *prog.Prog, info *ipc.CallInfo, call int) (prio uint8) {
 	if call == -1 {
 		return 0

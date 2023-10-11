@@ -419,11 +419,9 @@ func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes,
 
 	if !p.Threaded {
 		return proc.postExecute(p, flags, info)
-	} else if proc.fuzzer.schedule {
+	} else {
 		// We run concurrent calls only after triaging corpus
 		return proc.postExecuteThreaded(p, info)
-	} else {
-		return info
 	}
 }
 
@@ -436,7 +434,9 @@ func (proc *Proc) postExecute(p *prog.Prog, flags ProgTypes, info *ipc.ProgInfo)
 	if extra {
 		proc.enqueueCallTriage(p, flags, -1, info.Extra)
 	}
-	proc.pickupThreadingWorks(p, info)
+	if proc.fuzzer.canSchedule() {
+		proc.pickupThreadingWorks(p, info)
+	}
 	return info
 }
 
