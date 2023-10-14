@@ -6,19 +6,19 @@
 #define _GNU_SOURCE
 
 #include <errno.h>
+#include <fcntl.h>
+#include <linux/if.h>
+#include <linux/if_tun.h>
+#include <linux/if_vlan.h>
 #include <pthread.h>
 #include <stdio.h>
-#include <sys/socket.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <sys/uio.h>
-#include <linux/if_vlan.h>
-#include <linux/if_tun.h>
-#include <linux/if.h>
-#include <fcntl.h>
 
 #include "test.h"
 
-#define SIOCSIFVLAN	0x8983
+#define SIOCSIFVLAN 0x8983
 
 #define DEV_NAME "tap0"
 #define VLAN_NAME "tap0.1"
@@ -30,28 +30,28 @@ int sk, fd;
 char buf[] =
     "\xff\xff\xff\xff\xff\xff" /* Dest mac: any */
     "\xff\xff\xff\xff\xff\xff" /* Source mac: any */
-    "\x81\x00\x00\x02"         /* Vlan tag: 8021q (2 byte), vlan id 02 (2 byte) */
-    "\x08\x00"                 /* Length/protocol: ipv4 */
-    "\x45\x00\x00\x2e\x00\x00\x00\x00\x40\x11\x88\x97\x05\x08\x07\x08" 
+    "\x81\x00\x00\x02" /* Vlan tag: 8021q (2 byte), vlan id 02 (2 byte) */
+    "\x08\x00"         /* Length/protocol: ipv4 */
+    "\x45\x00\x00\x2e\x00\x00\x00\x00\x40\x11\x88\x97\x05\x08\x07\x08"
     "\x1e\x04\x10\x92\x10\x92\x00\x1a\x6d\xa3\x34\x33\x1f\x69\x40\x6b"
     "\x54\x59\xb6\x14\x2d\x11\x44\xbf\xaf\xd9\xbe\xaa"; /* Payload/crc: any? */
 
 struct ifreq ifr = {
-  .ifr_name = DEV_NAME,
-  .ifr_flags = IFF_TAP|IFF_NO_PI,
+    .ifr_name = DEV_NAME,
+    .ifr_flags = IFF_TAP | IFF_NO_PI,
 };
 struct ifreq ifr2 = {
-  .ifr_name = DEV_NAME,
-  .ifr_flags = IFF_UP,
+    .ifr_name = DEV_NAME,
+    .ifr_flags = IFF_UP,
 };
 struct vlan_ioctl_args if_request = {
-  .cmd = ADD_VLAN_CMD,
-  .device1 = DEV_NAME,
-  .u.VID = VLAN_VID,
+    .cmd = ADD_VLAN_CMD,
+    .device1 = DEV_NAME,
+    .u.VID = VLAN_VID,
 };
 struct vlan_ioctl_args if_request2 = {
-  .cmd = DEL_VLAN_CMD,
-  .device1 = VLAN_NAME,
+    .cmd = DEL_VLAN_CMD,
+    .device1 = VLAN_NAME,
 };
 
 void *th1(void *ret) {
@@ -62,7 +62,7 @@ void *th1(void *ret) {
   syscall(SYS_SSB_SWITCH);
   if (ioctl(sk, SIOCSIFVLAN, &if_request) < 0)
     perror("ioctl2");
-  deactivate_bp_sync();
+  hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
 }
 
 void *th2(void *ret) {
@@ -74,7 +74,7 @@ void *th2(void *ret) {
   syscall(SYS_SSB_SWITCH);
   if (write(fd, buf, sizeof(buf)) < 0)
     perror("write");
-  deactivate_bp_sync();
+  hypercall(HCALL_DEACTIVATE_BP, 0, 0, 0);
 }
 
 void run() {
@@ -82,7 +82,9 @@ void run() {
   hypercall(HCALL_PREPARE, 2, 2, 0);
 
   pthread_t pth1, pth2;
-  
+
+  hypercall(HCALL_ENABLE_KSSB, 0, 0, 0);
+
   pthread_create(&pth1, NULL, th1, NULL);
   pthread_create(&pth2, NULL, th2, NULL);
 
@@ -92,6 +94,7 @@ void run() {
   if (ioctl(sk, SIOCSIFVLAN, &if_request2) < 0)
     perror("ioctl3");
 
+  hypercall(HCALL_DISABLE_KSSB, 0, 0, 0);
   hypercall(HCALL_RESET, 0, 0, 0);
 }
 
