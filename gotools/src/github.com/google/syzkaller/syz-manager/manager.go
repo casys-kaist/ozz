@@ -1577,9 +1577,11 @@ func (mgr *Manager) newInput(inp rpctype.Input, sign signal.Signal) bool {
 			Cover:   inp.Cover,
 			Updates: []CorpusItemUpdate{update},
 		}
-		mgr.corpusDB.Save(sig, inp.Prog, 0)
-		if err := mgr.corpusDB.Flush(); err != nil {
-			log.Logf(0, "failed to save corpus database: %v", err)
+		if *flagCorpus {
+			mgr.corpusDB.Save(sig, inp.Prog, 0)
+			if err := mgr.corpusDB.Flush(); err != nil {
+				log.Logf(0, "failed to save corpus database: %v", err)
+			}
 		}
 	}
 	return true
