@@ -113,16 +113,6 @@ const (
 	CollectionWQCandidate
 	CollectionWQSmash
 	CollectionWQThreading
-	CollectionDurationTriage
-	CollectionDurationCandidate
-	CollectionDurationSmash
-	CollectionDurationThreading
-	CollectionDurationGen
-	CollectionDurationFuzz
-	CollectionDurationSchedule
-	CollectionDurationCalc1
-	CollectionDurationCalc2
-	CollectionDurationTotal
 	CollectionCount
 )
 
@@ -135,16 +125,6 @@ var collectionNames = [CollectionCount]string{
 	CollectionWQCandidate:       "workqueue candidate",
 	CollectionWQSmash:           "workqueue smash",
 	CollectionWQThreading:       "workqueue threading",
-	CollectionDurationTriage:    "duration triage",
-	CollectionDurationCandidate: "duration candidate",
-	CollectionDurationSmash:     "duration smash",
-	CollectionDurationThreading: "duration threading",
-	CollectionDurationGen:       "duration gen",
-	CollectionDurationFuzz:      "duration fuzz",
-	CollectionDurationSchedule:  "duration schedule",
-	CollectionDurationCalc1:     "duration calc1",
-	CollectionDurationCalc2:     "duration calc2",
-	CollectionDurationTotal:     "duration total",
 }
 
 type Stat int
@@ -163,6 +143,16 @@ const (
 	StatThreading
 	StatSchedule
 	StatThreadWorkTimeout
+	StatDurationTriage
+	StatDurationCandidate
+	StatDurationSmash
+	StatDurationThreading
+	StatDurationGen
+	StatDurationFuzz
+	StatDurationSchedule
+	StatDurationCalc1
+	StatDurationCalc2
+	StatDurationTotal
 	StatCount
 )
 
@@ -180,6 +170,16 @@ var statNames = [StatCount]string{
 	StatSchedule:          "exec schedulings",
 	StatBufferTooSmall:    "buffer too small",
 	StatThreadWorkTimeout: "threading work timeout",
+	StatDurationTriage:    "duration triage",
+	StatDurationCandidate: "duration candidate",
+	StatDurationSmash:     "duration smash",
+	StatDurationThreading: "duration threading",
+	StatDurationGen:       "duration gen",
+	StatDurationFuzz:      "duration fuzz",
+	StatDurationSchedule:  "duration schedule",
+	StatDurationCalc1:     "duration calc1",
+	StatDurationCalc2:     "duration calc2",
+	StatDurationTotal:     "duration total",
 }
 
 type OutputType int
@@ -536,15 +536,15 @@ func (fuzzer *Fuzzer) pollLoop() {
 				stats[statNames[stat]] = v
 				execTotal += v
 			}
+			for s, v := range fuzzer.m.get() {
+				name := statNames[s]
+				stats[name] = v / 1000 / 1000 / 1000 // ns -> s
+			}
 			collections := make(map[string]uint64)
 			for collection := Collection(0); collection < CollectionCount; collection++ {
 				name := fuzzer.name + "-" + collectionNames[collection]
 				v := atomic.LoadUint64(&fuzzer.collection[collection])
 				collections[name] = v
-			}
-			for c, v := range fuzzer.m.get() {
-				name := fuzzer.name + "-" + collectionNames[c]
-				collections[name] = v / 1000 / 1000 / 1000 // ns -> s
 			}
 			if !fuzzer.poll(needCandidates, stats, collections) {
 				lastPoll = time.Now()

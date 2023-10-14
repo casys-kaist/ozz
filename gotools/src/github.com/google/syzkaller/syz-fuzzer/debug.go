@@ -67,12 +67,13 @@ func (m *monitor) end() int {
 	return r
 }
 
-func (m *monitor) get() map[Collection]uint64 {
+func (m *monitor) get() map[Stat]uint64 {
 	m.Lock()
 	defer m.Unlock()
-	res := make(map[Collection]uint64)
+	res := make(map[Stat]uint64)
 	for i := 1; i < count; i++ {
-		res[CollectionDurationTriage+Collection(i)-1] = uint64(m.rec[i].Nanoseconds())
+		res[StatDurationTriage+Stat(i)-1] = uint64(m.rec[i].Nanoseconds())
+		m.rec[i] = 0
 	}
 	return res
 }
