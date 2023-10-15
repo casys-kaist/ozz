@@ -1,0 +1,93 @@
+From 904df8174eea1f4e368851ccf1c33817cb43c2c6 Mon Sep 17 00:00:00 2001
+From: "Dae R. Jeong" <threeearcat@gmail.com>
+Date: Sun, 15 Oct 2023 14:38:52 +0900
+Subject: [PATCH] applying a patch to allow hypercalls from userspace
+
+---
+ PKGBUILD               |  4 +---
+ custom-hypercall.patch | 45 ++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 46 insertions(+), 3 deletions(-)
+ create mode 100644 custom-hypercall.patch
+
+diff --git a/PKGBUILD b/PKGBUILD
+index 692619f..d5941ab 100644
+--- a/PKGBUILD
++++ b/PKGBUILD
+@@ -1,6 +1,6 @@
+ # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+ 
+-pkgbase=linux
++pkgbase=linux-custom
+ pkgver=6.5.7.arch1
+ pkgrel=1
+ pkgdesc='Linux'
+@@ -82,7 +82,6 @@ prepare() {
+ build() {
+   cd $_srcname
+   make all
+-  make htmldocs
+ }
+ 
+ _package() {
+@@ -229,7 +228,6 @@ _package-docs() {
+ pkgname=(
+   "$pkgbase"
+   "$pkgbase-headers"
+-  "$pkgbase-docs"
+ )
+ for _p in "${pkgname[@]}"; do
+   eval "package_$_p() {
+diff --git a/custom-hypercall.patch b/custom-hypercall.patch
+new file mode 100644
+index 0000000..f44c147
+--- /dev/null
++++ b/custom-hypercall.patch
+@@ -0,0 +1,45 @@
++diff --git a/arch/x86/kvm/hcall.h b/arch/x86/kvm/hcall.h
++new file mode 100644
++index 0000000..f5ce305
++--- /dev/null
+++++ b/arch/x86/kvm/hcall.h
++@@ -0,0 +1,18 @@
+++#ifndef __HCALL_H
+++#define __HCALL_H
+++
+++// RAX input value of hcall request
+++#define HCALL_RAX_ID 0x1d08aa3e
+++// RAX return value indicating a hcall handled successfully
+++#define HCALL_SUCCESS 0x2be98adc
+++// RAX return value indicating a bad request
+++#define HCALL_INVAL 0xb614e7a
+++
+++// kvm_run->exit_reason
+++#define HCALL_EXIT_REASON 0x33f355d
+++#define KVM_EXIT_HCALL HCALL_EXIT_REASON
+++
+++// Sub-commands saved in kvm_run->hypercall.args[0]
+++#define HCALL_INSTALL_BP 0xf477909a
+++
+++#endif /* __HCALL_H */
++diff --git a/arch/x86/kvm/x86.c b/arch/x86/kvm/x86.c
++index 99f3da5..76e1a22 100644
++--- a/arch/x86/kvm/x86.c
+++++ b/arch/x86/kvm/x86.c
++@@ -9838,6 +9838,16 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
++ 		a3 &= 0xFFFFFFFF;
++ 	}
++ 
+++	// Hypercall
+++	if (nr == HCALL_RAX_ID) {
+++		vcpu->run->hypercall.nr = HCALL_RAX_ID;
+++		vcpu->run->exit_reason = HCALL_EXIT_REASON;
+++		vcpu->run->hypercall.args[0] = a0;
+++		vcpu->run->hypercall.args[1] = a1;
+++		vcpu->run->hypercall.args[2] = a2;
+++		vcpu->run->hypercall.args[3] = a3;
+++		return 0;
+++	} else
++ 	if (static_call(kvm_x86_get_cpl)(vcpu) != 0) {
++ 		ret = -KVM_EPERM;
++ 		goto out;
+-- 
+2.42.0
+
