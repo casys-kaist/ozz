@@ -304,7 +304,7 @@ func (proc *Proc) triageInput(item *WorkTriage) {
 
 	proc.fuzzer.addInputToCorpus(item.p, inputSignal, sig)
 
-	if item.flags&ProgSmashed == 0 && proc.fuzzer.generate {
+	if item.flags&ProgSmashed == 0 && proc.fuzzer.generate && false {
 		proc.fuzzer.workQueue.enqueue(&WorkSmash{item.p, item.call})
 		proc.fuzzer.collectionWorkqueue(proc.fuzzer.workQueue.stats())
 	}
