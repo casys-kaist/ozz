@@ -37,7 +37,6 @@ type Stats struct {
 	maxSignal           Stat
 	maxInterleaving     Stat
 	instBlacklist       Stat
-	maxCommunication    Stat
 
 	mu         sync.Mutex
 	namedStats map[string]uint64
@@ -84,7 +83,6 @@ func (stats *Stats) all() map[string]uint64 {
 		"max signal":            stats.maxSignal.get(),
 		"max interleaving":      stats.maxInterleaving.get(),
 		"instruction blacklist": stats.instBlacklist.get(),
-		"max communication":     stats.maxCommunication.get(),
 	}
 	if stats.haveHub {
 		m["hub: send prog add"] = stats.hubSendProgAdd.get()
