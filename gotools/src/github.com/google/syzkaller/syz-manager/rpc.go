@@ -48,13 +48,14 @@ type RPCServer struct {
 }
 
 type Fuzzer struct {
-	name               string
-	rotated            bool
-	inputs             []rpctype.Input
-	newMaxSignal       signal.Signal
-	newMaxInterleaving interleaving.Signal
-	rotatedSignal      signal.Signal
-	machineInfo        []byte
+	name                string
+	rotated             bool
+	inputs              []rpctype.Input
+	newMaxSignal        signal.Signal
+	newMaxInterleaving  interleaving.Signal
+	revokedInterleaving interleaving.Signal
+	rotatedSignal       signal.Signal
+	machineInfo         []byte
 
 	instBlacklist map[uint32]struct{}
 }
@@ -99,7 +100,25 @@ func startRPCServer(mgr *Manager) (*RPCServer, error) {
 	log.Logf(0, "serving rpc on tcp://%v", s.Addr())
 	serv.port = s.Addr().(*net.TCPAddr).Port
 	go s.Serve()
+	go serv.periodicRevoke()
 	return serv, nil
+}
+
+func (serv *RPCServer) periodicRevoke() {
+	for {
+		time.Sleep(time.Hour)
+		serv.mu.Lock()
+		total := len(serv.maxInterleaving)
+		revoke := total / 10
+
+		revoked := serv.maxInterleaving.Split(revoke)
+		serv.stats.maxInterleaving.set(len(serv.maxInterleaving))
+		log.Logf(0, "Revoked: %d", len(revoked))
+		for _, f1 := range serv.fuzzers {
+			f1.revokedInterleaving.Merge(revoked)
+		}
+		defer serv.mu.Unlock()
+	}
 }
 
 func (serv *RPCServer) Connect(a *rpctype.ConnectArgs, r *rpctype.ConnectRes) error {
@@ -404,19 +423,20 @@ func (serv *RPCServer) Poll(a *rpctype.PollArgs, r *rpctype.PollRes) error {
 		serv.maxInterleaving.Merge(newMaxInterleaving)
 		serv.stats.maxInterleaving.set(len(serv.maxInterleaving))
 		for _, f1 := range serv.fuzzers {
-			if f1 == f || f1.rotated {
+			if f1 == f {
 				continue
 			}
 			f1.newMaxInterleaving.Merge(newMaxInterleaving)
 		}
 	}
+	r.MaxInterleaving = f.newMaxInterleaving.Split(2000).Serialize()
+	r.RevokedInterleaving = f.revokedInterleaving.Split(2000).Serialize()
 	if f.rotated {
 		// Let rotated VMs run in isolation, don't send them anything.
 		return nil
 	}
 	r.ManagerPhase = serv.mgr.getPhase()
 	r.MaxSignal = f.newMaxSignal.Split(2000).Serialize()
-	r.MaxInterleaving = f.newMaxInterleaving.Split(2000).Serialize()
 	for inst := range f.instBlacklist {
 		r.InstBlacklist = append(r.InstBlacklist, inst)
 	}
