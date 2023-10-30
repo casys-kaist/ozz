@@ -34,3 +34,12 @@ though. Analyze them if necessary.
 # Not a bug
 - 02bae7a24257947fe95fcca80c78e6cb602e94bf
 - 4eb6486cb43c93382c27a2659ba978c660e98498
+
+
+# Found by Ofence
+- a2915fa06227b056a8f9b0d79b61dca08ad5cfc6
+- b89a05b21f46150ac10a962aa50109250b56b03b - not an OoO bug
+- f8f7e0fb22b2e75be55f2f0c13e229e75b0eac07
+- a95d25dd7b94a5ba18246da09b4218f132fed60e - not an OoO bug
+- fd2ddef043592e7de80af53f47fa46fd3573086e - not an OoO bug
+- ...
