@@ -1643,9 +1643,7 @@ func (mgr *Manager) candidateBatch(size int) []rpctype.Candidate {
 }
 
 func (mgr *Manager) rotateCorpus() bool {
-	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
-	return mgr.phase == phaseTriagedHub
+	return false
 }
 
 func (mgr *Manager) collectUsedFiles() {
