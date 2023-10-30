@@ -110,14 +110,13 @@ func (serv *RPCServer) periodicRevoke() {
 		serv.mu.Lock()
 		total := len(serv.maxInterleaving)
 		revoke := total / 10
-
 		revoked := serv.maxInterleaving.Split(revoke)
 		serv.stats.maxInterleaving.set(len(serv.maxInterleaving))
 		log.Logf(0, "Revoked: %d", len(revoked))
 		for _, f1 := range serv.fuzzers {
 			f1.revokedInterleaving.Merge(revoked)
 		}
-		defer serv.mu.Unlock()
+		serv.mu.Unlock()
 	}
 }
 
