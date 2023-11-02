@@ -588,9 +588,8 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 	}
 	maxSignal := r.MaxSignal.Deserialize()
 	maxInterleaving := r.MaxInterleaving.Deserialize()
-	revokedInterleaving := r.RevokedInterleaving.Deserialize()
-	log.Logf(1, "poll: candidates=%v inputs=%v signal=%v interleaving=%v, revoked=%v",
-		len(r.Candidates), len(r.NewInputs), maxSignal.Len(), maxInterleaving.Len(), revokedInterleaving.Len())
+	log.Logf(1, "poll: candidates=%v inputs=%v signal=%v interleaving=%v",
+		len(r.Candidates), len(r.NewInputs), maxSignal.Len(), maxInterleaving.Len())
 
 	const phaseTriagedCorpus = 2
 	if r.ManagerPhase >= phaseTriagedCorpus {
@@ -608,7 +607,6 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 
 	fuzzer.addMaxSignal(maxSignal)
 	fuzzer.addMaxInterleaving(maxInterleaving)
-	fuzzer.revokeMaxInterleaving(revokedInterleaving)
 	for _, inp := range r.NewInputs {
 		fuzzer.addInputFromAnotherFuzzer(inp)
 	}
@@ -824,16 +822,6 @@ func (fuzzer *Fuzzer) addMaxInterleaving(sign interleaving.Signal) {
 	fuzzer.signalMu.Lock()
 	defer fuzzer.signalMu.Unlock()
 	fuzzer.maxInterleaving.Merge(sign)
-}
-
-func (fuzzer *Fuzzer) revokeMaxInterleaving(sign interleaving.Signal) {
-	fuzzer.signalMu.Lock()
-	defer fuzzer.signalMu.Unlock()
-	for s := range sign {
-		if _, ok := fuzzer.maxInterleaving[s]; ok {
-			delete(fuzzer.maxInterleaving, s)
-		}
-	}
 }
 
 func (fuzzer *Fuzzer) grabNewSignal() signal.Signal {
