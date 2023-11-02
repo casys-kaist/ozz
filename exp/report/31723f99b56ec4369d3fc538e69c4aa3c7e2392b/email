@@ -1,0 +1,52 @@
+Hello,
+
+It seems a write memory barrier is missing in tls_init() (or
+tls_ctx_create()). In the following execution, NULL dereference can
+happen in {tls_setsockopt, tls_getsockopt}.
+
+CPU0                                         CPU1
+-----                                        -----
+// In tls_init()
+// In tls_ctx_create()
+ctx = kzalloc()
+ctx->sk_proto = READ_ONCE(sk->sk_prot) - (1)
+
+// In update_sk_prot()
+WRITE_ONCE(sk->sk_prot, tls_prots)     - (2)
+                                              // In sock_common_setsockopt()
+                                              READ_ONCE(sk->sk_prot)->setsockopt()
+
+                                              // In tls_{setsockopt,getsockopt}()
+                                              ctx->sk_proto->setsockopt()    - (3)
+
+
+In the above concurrent execution, nothing prevents store-store
+reordering in CPU0, so it is possible that CPU0 completes (2) before
+(1). Consequently, CPU1 can crash at (3).
+
+To prevent such out-of-order execution, I think we need something like
+this (although I don't like smp_*mb. smp_store_release() should be
+better):
+
+diff --git a/net/tls/tls_main.c b/net/tls/tls_main.c
+index 1c2c6800949d..5dccde91f9b1 100644
+--- a/net/tls/tls_main.c
++++ b/net/tls/tls_main.c
+@@ -819,6 +819,7 @@ struct tls_context *tls_ctx_create(struct sock *sk)
+        rcu_assign_pointer(icsk->icsk_ulp_data, ctx);
+        ctx->sk_proto = READ_ONCE(sk->sk_prot);
+        ctx->sk = sk;
++       smp_wmb();
+        return ctx;
+ }
+
+In addition, I believe the {tls_setsockopt, tls_getsockopt}
+implementation is fine because of the address dependency. I think
+load-load reordering is prohibited in this case so we don't need a
+read barrier.
+
+Could you check this?
+
+
+Best regards,
+Dae R. Jeong
