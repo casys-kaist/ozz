@@ -1,0 +1,39 @@
+Hello,
+
+It seems that release_in_xmit() employs improper clear_bit() (which
+implies the relaxed semantic) instead of
+clear_bit_unlock(). release_in_xmit() acts as a lock, so it should be
+used with the release semantic.
+
+I see that there is smp_mb() *after* clear_bit(), but it does not
+prevent reordering between clear_bit() and instructions *before*
+clear_bit() (which are inside the critical section). As a result,
+acquire_in_xmit()/release_in_xmit() does not guarantee the mutual
+exclusion in rds_send_xmit() in some architectures such as ARM.
+
+I also see the comment saying that release_in_xmit() is in a hot
+path. But in the x86_64 architecture, clear_bit_unlock() just adds one
+compiler barrier to clear_bit(), so I believe it does not hurt the
+performance (not sure about the ARM architecture though).
+
+Please check the following change. I will send a patch if it makes
+sense.
+
+
+diff --git a/net/rds/send.c b/net/rds/send.c
+index 5e57a1581dc6..65b1bb06ca71 100644
+--- a/net/rds/send.c
++++ b/net/rds/send.c
+@@ -108,7 +108,7 @@ static int acquire_in_xmit(struct rds_conn_path *cp)
+ 
+ static void release_in_xmit(struct rds_conn_path *cp)
+ {
+-	clear_bit(RDS_IN_XMIT, &cp->cp_flags);
++	clear_bit_unlock(RDS_IN_XMIT, &cp->cp_flags);
+ 	smp_mb__after_atomic();
+ 	/*
+ 	 * We don't use wait_on_bit()/wake_up_bit() because our waking is in a
+
+
+Best regards,
+Dae R. Jeong
