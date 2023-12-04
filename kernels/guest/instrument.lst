@@ -1824,7 +1824,6 @@ add_hwgenerator_randomness
 addidata_apci7800_setup
 add_idt
 add_index
-add_inode
 add_inode_ref
 __add_ino_entry
 add_input_randomness
@@ -11251,7 +11250,6 @@ __bpf_trace_binder_transaction_ref_to_ref
 __bpf_trace_binder_txn_latency_free
 __bpf_trace_binder_update_page_range
 __bpf_trace_binder_wait_for_work
-__bpf_trace_bkey
 __bpf_trace_block_bio
 __bpf_trace_block_bio_complete
 __bpf_trace_block_bio_remap
@@ -11268,7 +11266,6 @@ __bpf_trace_br_fdb_add
 __bpf_trace_br_fdb_external_learn_add
 __bpf_trace_br_fdb_update
 __bpf_trace_br_mdb_full
-__bpf_trace_btree_node
 __bpf_trace_btree_split
 __bpf_trace_btrfs_add_block_group
 __bpf_trace_btrfs__block_group
@@ -13560,12 +13557,8 @@ btree_lookup_raw
 btree_mergesort
 btree_migrate_folio
 btree_node_free
-btree_node_read_endio
-__btree_node_write_done
 btree_node_write_done
-btree_node_write_endio
 btree_node_write_unlock
-btree_node_write_work
 btree_release_folio
 __btree_sort
 btree_write_cache_pages
@@ -25355,7 +25348,6 @@ dma_fence_get_stub
 dma_fence_init
 dma_fence_match_context
 __dma_fence_might_wait
-dma_fence_put
 dma_fence_release
 dma_fence_remove_callback
 dma_fence_set_deadline
@@ -26406,7 +26398,6 @@ do_journal_begin_r
 do_journal_end
 do_journal_get_write_access
 do_journal_release
-do_journal_write
 do_kernel_power_off
 do_kernel_restart
 do_kexec_load
@@ -34624,7 +34615,6 @@ find_pattern
 find_pid_ns
 find_prev_fhdr
 find_prop_handler
-find_readable_file
 find_ref
 find_ref_lock
 find_reloc_root
@@ -39785,7 +39775,6 @@ hash_and_copy_to_iter
 hash_bind
 hash_bucket
 hash_by_src
-hash_check_key
 __hash_conntrack
 hash_conntrack
 hash_dst
@@ -43645,7 +43634,6 @@ i915_request_show
 i915_request_show_with_schedule
 __i915_request_skip
 i915_request_slab_cache
-i915_request_started
 __i915_request_submit
 i915_request_submit
 __i915_request_unsubmit
@@ -45052,7 +45040,6 @@ idr_get_next_ul
 idr_preload
 idr_remove
 idr_replace
-id_store
 idtoname_match
 idtoname_parse
 idtoname_request
@@ -53496,7 +53483,6 @@ journal_init_common
 journal_join_abort
 journal_mark_dirty
 journal_mark_freed
-journal_read_bucket
 journal_read_endio
 journal_reclaim
 journal_release
@@ -53507,11 +53493,8 @@ journal_transaction_is_valid
 journal_transaction_should_end
 journal_try_write
 journal_write
-journal_write_done
-journal_write_endio
 journal_write_unlock
 journal_write_unlocked
-journal_write_work
 joydev_cleanup
 joydev_compat_ioctl
 joydev_connect
@@ -56454,7 +56437,6 @@ lookup_get_fd_uobject
 lookup_get_idr_uobject
 lookup_get_request
 lookup_inline_extent_backref
-__lookup_inode
 lookup_interface
 lookup_ioctx
 lookup_level0_dirty
@@ -73742,7 +73724,6 @@ perf_trace_binder_transaction_ref_to_ref
 perf_trace_binder_txn_latency_free
 perf_trace_binder_update_page_range
 perf_trace_binder_wait_for_work
-perf_trace_bkey
 perf_trace_block_bio
 perf_trace_block_bio_complete
 perf_trace_block_bio_remap
@@ -73759,7 +73740,6 @@ perf_trace_br_fdb_add
 perf_trace_br_fdb_external_learn_add
 perf_trace_br_fdb_update
 perf_trace_br_mdb_full
-perf_trace_btree_node
 perf_trace_btree_split
 perf_trace_btrfs_add_block_group
 perf_trace_btrfs__block_group
@@ -102132,7 +102112,6 @@ trace_event_raw_event_binder_transaction_ref_to_ref
 trace_event_raw_event_binder_txn_latency_free
 trace_event_raw_event_binder_update_page_range
 trace_event_raw_event_binder_wait_for_work
-trace_event_raw_event_bkey
 trace_event_raw_event_block_bio
 trace_event_raw_event_block_bio_complete
 trace_event_raw_event_block_bio_remap
@@ -102149,7 +102128,6 @@ trace_event_raw_event_br_fdb_add
 trace_event_raw_event_br_fdb_external_learn_add
 trace_event_raw_event_br_fdb_update
 trace_event_raw_event_br_mdb_full
-trace_event_raw_event_btree_node
 trace_event_raw_event_btree_split
 trace_event_raw_event_btrfs_add_block_group
 trace_event_raw_event_btrfs__block_group
@@ -108483,7 +108461,6 @@ trace_raw_output_binder_transaction_ref_to_ref
 trace_raw_output_binder_txn_latency_free
 trace_raw_output_binder_update_page_range
 trace_raw_output_binder_wait_for_work
-trace_raw_output_bkey
 trace_raw_output_block_bio
 trace_raw_output_block_bio_complete
 trace_raw_output_block_bio_remap
@@ -108500,7 +108477,6 @@ trace_raw_output_br_fdb_add
 trace_raw_output_br_fdb_external_learn_add
 trace_raw_output_br_fdb_update
 trace_raw_output_br_mdb_full
-trace_raw_output_btree_node
 trace_raw_output_btree_split
 trace_raw_output_btrfs_add_block_group
 trace_raw_output_btrfs__block_group
@@ -121816,7 +121792,6 @@ write_remote_amp_assoc_complete
 write_sb_page
 write_sequnlock
 __write_super
-write_super_endio
 write_threads
 write_unlock_fs
 write_unlock_ip
