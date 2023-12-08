@@ -221,6 +221,19 @@ func createIPCConfig(features *host.Features, config *ipc.Config) {
 	}
 }
 
+func setupKMemCov(traceLock bool) {
+	const fn = "/sys/kernel/debug/kmemcov_trace_lock"
+	log.Logf(0, "Trace lock: %v", traceLock)
+	var i int
+	if traceLock {
+		i = 1
+	}
+	data := []byte(fmt.Sprintf("%d", i))
+	if err := osutil.WriteFile("fn", data); err != nil {
+		log.Logf(0, "Failed to setup kmemcov")
+	}
+}
+
 // nolint: funlen
 func main() {
 	golog.SetPrefix("[FUZZER] ")
@@ -239,6 +252,7 @@ func main() {
 		flagGen              = flag.Bool("gen", true, "generate/mutate inputs")
 		flagShifter          = flag.String("shifter", "./shifter", "path to the shifter")
 		flagRandomReordering = flag.Bool("random-reordering", false, "")
+		flagTraceLock        = flag.Bool("trace-lock", true, "")
 	)
 	defer tool.Init()()
 	outputType := parseOutputType(*flagOutput)
@@ -338,6 +352,7 @@ func main() {
 		log.Logf(0, "%v: %v", feat.Name, feat.Reason)
 	}
 	createIPCConfig(r.CheckResult.Features, config)
+	setupKMemCov(*flagTraceLock)
 
 	if *flagRunTest {
 		runTest(target, manager, *flagName, config.Executor)

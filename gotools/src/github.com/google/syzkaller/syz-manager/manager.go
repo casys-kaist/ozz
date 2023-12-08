@@ -55,6 +55,7 @@ var (
 	flagDumpCoverage     = flag.Bool("dump-coverage", false, "for experiments. dump both coverages periodically")
 	flagOneShot          = flag.Bool("one-shot", false, "quit after a crash occurs")
 	flagRandomReordering = flag.Bool("random-reordering", false, "")
+	flagTraceLock        = flag.Bool("trace-lock", true, "")
 )
 
 type Manager struct {
@@ -1006,6 +1007,7 @@ func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Re
 		Generate:         *flagGen,
 		Pinning:          true,
 		RandomReordering: *flagRandomReordering,
+		TraceLock:        *flagTraceLock,
 		Optional: &instance.OptionalFuzzerArgs{
 			Slowdown:   mgr.cfg.Timeouts.Slowdown,
 			RawCover:   mgr.cfg.RawCover,
