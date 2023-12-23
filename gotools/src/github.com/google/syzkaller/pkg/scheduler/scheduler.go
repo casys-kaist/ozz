@@ -1,8 +1,6 @@
 package scheduler
 
 import (
-	"sort"
-
 	"github.com/google/syzkaller/pkg/interleaving"
 )
 
@@ -11,19 +9,13 @@ import (
 // extend, for example, to three threads.
 
 type Knotter struct {
-	config config
-	opts   KnotterOpts
-
 	loopAllowed []int
 	commChan    map[uint32]struct{}
 	accessMap   map[uint32][]interleaving.Access
 	numThr      int
 
-	commHsh        map[uint64]struct{}
-	innerCommCount map[interleaving.Communication]int
-	comms0         []interleaving.Communication
-	comms1         []interleaving.Communication
-	windowSize     []int
+	commHsh    map[uint64]struct{}
+	windowSize []int
 
 	// input
 	seqCount int
@@ -31,27 +23,7 @@ type Knotter struct {
 	seqs     [][]interleaving.SerialAccess // Used internally
 	// output
 	knots []interleaving.Segment
-	comms []interleaving.Segment
-}
-
-func GetKnotter(opts KnotterOpts) Knotter {
-	if !opts.flagSet(FlagWantParallel) {
-		opts.Flags &= ^FlagWantMessagePassing
-	}
-	if opts.flagSet(FlagWantMessagePassing) {
-		opts.Flags |= FlagDifferentAccessTypeOnly
-	}
-	if opts.flagSet(FlagWantOOTA) && opts.flagSet(FlagWantMessagePassing) {
-		panic("invalid flag")
-	}
-	return Knotter{
-		opts: opts,
-	}
-}
-
-type config struct {
-	factor    float32
-	threshold int
+	comms []interleaving.Communication
 }
 
 func (knotter *Knotter) AddSequentialTrace(seq []interleaving.SerialAccess) bool {
@@ -77,10 +49,7 @@ func (knotter *Knotter) sanitizeSequentialTrace(seq []interleaving.SerialAccess)
 		// since they do not race anyway. 2) or a single thread is given
 		return false
 	}
-	var chk []bool
-	if !knotter.opts.flagSet(FlagReassignThreadID) {
-		chk = make([]bool, len(seq))
-	}
+	chk := make([]bool, len(seq))
 	for _, serial := range seq {
 		if len(serial) == 0 {
 			return false
@@ -88,9 +57,6 @@ func (knotter *Knotter) sanitizeSequentialTrace(seq []interleaving.SerialAccess)
 		if !serial.SingleThread() {
 			// All serial execution should be a single thread
 			return false
-		}
-		if knotter.opts.flagSet(FlagReassignThreadID) {
-			continue
 		}
 		thr := int(serial[0].Thread)
 		if thr >= len(chk) {
@@ -122,11 +88,6 @@ func (knotter *Knotter) ExcavateKnots() {
 
 func (knotter *Knotter) fastenKnots() {
 	knotter.collectCommChans()
-	knotter.doReassignThreadID()
-	knotter.inferProgramOrder()
-	knotter.inferWindowSize()
-	// At this point, two accesses conducted by a single thread are
-	// same if they have the same timestamp
 	knotter.buildAccessMap()
 	knotter.formCommunications()
 	knotter.formKnots()
@@ -185,70 +146,6 @@ func (knotter *Knotter) distillSerial(serial *interleaving.SerialAccess, distile
 	}
 }
 
-func (knotter *Knotter) doReassignThreadID() {
-	if !knotter.opts.flagSet(FlagReassignThreadID) {
-		return
-	}
-	if len(knotter.seqs) != 1 {
-		panic("wrong")
-	}
-	for id := range knotter.seqs[0] {
-		for i := range knotter.seqs[0][id] {
-			knotter.seqs[0][id][i].Thread = uint64(id)
-		}
-	}
-}
-
-func (knotter *Knotter) inferProgramOrder() {
-	for i := 0; i < knotter.numThr; i++ {
-		serials := knotter.pickThread(uint64(i))
-		knotter.alignThread(serials)
-	}
-}
-
-func (knotter *Knotter) inferWindowSize() {
-	knotter.windowSize = make([]int, knotter.numThr)
-	for tid := 0; tid < knotter.numThr; tid++ {
-		serials := knotter.pickThread(uint64(tid))
-		size := 0
-		for _, serial := range serials {
-			if len(serial) == 0 {
-				continue
-			}
-			last := len(serial) - 1
-			curSize := int(serial[last].Timestamp - serial[0].Timestamp)
-			if size < curSize {
-				size = curSize
-			}
-		}
-		knotter.windowSize[tid] = size
-	}
-}
-
-func (knotter *Knotter) pickThread(id uint64) []interleaving.SerialAccess {
-	thr := []interleaving.SerialAccess{}
-	for i := range knotter.seqs {
-		for j := range knotter.seqs[i] {
-			serial := knotter.seqs[i][j]
-			if len(serial) == 0 {
-				continue
-			}
-			if serial[0].Thread == id {
-				thr = append(thr, serial)
-				break
-			}
-		}
-	}
-	return thr
-}
-
-func (knotter *Knotter) alignThread(thr []interleaving.SerialAccess) {
-	if len(thr) < 2 {
-		return
-	}
-	pairwiseSequenceAlign(&thr[0], &thr[1])
-}
-
 func (knotter *Knotter) buildAccessMap() {
 	knotter.accessMap = make(map[uint32][]interleaving.Access)
 	for _, seq := range knotter.seqs {
@@ -266,9 +163,8 @@ func (knotter *Knotter) buildAccessMapSerial(serial interleaving.SerialAccess) {
 }
 
 func (knotter *Knotter) formCommunications() {
-	knotter.comms = []interleaving.Segment{}
+	knotter.comms = []interleaving.Communication{}
 	knotter.commHsh = make(map[uint64]struct{})
-	knotter.innerCommCount = make(map[interleaving.Communication]int)
 	for _, accs := range knotter.accessMap {
 		knotter.formCommunicationAddr(accs)
 	}
@@ -282,6 +178,10 @@ func (knotter *Knotter) formCommunicationAddr(accesses []interleaving.Access) {
 				continue
 			}
 
+			if acc1.Timestamp > acc2.Timestamp {
+				acc1, acc2 = acc2, acc1
+			}
+
 			// NOTE: We want to form a communication when one stores a
 			// value and the other loads the value. However, all
 			// RMW-atomics such that atomic_inc and atomic_dec have
@@ -289,11 +189,7 @@ func (knotter *Knotter) formCommunicationAddr(accesses []interleaving.Access) {
 			// in fact reads a value from another atomic. To handle
 			// the cases, we discasd cases only when both accesses
 			// have the load type.
-			if acc1.Typ == interleaving.TypeLoad && acc2.Typ == interleaving.TypeLoad {
-				continue
-			}
-
-			if knotter.opts.flagSet(FlagDifferentAccessTypeOnly) && (acc1.Typ == acc2.Typ) {
+			if acc1.Typ == acc2.Typ {
 				continue
 			}
 
@@ -301,30 +197,17 @@ func (knotter *Knotter) formCommunicationAddr(accesses []interleaving.Access) {
 				continue
 			}
 
-			// We are generating all possible knots so append both
-			// Communications
 			knotter.formCommunicationSingle(acc1, acc2)
-			knotter.formCommunicationSingle(acc2, acc1)
 		}
 	}
 }
 
 func (knotter *Knotter) formCommunicationSingle(acc0, acc1 interleaving.Access) {
-	if knotter.opts.flagSet(FlagStrictTimestamp) && acc0.Timestamp > acc1.Timestamp {
-		return
-	}
 	comm := interleaving.Communication{acc0, acc1}
 	if knotter.duppedComm(comm) {
 		return
 	}
 	knotter.comms = append(knotter.comms, comm)
-	if acc0.Thread < acc1.Thread {
-		knotter.comms0 = append(knotter.comms0, comm)
-		knotter.countInnerCommunication(knotter.comms0, comm)
-	} else {
-		knotter.comms1 = append(knotter.comms1, comm)
-		knotter.countInnerCommunication(knotter.comms1, comm)
-	}
 }
 
 func (knotter *Knotter) duppedComm(comm interleaving.Communication) bool {
@@ -336,56 +219,13 @@ func (knotter *Knotter) duppedComm(comm interleaving.Communication) bool {
 	return ok
 }
 
-func (knotter *Knotter) countInnerCommunication(comms []interleaving.Communication, comm interleaving.Communication) {
-	for _, inner := range comms {
-		if inner.Imply(comm) {
-			knotter.innerCommCount[comm]++
-		}
-	}
-}
-
 func (knotter *Knotter) formKnots() {
-	configs := []config{
-		{0.2, 20},
-		{0.15, 16},
-		{0.1, 13},
-		{0.05, 10},
-	}
-	for step, stop := 0, false; step < 4 && !stop; step++ {
-		knotter.config = configs[step]
-		stop = knotter.doFormKnots()
-	}
-}
-
-func (knotter *Knotter) doFormKnots() bool {
 	knotter.knots = []interleaving.Segment{}
-	if knotter.opts.Mu != nil {
-		(*knotter.opts.Mu).RLock()
-		defer (*knotter.opts.Mu).RUnlock()
-	}
-
-	if knotter.opts.flagSet(FlagWantParallel) {
-		knotter.doFormKnotsParallel()
-	} else {
-		knotter.doFormKnotsNotParallel()
-	}
-	return len(knotter.knots) < thresholdKnots
-}
-
-func (knotter *Knotter) doFormKnotsNotParallel() {
-	for _, comm0 := range knotter.comms0 {
-		if knotter.tooManyNestedComm(comm0) {
-			continue
-		}
-		for _, comm1 := range knotter.comms1 {
-			knotter.formKnotSingle(comm0, comm1)
-		}
-	}
+	knotter.doFormKnotsParallel()
 }
 
 func (knotter *Knotter) doFormKnotsParallel() {
-	knotter.doFormKnotsinThread(knotter.comms0)
-	knotter.doFormKnotsinThread(knotter.comms1)
+	knotter.doFormKnotsinThread(knotter.comms)
 }
 
 func (knotter *Knotter) doFormKnotsinThread(comms []interleaving.Communication) {
@@ -402,55 +242,18 @@ func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication) 
 	if parallel && comm0.Former().Timestamp > comm1.Former().Timestamp {
 		comm0, comm1 = comm1, comm0
 	}
-	if !parallel && knotter.opts.flagSet(FlagWantParallel) {
+	if !parallel {
 		panic("want parallel but comms are not parallel")
 	}
 	knotter.formKnotSingleSorted(comm0, comm1)
 }
 
 func (knotter *Knotter) formKnotSingleSorted(comm0, comm1 interleaving.Communication) {
-	if !sanitizeKnotSingle(comm0, comm1, knotter.opts) {
-		return
-	}
 	knot := interleaving.Knot{comm0, comm1}
-	if knotter.alreadyHave(knot) {
-		return
-	}
-	if knotter.tooFarComms(comm0, comm1) {
-		return
-	}
 	if typ := knot.Type(); typ == interleaving.KnotInvalid {
 		return
 	}
 	knotter.knots = append(knotter.knots, knot)
-}
-
-func sanitizeKnotSingle(comm0, comm1 interleaving.Communication, opts KnotterOpts) bool {
-	if opts.flagSet(FlagWantOOTA) {
-		// XXX: Not sure the OOTA behavior is really limited in the
-		// following pattern
-		if !(comm0.Former().Typ == comm1.Latter().Typ &&
-			comm1.Latter().Typ == comm0.Former().Typ &&
-			comm0.Former().Typ == interleaving.TypeStore) {
-			return false
-		}
-	} else if opts.flagSet(FlagWantMessagePassing) {
-		if !isMessagePassing(comm0, comm1) {
-			return false
-		}
-	}
-	if opts.flagSet(FlagMultiVariableOnly) {
-		if comm0.Former().Addr == comm1.Former().Addr {
-			return false
-		}
-	}
-	if opts.flagSet(FlagWantParallel) {
-		// We want twisted knots only for relrazzer
-		if comm0.Latter().Timestamp < comm1.Latter().Timestamp {
-			return false
-		}
-	}
-	return true
 }
 
 func isMessagePassing(c0, c1 interleaving.Communication) bool {
@@ -458,43 +261,6 @@ func isMessagePassing(c0, c1 interleaving.Communication) bool {
 		c0.Former().Typ == c1.Former().Typ &&
 		c0.Latter().Typ == c1.Latter().Typ &&
 		c0.Former().Typ != c0.Latter().Typ)
-}
-
-func (knotter *Knotter) alreadyHave(knot interleaving.Knot) bool {
-	if knotter.opts.Signal == nil {
-		return false
-	}
-	hsh := knot.Hash()
-	_, ok := (*knotter.opts.Signal)[hsh]
-	return ok
-}
-
-func (knotter *Knotter) tooManyNestedComm(comm interleaving.Communication) bool {
-	return knotter.innerCommCount[comm] >= knotter.config.threshold
-}
-
-func (knotter *Knotter) tooFarComms(comm0, comm1 interleaving.Communication) bool {
-	parallel := comm0.Parallel(comm1)
-	tooFar := func(acc0, acc1 interleaving.Access) bool {
-		if acc0.Thread != acc1.Thread {
-			panic("wrong")
-		}
-		tid := acc0.Thread
-		windowSize := knotter.windowSize[tid]
-		factor := knotter.config.factor
-		if windowSize < 2000 {
-			factor = 1
-		}
-		dist := timeDiff(acc0, acc1)
-		return dist > uint32(float32(windowSize)*factor)
-	}
-	if parallel {
-		// TODO: At this point, we don't know exactly what the
-		// condition of tooFar should be.
-		return tooFar(comm0.Former(), comm1.Former()) && tooFar(comm0.Latter(), comm1.Latter())
-	} else {
-		return tooFar(comm0.Former(), comm1.Latter()) && tooFar(comm1.Latter(), comm0.Former())
-	}
 }
 
 func timeDiff(acc0, acc1 interleaving.Access) (dist uint32) {
@@ -506,71 +272,8 @@ func timeDiff(acc0, acc1 interleaving.Access) (dist uint32) {
 	return dist
 }
 
-func (knotter *Knotter) GetCommunications() []interleaving.Segment {
-	return knotter.comms
-}
-
 func (knotter *Knotter) GetKnots() []interleaving.Segment {
 	return knotter.knots
-}
-
-type Scheduler struct {
-	// input
-	Knots []interleaving.Knot
-	// output
-	schedPoints []interleaving.Access
-}
-
-func (sched *Scheduler) GenerateSchedPoints() ([]interleaving.Access, bool) {
-	dag := sched.buildDAG()
-	nodes, ok := dag.topologicalSort()
-	if !ok {
-		return nil, false
-	}
-
-	// TODO: This is a current implementation's limitation. QEMU
-	// cannot handle schedpoints on the same instruction
-	type k struct {
-		inst   uint32
-		thread uint32
-	}
-	m := make(map[k]struct{})
-
-	for _, node := range nodes {
-		acc := node.(interleaving.Access)
-		k0 := k{inst: acc.Inst, thread: uint32(acc.Thread)}
-		if _, ok := m[k0]; ok {
-			continue
-		}
-		m[k0] = struct{}{}
-		sched.schedPoints = append(sched.schedPoints, interleaving.Access(acc))
-	}
-	return sched.schedPoints, true
-}
-
-func (sched *Scheduler) buildDAG() dag {
-	d := newDAG()
-	threads := make(map[uint64][]interleaving.Access)
-	for i /*, knot */ := range sched.Knots {
-		for j /*, comm */ := range sched.Knots[i] {
-			former := sched.Knots[i][j].Former()
-			latter := sched.Knots[i][j].Latter()
-			d.addEdge(former, latter)
-			threads[former.Thread] = append(threads[former.Thread], former)
-			threads[latter.Thread] = append(threads[latter.Thread], latter)
-		}
-	}
-
-	for /* threadid*/ _, accs := range threads {
-		// NOTE: timestamp represents the program order
-		sort.Slice(accs, func(i, j int) bool { return accs[i].Timestamp < accs[j].Timestamp })
-		for i /*, acc*/ := range accs {
-			if i != len(accs)-1 && accs[i].Timestamp != accs[i+1].Timestamp {
-				d.addEdge(accs[i], accs[i+1])
-			}
-		}
-	}
-	return d
 }
 
 func wordify(addr uint32) uint32 {
@@ -581,5 +284,3 @@ func wordify(addr uint32) uint32 {
 // we do not handle them.
 // var loopAllowed = []int{1, 2, 4, 8, 16, 32}
 var loopAllowed = []int{1}
-
-const thresholdKnots = 20000

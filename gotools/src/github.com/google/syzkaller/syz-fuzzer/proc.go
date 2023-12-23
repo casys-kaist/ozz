@@ -31,10 +31,6 @@ type Proc struct {
 	execOptsCollide *ipc.ExecOpts
 	execOptsCover   *ipc.ExecOpts
 
-	knotterOptsPreThreading scheduler.KnotterOpts
-	knotterOptsThreading    scheduler.KnotterOpts
-	knotterOptsSchedule     scheduler.KnotterOpts
-
 	// To give a half of computing power for scheduling. We don't use
 	// proc.fuzzer.Stats and proc.env.StatExec as it is periodically
 	// set to 0.
@@ -54,29 +50,14 @@ func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
 	execOptsCover := *fuzzer.execOpts
 	execOptsCover.Flags |= ipc.FlagCollectCover
 
-	defaultKnotterOpts := scheduler.KnotterOpts{
-		Signal: &fuzzer.maxInterleaving,
-		Mu:     &fuzzer.signalMu,
-		// In RelRazzer, we want to track/test only parallel knots
-		Flags: scheduler.FlagWantParallel,
-	}
-	knotterOptsPreThreading := defaultKnotterOpts
-	knotterOptsPreThreading.Flags |= scheduler.FlagReassignThreadID
-	knotterOptsThreading := defaultKnotterOpts
-	knotterOptsSchedule := defaultKnotterOpts
-	knotterOptsSchedule.Flags |= scheduler.FlagStrictTimestamp
-
 	proc := &Proc{
-		fuzzer:                  fuzzer,
-		pid:                     pid,
-		env:                     env,
-		rnd:                     rnd,
-		execOpts:                fuzzer.execOpts,
-		execOptsCollide:         &execOptsCollide,
-		execOptsCover:           &execOptsCover,
-		knotterOptsPreThreading: knotterOptsPreThreading,
-		knotterOptsThreading:    knotterOptsThreading,
-		knotterOptsSchedule:     knotterOptsSchedule,
+		fuzzer:          fuzzer,
+		pid:             pid,
+		env:             env,
+		rnd:             rnd,
+		execOpts:        fuzzer.execOpts,
+		execOptsCollide: &execOptsCollide,
+		execOptsCover:   &execOptsCover,
 	}
 	return proc, nil
 }
@@ -485,7 +466,7 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 
 func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.ProgInfo {
 	// NOTE: The scheduling work is the only case reaching here
-	knots := proc.extractKnots(info, p.Contender, proc.knotterOptsSchedule)
+	knots := proc.extractKnots(info, p.Contender)
 	if len(knots) == 0 {
 		log.Logf(1, "Failed to add sequential traces")
 		return info
@@ -509,19 +490,7 @@ func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.Pro
 	return info
 }
 
-func (proc *Proc) extractHints(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) []interleaving.Segment {
-	knotter := scheduler.GetKnotter(opts)
-
-	seq := proc.sequentialAccesses(info, calls)
-	if !knotter.AddSequentialTrace(seq) {
-		return nil
-	}
-	knotter.ExcavateKnots()
-
-	return knotter.GetKnots()
-}
-
-func (proc *Proc) extractKnots(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) []interleaving.Segment {
+func (proc *Proc) extractKnots(info *ipc.ProgInfo, calls prog.Contender) []interleaving.Segment {
 	// TODO: IMPLEMENT
 	return nil
 }
