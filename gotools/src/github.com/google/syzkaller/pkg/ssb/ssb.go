@@ -58,7 +58,7 @@ func (vec FlushVector) SerializeTable() []uint64 {
 	return r
 }
 
-func GenerateFlushVector(r *rand.Rand, cand interleaving.Candidate, randomReordering bool) FlushVector {
+func GenerateFlushVector(r *rand.Rand, hint interleaving.Hint, randomReordering bool) FlushVector {
 	doRandom := func() bool {
 		if r == nil || !randomReordering {
 			return false
@@ -66,15 +66,15 @@ func GenerateFlushVector(r *rand.Rand, cand interleaving.Candidate, randomReorde
 		// 0.5%
 		return r.Intn(1000) < 5
 	}
-	if !cand.Invalid() && !doRandom() {
-		return generateFlushVectorForCandidate(cand)
+	if !hint.Invalid() && !doRandom() {
+		return generateFlushVectorForHint(hint)
 	} else {
 		// Return a random flush vector
 		return generateRandomFlushVector(r)
 	}
 }
 
-func generateFlushVectorForCandidate(cand interleaving.Candidate) FlushVector {
+func generateFlushVectorForHint(hint interleaving.Hint) FlushVector {
 	uext := func(v uint32) uint64 {
 		return uint64(v) | 0xffffffff00000000
 	}
@@ -87,12 +87,12 @@ func generateFlushVectorForCandidate(cand interleaving.Candidate) FlushVector {
 		ht[i] = struct{}{}
 		table = append(table, tableEntry{inst: uext(i), value: v})
 	}
-	for _, acc := range cand.DelayingInst {
+	for _, acc := range hint.DelayingInst {
 		_add_entry(acc.Inst, 0)
 	}
 	// TODO: Reuse generated sched point
 	// Sched point (= first acc of crit comm) should be 1
-	schedPoint := cand.CriticalComm.Former()
+	schedPoint := hint.CriticalComm.Former()
 	_add_entry(schedPoint.Inst, 1)
 	return FlushVector{table: table}
 }

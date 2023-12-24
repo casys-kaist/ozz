@@ -1,24 +1,24 @@
 package interleaving
 
-type Candidate struct {
+type Hint struct {
 	DelayingInst []Access
 	SomeInst     []Access
 	CriticalComm Communication
 }
 
-func (cand Candidate) Invalid() bool {
-	return len(cand.DelayingInst) == 0 || cand.invalidCriticalComm()
+func (hint Hint) Invalid() bool {
+	return len(hint.DelayingInst) == 0 || hint.invalidCriticalComm()
 }
 
-func (cand Candidate) invalidCriticalComm() bool {
-	c := cand.CriticalComm
+func (hint Hint) invalidCriticalComm() bool {
+	c := hint.CriticalComm
 	return c.Former().Inst == 0 || c.Latter().Inst == 0
 }
 
-func (cand Candidate) GenerateSchedule() []Access {
-	c := cand.CriticalComm
+func (hint Hint) GenerateSchedule() []Access {
+	c := hint.CriticalComm
 	// NOTE: As long as we consider one critical communication for one
-	// candidate, a schedule always contains one access which is the
+	// hintidate, a schedule always contains one access which is the
 	// first access of the critcal comm.
 	return []Access{c.Former()}
 }

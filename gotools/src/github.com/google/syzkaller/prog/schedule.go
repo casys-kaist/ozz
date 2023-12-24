@@ -78,8 +78,8 @@ func (p *Prog) removeDummyPoints() {
 	p.Schedule.points = p.Schedule.points[:i+1]
 }
 
-func (p *Prog) MutateScheduleFromCandidate(rs rand.Source, cand interleaving.Candidate) {
-	schedule := cand.GenerateSchedule()
+func (p *Prog) MutateScheduleFromHint(rs rand.Source, hint interleaving.Hint) {
+	schedule := hint.GenerateSchedule()
 	p.applySchedule(schedule)
 }
 

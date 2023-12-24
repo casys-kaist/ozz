@@ -70,7 +70,7 @@ type WorkSmash struct {
 type WorkThreading struct {
 	p     *prog.Prog
 	calls prog.Contender
-	knots []interleaving.Segment
+	hints []interleaving.Hint
 }
 
 func newWorkQueue(procs int, needCandidates chan struct{}) *WorkQueue {

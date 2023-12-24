@@ -764,7 +764,7 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 	}
 }
 
-func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hint []interleaving.Segment) {
+func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hint []interleaving.Hint) {
 	log.Logf(2, "book a schedule guide")
 	fuzzer.addCollection(CollectionScheduleHint, uint64(len(hint)))
 	fuzzer.addCollection(CollectionConcurrentCalls, 1)
@@ -899,17 +899,17 @@ func (fuzzer *Fuzzer) newSegment(base *interleaving.Signal, segs []interleaving.
 	return base.DiffRaw(segs)
 }
 
-func (fuzzer *Fuzzer) getNewKnot(knots []interleaving.Segment) []interleaving.Segment {
-	diff := fuzzer.newSegment(&fuzzer.maxInterleaving, knots)
-	if len(diff) == 0 {
-		return nil
-	}
-	sign := interleaving.FromCoverToSignal(diff)
-	fuzzer.signalMu.Lock()
-	fuzzer.newInterleaving.Merge(sign)
-	fuzzer.maxInterleaving.Merge(sign)
-	fuzzer.signalMu.Unlock()
-	return diff
+func (fuzzer *Fuzzer) getNewHints(hints []interleaving.Hint) []interleaving.Hint {
+	// diff := fuzzer.newSegment(&fuzzer.maxInterleaving, knots)
+	// if len(diff) == 0 {
+	// 	return nil
+	// }
+	// sign := interleaving.FromCoverToSignal(diff)
+	// fuzzer.signalMu.Lock()
+	// fuzzer.newInterleaving.Merge(sign)
+	// fuzzer.maxInterleaving.Merge(sign)
+	// fuzzer.signalMu.Unlock()
+	return hints
 }
 
 func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog) bool {

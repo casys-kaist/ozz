@@ -8,7 +8,7 @@ type temp struct {
 	inst, addr uint32
 }
 
-func ComputeHints0(seq []interleaving.SerialAccess) []interleaving.Segment {
+func ComputeHints0(seq []interleaving.SerialAccess) []interleaving.Hint {
 	if len(seq) != 2 {
 		return nil
 	}
@@ -39,7 +39,7 @@ func ComputeHints0(seq []interleaving.SerialAccess) []interleaving.Segment {
 	return append(h0, h1...)
 }
 
-func ComputeHints(seq []interleaving.SerialAccess) []interleaving.Segment {
+func ComputeHints(seq []interleaving.SerialAccess) []interleaving.Hint {
 	// XXX: This function assumes that seq[0] was executed before
 	// seq[1]
 	if len(seq) != 2 {
@@ -48,5 +48,7 @@ func ComputeHints(seq []interleaving.SerialAccess) []interleaving.Segment {
 	knotter := Knotter{}
 	knotter.AddSequentialTrace(seq)
 	knotter.ExcavateKnots()
-	return knotter.GetKnots()
+	knots := knotter.GetKnots()
+	_ = knots
+	return nil
 }
