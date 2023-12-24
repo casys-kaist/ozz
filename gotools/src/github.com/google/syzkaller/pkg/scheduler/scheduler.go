@@ -22,7 +22,7 @@ type Knotter struct {
 	seqs0    [][]interleaving.SerialAccess // Unmodified input
 	seqs     [][]interleaving.SerialAccess // Used internally
 	// output
-	knots []interleaving.Segment
+	knots map[uint64][]interleaving.Knot
 	comms []interleaving.Communication
 }
 
@@ -220,15 +220,12 @@ func (knotter *Knotter) duppedComm(comm interleaving.Communication) bool {
 }
 
 func (knotter *Knotter) formKnots() {
-	knotter.knots = []interleaving.Segment{}
+	knotter.knots = make(map[uint64][]interleaving.Knot)
 	knotter.doFormKnotsParallel()
 }
 
 func (knotter *Knotter) doFormKnotsParallel() {
-	knotter.doFormKnotsinThread(knotter.comms)
-}
-
-func (knotter *Knotter) doFormKnotsinThread(comms []interleaving.Communication) {
+	comms := knotter.comms
 	for i := 0; i < len(comms); i++ {
 		for j := i + 1; j < len(comms); j++ {
 			comm0, comm1 := comms[i], comms[j]
@@ -238,22 +235,19 @@ func (knotter *Knotter) doFormKnotsinThread(comms []interleaving.Communication) 
 }
 
 func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication) {
-	parallel := comm0.Parallel(comm1)
-	if parallel && comm0.Former().Timestamp > comm1.Former().Timestamp {
-		comm0, comm1 = comm1, comm0
-	}
-	if !parallel {
+	if !comm0.Parallel(comm1) {
 		panic("want parallel but comms are not parallel")
+	}
+	if comm0.Former().Timestamp > comm1.Former().Timestamp {
+		comm0, comm1 = comm1, comm0
 	}
 	knotter.formKnotSingleSorted(comm0, comm1)
 }
 
 func (knotter *Knotter) formKnotSingleSorted(comm0, comm1 interleaving.Communication) {
 	knot := interleaving.Knot{comm0, comm1}
-	if typ := knot.Type(); typ == interleaving.KnotInvalid {
-		return
-	}
-	knotter.knots = append(knotter.knots, knot)
+	hsh := comm1.Hash()
+	knotter.knots[hsh] = append(knotter.knots[hsh], knot)
 }
 
 func isMessagePassing(c0, c1 interleaving.Communication) bool {
@@ -270,10 +264,6 @@ func timeDiff(acc0, acc1 interleaving.Access) (dist uint32) {
 		dist = acc1.Timestamp - acc0.Timestamp
 	}
 	return dist
-}
-
-func (knotter *Knotter) GetKnots() []interleaving.Segment {
-	return knotter.knots
 }
 
 func wordify(addr uint32) uint32 {

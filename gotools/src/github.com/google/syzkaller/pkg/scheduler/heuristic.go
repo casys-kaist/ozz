@@ -40,7 +40,7 @@ func ComputeHints0(seq []interleaving.SerialAccess) []interleaving.Hint {
 }
 
 func ComputeHints(seq []interleaving.SerialAccess) []interleaving.Hint {
-	// XXX: This function assumes that seq[0] was executed before
+	// NOTE: This function assumes that seq[0] was executed before
 	// seq[1]
 	if len(seq) != 2 {
 		return nil
@@ -48,7 +48,37 @@ func ComputeHints(seq []interleaving.SerialAccess) []interleaving.Hint {
 	knotter := Knotter{}
 	knotter.AddSequentialTrace(seq)
 	knotter.ExcavateKnots()
-	knots := knotter.GetKnots()
-	_ = knots
-	return nil
+
+	hints := []interleaving.Hint{}
+	knots := knotter.knots
+	for hsh, grouped := range knots {
+		for _, knot := range grouped {
+			if hsh != knot[1].Hash() {
+				panic("wrong")
+			}
+		}
+		if len(grouped) == 0 {
+			continue
+		}
+		critComm := grouped[0][1]
+		hint := aggregateHints(critComm, grouped)
+		hints = append(hints, hint)
+	}
+	return hints
+}
+
+func aggregateHints(critComm interleaving.Communication, grouped []interleaving.Knot) interleaving.Hint {
+	// TODO: What are good names for someInst*?
+	someInst := []interleaving.Access{}
+	someInst2 := []interleaving.Access{}
+	for _, knot := range grouped {
+		someComm := knot[0]
+		someInst = append(someInst, someComm.Former())
+		someInst2 = append(someInst2, someComm.Latter())
+	}
+	return interleaving.Hint{
+		DelayingInst: someInst,
+		SomeInst:     someInst2,
+		CriticalComm: critComm,
+	}
 }
