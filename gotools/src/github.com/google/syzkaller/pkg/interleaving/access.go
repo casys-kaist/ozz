@@ -124,4 +124,7 @@ const (
 	TypeStore = iota
 	TypeLoad
 	TypeFlush
+	TypeLFence
+	TypeLockAcquire
+	TypeLockRelease
 )

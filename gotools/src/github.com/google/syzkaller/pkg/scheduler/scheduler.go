@@ -14,6 +14,12 @@ type Knotter struct {
 	accessMap   map[uint32][]interleaving.Access
 	numThr      int
 
+	// map: access IDs --> Lock IDs
+	locks map[uint32][]int
+	// map: access IDs -> chunk IDs
+	storeChunks map[uint32]int
+	loadChunks  map[uint32]int
+
 	commHsh    map[uint64]struct{}
 	windowSize []int
 
@@ -89,6 +95,8 @@ func (knotter *Knotter) ExcavateKnots() {
 func (knotter *Knotter) fastenKnots() {
 	knotter.collectCommChans()
 	knotter.buildAccessMap()
+	knotter.annotateLocks()
+	knotter.chunknizeSerials()
 	knotter.formCommunications()
 	knotter.formKnots()
 }
@@ -162,6 +170,14 @@ func (knotter *Knotter) buildAccessMapSerial(serial interleaving.SerialAccess) {
 	}
 }
 
+func (knotter *Knotter) annotateLocks() {
+	// TODO
+}
+
+func (knotter *Knotter) chunknizeSerials() {
+	// TOOD
+}
+
 func (knotter *Knotter) formCommunications() {
 	knotter.comms = []interleaving.Communication{}
 	knotter.commHsh = make(map[uint64]struct{})
@@ -172,14 +188,14 @@ func (knotter *Knotter) formCommunications() {
 
 func (knotter *Knotter) formCommunicationAddr(accesses []interleaving.Access) {
 	for i := 0; i < len(accesses); i++ {
-		for j := i + 1; j < len(accesses); j++ {
-			acc1, acc2 := accesses[i], accesses[j]
-			if acc1.Thread == acc2.Thread {
+		for j := i + 0; j < len(accesses); j++ {
+			acc0, acc1 := accesses[i], accesses[j]
+			if acc0.Thread == acc1.Thread {
 				continue
 			}
 
-			if acc1.Timestamp > acc2.Timestamp {
-				acc1, acc2 = acc2, acc1
+			if acc0.Timestamp > acc1.Timestamp {
+				acc0, acc1 = acc1, acc0
 			}
 
 			// NOTE: We want to form a communication when one stores a
@@ -189,17 +205,37 @@ func (knotter *Knotter) formCommunicationAddr(accesses []interleaving.Access) {
 			// in fact reads a value from another atomic. To handle
 			// the cases, we discasd cases only when both accesses
 			// have the load type.
-			if acc1.Typ == acc2.Typ {
+			if (acc0.Typ == interleaving.TypeLoad) && (acc1.Typ == interleaving.TypeLoad) {
 				continue
 			}
 
-			if !acc1.Overlapped(acc2) {
+			if !acc0.Overlapped(acc1) {
 				continue
 			}
 
-			knotter.formCommunicationSingle(acc1, acc2)
+			if knotter.lockContending(acc0, acc1) {
+				continue
+			}
+
+			knotter.formCommunicationSingle(acc0, acc1)
 		}
 	}
+}
+
+func (knotter *Knotter) lockContending(acc0, acc1 interleaving.Access) bool {
+	l0 := knotter.locks[acc0.Inst]
+	l1 := knotter.locks[acc1.Inst]
+	// TODO: Possibly making a map is too heavy for this.
+	ht := make(map[int]struct{})
+	for _, l := range l0 {
+		ht[l] = struct{}{}
+	}
+	for _, l := range l1 {
+		if _, ok := ht[l]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (knotter *Knotter) formCommunicationSingle(acc0, acc1 interleaving.Access) {
@@ -229,12 +265,49 @@ func (knotter *Knotter) doFormKnotsParallel() {
 	for i := 0; i < len(comms); i++ {
 		for j := i + 1; j < len(comms); j++ {
 			comm0, comm1 := comms[i], comms[j]
-			knotter.formKnotSingle(comm0, comm1)
+			if knotter.canTestMissingStoreBarrier(comm0, comm1) {
+				knotter.formKnotForStoreBarrier(comm0, comm1)
+			}
+			if knotter.canTestMissingLoadBarrier(comm0, comm1) {
+				knotter.formKnotForLoadBarrier(comm0, comm1)
+			}
 		}
 	}
 }
 
-func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication) {
+func (knotter *Knotter) canTestMissingStoreBarrier(comm0, comm1 interleaving.Communication) bool {
+	return knotter.inSameChunk(comm0.Former(), comm1.Former(), true)
+}
+
+func (knotter *Knotter) canTestMissingLoadBarrier(comm0, comm1 interleaving.Communication) bool {
+	return knotter.inSameChunk(comm0.Latter(), comm1.Latter(), false)
+}
+
+func (knotter *Knotter) inSameChunk(acc0, acc1 interleaving.Access, storeChunk bool) bool {
+	var c0, c1 int
+	var ok0, ok1 bool
+	if storeChunk {
+		c0, ok0 = knotter.storeChunks[acc0.Inst]
+		c1, ok1 = knotter.storeChunks[acc1.Inst]
+	} else {
+		c0, ok0 = knotter.loadChunks[acc0.Inst]
+		c1, ok1 = knotter.loadChunks[acc1.Inst]
+	}
+	if !ok0 || !ok1 {
+		return false
+	}
+	return c0 == c1
+}
+
+func (knotter *Knotter) formKnotForStoreBarrier(comm0, comm1 interleaving.Communication) {
+	knotter.formKnotSingle(comm0, comm1, true)
+}
+
+func (knotter *Knotter) formKnotForLoadBarrier(comm0, comm1 interleaving.Communication) {
+	knotter.formKnotSingle(comm0, comm1, false)
+}
+
+func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication, testingStoreBarrier bool) {
 	if !comm0.Parallel(comm1) {
 		panic("want parallel but comms are not parallel")
 	}
@@ -248,22 +321,6 @@ func (knotter *Knotter) formKnotSingleSorted(comm0, comm1 interleaving.Communica
 	knot := interleaving.Knot{comm0, comm1}
 	hsh := comm1.Hash()
 	knotter.knots[hsh] = append(knotter.knots[hsh], knot)
-}
-
-func isMessagePassing(c0, c1 interleaving.Communication) bool {
-	return (c0.Former().Typ == interleaving.TypeStore &&
-		c0.Former().Typ == c1.Former().Typ &&
-		c0.Latter().Typ == c1.Latter().Typ &&
-		c0.Former().Typ != c0.Latter().Typ)
-}
-
-func timeDiff(acc0, acc1 interleaving.Access) (dist uint32) {
-	if acc0.Timestamp > acc1.Timestamp {
-		dist = acc0.Timestamp - acc1.Timestamp
-	} else {
-		dist = acc1.Timestamp - acc0.Timestamp
-	}
-	return dist
 }
 
 func wordify(addr uint32) uint32 {
