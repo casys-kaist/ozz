@@ -24,68 +24,23 @@ type Knotter struct {
 	windowSize []int
 
 	// input
-	seqCount int
-	seq0     []interleaving.SerialAccess // Unmodified input
-	seq      []interleaving.SerialAccess // Used internally
+	seq0 []interleaving.SerialAccess // Unmodified input
+	seq  []interleaving.SerialAccess // Used internally
 	// output
 	knots map[uint64][]interleaving.Knot
 	comms []interleaving.Communication
 }
 
 func (knotter *Knotter) AddSequentialTrace(seq []interleaving.SerialAccess) bool {
-	if knotter.seqCount == 2 {
-		// NOTE: In this project, we build knots using at most two
-		// sequential executions. Adding more sequential execution is
-		// not allowed.
-		return false
-	}
-	if !knotter.sanitizeSequentialTrace(seq) {
+	if len(seq) != 2 {
 		return false
 	}
 	knotter.seq0 = seq
-	knotter.seqCount++
-	return true
-}
-
-func (knotter *Knotter) sanitizeSequentialTrace(seq []interleaving.SerialAccess) bool {
-	if len(seq) <= 1 {
-		// 1) Reject a case that a thread does not touch memory at all. In
-		// theory, there can be a case that a thread or all threads do not
-		// touch any memory objects. We don't need to consider those cases
-		// since they do not race anyway. 2) or a single thread is given
-		return false
-	}
-	chk := make([]bool, len(seq))
-	for _, serial := range seq {
-		if len(serial) == 0 {
-			return false
-		}
-		if !serial.SingleThread() {
-			// All serial execution should be a single thread
-			return false
-		}
-		thr := int(serial[0].Thread)
-		if thr >= len(chk) {
-			// thread id should be consecutive starting from 0
-		}
-		if chk[thr] {
-			// All serial should have a different thread id
-			return false
-		}
-		chk[thr] = true
-	}
-	// NOTE: At this point we take consider cases that all sequential
-	// executions have the same nubmer of threads
-	if knotter.numThr == 0 {
-		knotter.numThr = len(seq)
-	} else if knotter.numThr != len(seq) {
-		return false
-	}
 	return true
 }
 
 func (knotter *Knotter) ExcavateKnots() {
-	if knotter.seqCount < 1 {
+	if knotter.seq == nil {
 		return
 	}
 	knotter.loopAllowed = loopAllowed
