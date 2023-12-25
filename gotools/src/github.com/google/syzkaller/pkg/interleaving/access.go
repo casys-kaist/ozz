@@ -6,8 +6,8 @@ import (
 )
 
 // TODO: Access contains both static information (i.e., Inst, Size,
-// Type, Context, ...) and dynamic information (i.e., Addr,
-// Thread). Split the struct type into two for them.
+// Type) and dynamic information (i.e., Addr, Thread). Split the
+// struct type into two for them.
 type Access struct {
 	Inst      uint32
 	Addr      uint32
@@ -16,13 +16,11 @@ type Access struct {
 	Timestamp uint32
 	// TODO: do we need to keep epoch?
 	Thread uint64
-
-	Context uint32
 }
 
 func (acc Access) String() string {
-	return fmt.Sprintf("thread #%d (ctx %x): %x accesses %x (size: %d, type: %d, timestamp: %d)",
-		acc.Thread, acc.Context, acc.Inst, acc.Addr, acc.Size, acc.Typ, acc.Timestamp)
+	return fmt.Sprintf("thread #%d: %x accesses %x (size: %d, type: %d, timestamp: %d)",
+		acc.Thread, acc.Inst, acc.Addr, acc.Size, acc.Typ, acc.Timestamp)
 }
 
 func (acc Access) Overlapped(acc2 Access) bool {

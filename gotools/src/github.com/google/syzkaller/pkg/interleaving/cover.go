@@ -27,7 +27,6 @@ func (c Cover) Serialize() SerialCover {
 						acc.Typ,
 						acc.Timestamp,
 						uint32(acc.Thread),
-						acc.Context,
 					)
 				}
 			}
@@ -66,12 +65,11 @@ func deserializeAccess(raw []uint32) Access {
 		Typ:       raw[3],
 		Timestamp: raw[4],
 		Thread:    uint64(raw[5]),
-		Context:   raw[6],
 	}
 }
 
 const (
-	sizePerAccess        = 7
+	sizePerAccess        = 6
 	sizePerCommunication = sizePerAccess * 2
 	sizePerKnot          = sizePerCommunication * 2
 )

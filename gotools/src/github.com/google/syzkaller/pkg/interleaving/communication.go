@@ -11,14 +11,6 @@ func (inner Communication) Imply(outer Communication) bool {
 	// inner[0]
 	//             inner[1]
 	//             outer[1]
-	chk := func(acc1, acc2 Access) bool {
-		return acc1.Context == CommonPath ||
-			acc2.Context == CommonPath ||
-			acc1.Context == acc2.Context
-	}
-	if !chk(inner.Former(), outer.Former()) || !chk(inner.Latter(), outer.Latter()) {
-		return false
-	}
 	return inner.Former().Timestamp >= outer.Former().Timestamp &&
 		inner.Latter().Timestamp <= outer.Latter().Timestamp
 }
