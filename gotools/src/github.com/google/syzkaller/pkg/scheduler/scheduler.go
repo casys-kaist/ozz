@@ -86,19 +86,23 @@ func (knotter *Knotter) collectCommChansSerial(serial, unused *interleaving.Seri
 func (knotter *Knotter) distillSerial(serial *interleaving.SerialAccess, distiled *interleaving.SerialAccess) {
 	loopCnt := make(map[uint32]int)
 	for _, acc := range *serial {
-		addr := wordify(acc.Addr)
-		if _, ok := knotter.commChan[addr]; !ok {
-			continue
-		}
-		// Deal with specific dynamic instances for the same instruction
-		// to handle loops
-		loopCnt[acc.Inst]++
-		// TODO: this loop can be optimized
-		for _, allowed := range knotter.loopAllowed {
-			if allowed == loopCnt[acc.Inst] {
-				(*distiled) = append((*distiled), acc)
-				break
+		if typ := acc.Typ; typ == interleaving.TypeLoad || typ == interleaving.TypeStore {
+			addr := wordify(acc.Addr)
+			if _, ok := knotter.commChan[addr]; !ok {
+				continue
 			}
+			// Deal with specific dynamic instances for the same instruction
+			// to handle loops
+			loopCnt[acc.Inst]++
+			// TODO: this loop can be optimized
+			for _, allowed := range knotter.loopAllowed {
+				if allowed == loopCnt[acc.Inst] {
+					(*distiled) = append((*distiled), acc)
+					break
+				}
+			}
+		} else {
+			(*distiled) = append((*distiled), acc)
 		}
 	}
 }
