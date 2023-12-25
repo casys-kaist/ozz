@@ -199,7 +199,25 @@ loop:
 }
 
 func (knotter *Knotter) chunknizeSerials() {
-	// TODO
+	for _, serial := range knotter.seq {
+		knotter.chunknizeSerial(serial)
+	}
+}
+
+func (knotter *Knotter) chunknizeSerial(serial interleaving.SerialAccess) {
+	storeChunkID, loadChunkID := 0, 0
+	for _, acc := range serial {
+		switch typ := acc.Typ; typ {
+		case interleaving.TypeStore, interleaving.TypeLoad:
+			memId := getMemID(acc)
+			knotter.storeChunks[memId] = storeChunkID
+			knotter.loadChunks[memId] = loadChunkID
+		case interleaving.TypeFlush:
+			storeChunkID++
+		case interleaving.TypeLFence:
+			loadChunkID++
+		}
+	}
 }
 
 func (knotter *Knotter) formCommunications() {
