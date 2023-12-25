@@ -14,11 +14,11 @@ type Knotter struct {
 	accessMap   map[uint32][]interleaving.Access
 	numThr      int
 
-	// map: Per thread, map (access IDs --> Lock IDs)
+	// Per thread, map (access IDs --> Lock IDs)
 	locks []map[uint32][]int
-	// map: access IDs -> chunk IDs
-	storeChunks map[uint32]int
-	loadChunks  map[uint32]int
+	// Per thread, map (access IDs -> chunk IDs)
+	storeChunks []map[uint32]int
+	loadChunks  []map[uint32]int
 
 	commHsh    map[uint64]struct{}
 	windowSize []int
@@ -165,19 +165,27 @@ loop:
 }
 
 func (knotter *Knotter) chunknizeSerials() {
+	knotter.storeChunks = make([]map[uint32]int, 2)
+	knotter.loadChunks = make([]map[uint32]int, 2)
 	for _, serial := range knotter.seq {
-		knotter.chunknizeSerial(serial)
+		if len(serial) == 0 {
+			continue
+		}
+		tid := uint32(serial[0].Thread)
+		knotter.chunknizeSerial(tid, serial)
 	}
 }
 
-func (knotter *Knotter) chunknizeSerial(serial interleaving.SerialAccess) {
+func (knotter *Knotter) chunknizeSerial(tid uint32, serial interleaving.SerialAccess) {
+	knotter.storeChunks[tid] = make(map[uint32]int)
+	knotter.loadChunks[tid] = make(map[uint32]int)
 	storeChunkID, loadChunkID := 0, 0
 	for _, acc := range serial {
 		switch typ := acc.Typ; typ {
 		case interleaving.TypeStore, interleaving.TypeLoad:
 			memId := getMemID(acc)
-			knotter.storeChunks[memId] = storeChunkID
-			knotter.loadChunks[memId] = loadChunkID
+			knotter.storeChunks[tid][memId] = storeChunkID
+			knotter.loadChunks[tid][memId] = loadChunkID
 		case interleaving.TypeFlush:
 			storeChunkID++
 		case interleaving.TypeLFence:
@@ -292,14 +300,18 @@ func (knotter *Knotter) canTestMissingLoadBarrier(comm0, comm1 interleaving.Comm
 }
 
 func (knotter *Knotter) inSameChunk(acc0, acc1 interleaving.Access, storeChunk bool) bool {
+	if acc0.Thread != acc1.Thread {
+		panic("wrong")
+	}
 	var c0, c1 int
 	var ok0, ok1 bool
+	tid := uint32(acc0.Thread)
 	if storeChunk {
-		c0, ok0 = knotter.storeChunks[acc0.Inst]
-		c1, ok1 = knotter.storeChunks[acc1.Inst]
+		c0, ok0 = knotter.storeChunks[tid][acc0.Inst]
+		c1, ok1 = knotter.storeChunks[tid][acc1.Inst]
 	} else {
-		c0, ok0 = knotter.loadChunks[acc0.Inst]
-		c1, ok1 = knotter.loadChunks[acc1.Inst]
+		c0, ok0 = knotter.loadChunks[tid][acc0.Inst]
+		c1, ok1 = knotter.loadChunks[tid][acc1.Inst]
 	}
 	if !ok0 || !ok1 {
 		return false
