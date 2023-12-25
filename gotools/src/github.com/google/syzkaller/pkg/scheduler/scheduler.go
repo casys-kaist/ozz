@@ -25,8 +25,8 @@ type Knotter struct {
 
 	// input
 	seqCount int
-	seqs0    [][]interleaving.SerialAccess // Unmodified input
-	seqs     [][]interleaving.SerialAccess // Used internally
+	seq0     []interleaving.SerialAccess // Unmodified input
+	seq      []interleaving.SerialAccess // Used internally
 	// output
 	knots map[uint64][]interleaving.Knot
 	comms []interleaving.Communication
@@ -42,7 +42,7 @@ func (knotter *Knotter) AddSequentialTrace(seq []interleaving.SerialAccess) bool
 	if !knotter.sanitizeSequentialTrace(seq) {
 		return false
 	}
-	knotter.seqs0 = append(knotter.seqs0, seq)
+	knotter.seq0 = seq
 	knotter.seqCount++
 	return true
 }
@@ -102,21 +102,14 @@ func (knotter *Knotter) fastenKnots() {
 }
 
 func (knotter *Knotter) collectCommChans() {
-	knotter.seqs = make([][]interleaving.SerialAccess, len(knotter.seqs0))
-	for i, seq := range knotter.seqs0 {
-		knotter.seqs[i] = make([]interleaving.SerialAccess, len(seq))
-	}
-
 	// Only memory objects on which store operations take place can be
 	// a communication channel
 	knotter.commChan = make(map[uint32]struct{})
 	doSerial := func(f func(*interleaving.SerialAccess, *interleaving.SerialAccess)) {
-		for i := 0; i < len(knotter.seqs0); i++ {
-			for j := 0; j < len(knotter.seqs0[i]); j++ {
-				src := &knotter.seqs0[i][j]
-				dst := &knotter.seqs[i][j]
-				f(src, dst)
-			}
+		for i := 0; i < len(knotter.seq0); i++ {
+			src := &knotter.seq0[i]
+			dst := &knotter.seq[i]
+			f(src, dst)
 		}
 	}
 	// Firstly, collect all possible communicatino channels
@@ -156,10 +149,8 @@ func (knotter *Knotter) distillSerial(serial *interleaving.SerialAccess, distile
 
 func (knotter *Knotter) buildAccessMap() {
 	knotter.accessMap = make(map[uint32][]interleaving.Access)
-	for _, seq := range knotter.seqs {
-		for _, serial := range seq {
-			knotter.buildAccessMapSerial(serial)
-		}
+	for _, serial := range knotter.seq {
+		knotter.buildAccessMapSerial(serial)
 	}
 }
 
@@ -171,11 +162,44 @@ func (knotter *Knotter) buildAccessMapSerial(serial interleaving.SerialAccess) {
 }
 
 func (knotter *Knotter) annotateLocks() {
-	// TODO
+	for _, serial := range knotter.seq {
+		knotter.annotateLocksInSerial(serial)
+	}
+}
+
+func (knotter *Knotter) annotateLocksInSerial(serial interleaving.SerialAccess) {
+	// NOTE: Unless there is a deadlock, traces of lock operations are
+	// always a form of a stack.
+	locks, head := make([]int, 16), 0
+loop:
+	for _, acc := range serial {
+		switch typ := acc.Typ; typ {
+		case interleaving.TypeLoad, interleaving.TypeStore:
+			memID := getMemID(acc)
+			knotter.locks[memID] = append([]int{}, locks[:head]...)
+		case interleaving.TypeLockAcquire:
+			lockID := getLockID(acc)
+			locks[head] = lockID
+			head++
+		case interleaving.TypeLockRelease:
+			lockID := getLockID(acc)
+			// NOTE: KMemcov does not record if a lock acquire is
+			// try-lock. This causes a trace to miss lock acquires
+			// even if they are successful, leading an incomplete
+			// trace.
+			for i := head - 1; i >= 0; i-- {
+				if lockID == locks[i] {
+					head = i
+					continue loop
+				}
+			}
+			head = 0
+		}
+	}
 }
 
 func (knotter *Knotter) chunknizeSerials() {
-	// TOOD
+	// TODO
 }
 
 func (knotter *Knotter) formCommunications() {
@@ -325,6 +349,14 @@ func (knotter *Knotter) formKnotSingleSorted(comm0, comm1 interleaving.Communica
 
 func wordify(addr uint32) uint32 {
 	return addr & ^uint32(7)
+}
+
+func getMemID(acc interleaving.Access) uint32 {
+	return acc.Inst
+}
+
+func getLockID(acc interleaving.Access) int {
+	return int(acc.Addr)
 }
 
 // TODO: Currently QEMU cannot handle multiple dynamic instances, so
