@@ -104,6 +104,7 @@ func (knotter *Knotter) fastenKnots() {
 func (knotter *Knotter) collectCommChans() {
 	// Only memory objects on which store operations take place can be
 	// a communication channel
+	knotter.seq = make([]interleaving.SerialAccess, len(knotter.seq0))
 	knotter.commChan = make(map[uint32]struct{})
 	doSerial := func(f func(*interleaving.SerialAccess, *interleaving.SerialAccess)) {
 		for i := 0; i < len(knotter.seq0); i++ {
