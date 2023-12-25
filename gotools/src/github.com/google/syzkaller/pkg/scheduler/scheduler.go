@@ -14,8 +14,8 @@ type Knotter struct {
 	accessMap   map[uint32][]interleaving.Access
 	numThr      int
 
-	// map: access IDs --> Lock IDs
-	locks map[uint32][]int
+	// map: Per thread, map (access IDs --> Lock IDs)
+	locks []map[uint32][]int
 	// map: access IDs -> chunk IDs
 	storeChunks map[uint32]int
 	loadChunks  map[uint32]int
@@ -122,12 +122,18 @@ func (knotter *Knotter) buildAccessMapSerial(serial interleaving.SerialAccess) {
 }
 
 func (knotter *Knotter) annotateLocks() {
+	knotter.locks = make([]map[uint32][]int, 2)
 	for _, serial := range knotter.seq {
-		knotter.annotateLocksInSerial(serial)
+		if len(serial) == 0 {
+			continue
+		}
+		tid := serial[0].Thread
+		knotter.annotateLocksInSerial(uint32(tid), serial)
 	}
 }
 
-func (knotter *Knotter) annotateLocksInSerial(serial interleaving.SerialAccess) {
+func (knotter *Knotter) annotateLocksInSerial(tid uint32, serial interleaving.SerialAccess) {
+	knotter.locks[tid] = make(map[uint32][]int)
 	// NOTE: Unless there is a deadlock, traces of lock operations are
 	// always a form of a stack.
 	locks, head := make([]int, 16), 0
@@ -136,7 +142,7 @@ loop:
 		switch typ := acc.Typ; typ {
 		case interleaving.TypeLoad, interleaving.TypeStore:
 			memID := getMemID(acc)
-			knotter.locks[memID] = append([]int{}, locks[:head]...)
+			knotter.locks[tid][memID] = append([]int{}, locks[:head]...)
 		case interleaving.TypeLockAcquire:
 			lockID := getLockID(acc)
 			locks[head] = lockID
@@ -225,8 +231,8 @@ func (knotter *Knotter) formCommunicationAddr(accesses []interleaving.Access) {
 }
 
 func (knotter *Knotter) lockContending(acc0, acc1 interleaving.Access) bool {
-	l0 := knotter.locks[acc0.Inst]
-	l1 := knotter.locks[acc1.Inst]
+	l0 := knotter.locks[uint32(acc0.Thread)][acc0.Inst]
+	l1 := knotter.locks[uint32(acc1.Thread)][acc1.Inst]
 	// TODO: Possibly making a map is too heavy for this.
 	ht := make(map[int]struct{})
 	for _, l := range l0 {
