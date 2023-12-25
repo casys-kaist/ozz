@@ -222,14 +222,13 @@ func createIPCConfig(features *host.Features, config *ipc.Config) {
 }
 
 func setupKMemCov(traceLock bool) {
-	const fn = "/sys/kernel/debug/kmemcov_trace_lock"
 	log.Logf(0, "Trace lock: %v", traceLock)
-	var i int
-	if traceLock {
-		i = 1
+	if !traceLock {
+		return
 	}
-	data := []byte(fmt.Sprintf("%d", i))
-	if err := osutil.WriteFile("fn", data); err != nil {
+	const fn = "/sys/kernel/debug/kmemcov_trace_lock"
+	data := []byte(fmt.Sprintf("%d", 1))
+	if err := osutil.WriteFile(fn, data); err != nil {
 		log.Logf(0, "Failed to setup kmemcov")
 	}
 }
