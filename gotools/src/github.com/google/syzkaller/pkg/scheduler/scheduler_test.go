@@ -140,6 +140,26 @@ func TestFastenKnots(t *testing.T) {
 	}
 }
 
+func TestRedundantKnots(t *testing.T) {
+	tests := []string{"watchqueue"}
+	for _, test := range tests {
+		seq := loadTestdata(t, test)
+		knotter := Knotter{}
+		knotter.AddSequentialTrace(seq)
+		knotter.ExcavateKnots()
+		ht := make(map[uint64]struct{})
+		for _, grouped := range knotter.knots {
+			for _, knot := range grouped {
+				hsh := knot.Hash()
+				if _, ok := ht[hsh]; ok {
+					t.Errorf("Redundant hash found: %v", hsh)
+				}
+				ht[hsh] = struct{}{}
+			}
+		}
+	}
+}
+
 func loadTestdata(t *testing.T, fn string) []interleaving.SerialAccess {
 	path := filepath.Join("testdata", fn)
 	data, err := ioutil.ReadFile(path)
