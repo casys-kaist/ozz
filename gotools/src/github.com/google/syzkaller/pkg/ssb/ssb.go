@@ -87,7 +87,7 @@ func generateFlushVectorForHint(hint interleaving.Hint) FlushVector {
 		ht[i] = struct{}{}
 		table = append(table, tableEntry{inst: uext(i), value: v})
 	}
-	for _, acc := range hint.SomeInst {
+	for _, acc := range hint.PrecedingInsts {
 		_add_entry(acc.Inst, 0)
 	}
 	// TODO: Reuse generated sched point

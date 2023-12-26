@@ -67,20 +67,19 @@ func aggregateHints(critComm interleaving.Communication, grouped []interleaving.
 }
 
 func aggregateHintWithConditions(critComm interleaving.Communication, grouped []interleaving.Knot, conds map[uint64]struct{}, typ interleaving.HintType) interleaving.Hint {
-	// TODO: What are good names for someInst*?
-	someInst := []interleaving.Access{}
-	someInst2 := []interleaving.Access{}
+	precedingInsts := []interleaving.Access{}
+	followingInsts := []interleaving.Access{}
 	for _, knot := range grouped {
 		if _, ok := conds[knot.Hash()]; ok {
-			someComm := knot[0]
-			someInst = append(someInst, someComm.Former())
-			someInst2 = append(someInst2, someComm.Latter())
+			comm := knot[0]
+			precedingInsts = append(precedingInsts, comm.Former())
+			followingInsts = append(followingInsts, comm.Latter())
 		}
 	}
 	return interleaving.Hint{
-		SomeInst:     someInst,
-		SomeInst2:    someInst2,
-		CriticalComm: critComm,
-		Typ:          typ,
+		PrecedingInsts: precedingInsts,
+		FollowingInsts: followingInsts,
+		CriticalComm:   critComm,
+		Typ:            typ,
 	}
 }
