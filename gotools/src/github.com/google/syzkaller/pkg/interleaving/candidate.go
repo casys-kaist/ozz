@@ -1,13 +1,21 @@
 package interleaving
 
 type Hint struct {
-	DelayingInst []Access
 	SomeInst     []Access
+	SomeInst2    []Access
 	CriticalComm Communication
+	Typ          HintType
 }
 
+type HintType bool
+
+const (
+	TestingStoreBarrier = true
+	TestingLoadBarrier  = false
+)
+
 func (hint Hint) Invalid() bool {
-	return len(hint.DelayingInst) == 0 || hint.invalidCriticalComm()
+	return len(hint.SomeInst) == 0 || len(hint.SomeInst2) == 0 || hint.invalidCriticalComm()
 }
 
 func (hint Hint) invalidCriticalComm() bool {
