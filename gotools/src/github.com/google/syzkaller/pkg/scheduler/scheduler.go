@@ -26,6 +26,9 @@ type Knotter struct {
 	// output
 	knots map[uint64][]interleaving.Knot
 	comms []interleaving.Communication
+	// Sets of knot hashes.
+	delayingStores   map[uint64]struct{}
+	prefetchingLoads map[uint64]struct{}
 }
 
 func (knotter *Knotter) AddSequentialTrace(seq []interleaving.SerialAccess) bool {
@@ -328,8 +331,14 @@ func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication, 
 		panic("want parallel but comms are not parallel")
 	}
 	knot := interleaving.Knot{comm0, comm1}
-	hsh := comm1.Hash()
-	knotter.knots[hsh] = append(knotter.knots[hsh], knot)
+	critHsh := comm1.Hash()
+	knotHsh := knot.Hash()
+	knotter.knots[critHsh] = append(knotter.knots[critHsh], knot)
+	if testingStoreBarrier {
+		knotter.delayingStores[knotHsh] = struct{}{}
+	} else {
+		knotter.prefetchingLoads[knotHsh] = struct{}{}
+	}
 }
 
 func canonicalize(comms []interleaving.Communication, i, j int) (comm0, comm1 interleaving.Communication, ok bool) {
