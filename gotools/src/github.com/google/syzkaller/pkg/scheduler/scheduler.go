@@ -27,8 +27,8 @@ type Knotter struct {
 	knots map[uint64][]interleaving.Knot
 	comms []interleaving.Communication
 	// Sets of knot hashes.
-	delayingStores   map[uint64]struct{}
-	prefetchingLoads map[uint64]struct{}
+	testingStoreBarrier map[uint64]struct{}
+	testingLoadBarrier  map[uint64]struct{}
 }
 
 func (knotter *Knotter) AddSequentialTrace(seq []interleaving.SerialAccess) bool {
@@ -336,9 +336,9 @@ func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication, 
 	knotHsh := knot.Hash()
 	knotter.knots[critHsh] = append(knotter.knots[critHsh], knot)
 	if testingStoreBarrier {
-		knotter.delayingStores[knotHsh] = struct{}{}
+		knotter.testingStoreBarrier[knotHsh] = struct{}{}
 	} else {
-		knotter.prefetchingLoads[knotHsh] = struct{}{}
+		knotter.testingLoadBarrier[knotHsh] = struct{}{}
 	}
 }
 
