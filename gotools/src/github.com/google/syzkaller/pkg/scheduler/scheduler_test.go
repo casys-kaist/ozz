@@ -174,6 +174,28 @@ func TestRedundantKnots(t *testing.T) {
 	}
 }
 
+func TestOverlappedConditions(t *testing.T) {
+	tests := []string{
+		"watchqueue",
+		"watchqueue2",
+	}
+	for _, test := range tests {
+		seq := loadTestdata(t, test)
+		knotter := Knotter{}
+		knotter.AddSequentialTrace(seq)
+		knotter.ExcavateKnots()
+		ht := make(map[uint64]struct{})
+		for c := range knotter.testingStoreBarrier {
+			ht[c] = struct{}{}
+		}
+		for c := range knotter.testingLoadBarrier {
+			if _, ok := ht[c]; ok {
+				t.Errorf("conditions are overlapped")
+			}
+		}
+	}
+}
+
 func loadTestdata(t *testing.T, fn string) []interleaving.SerialAccess {
 	path := filepath.Join("testdata", fn)
 	data, err := ioutil.ReadFile(path)
