@@ -54,7 +54,6 @@ func (knotter *Knotter) fastenKnots() {
 	knotter.chunknizeSerials()
 	knotter.formCommunications()
 	knotter.formKnots()
-	knotter.postProcessing()
 }
 
 func (knotter *Knotter) collectCommChans() {
@@ -288,8 +287,7 @@ func (knotter *Knotter) formKnots() {
 			}
 			if knotter.canTestMissingStoreBarrier(comm0, comm1) {
 				knotter.formKnotForStoreBarrier(comm0, comm1)
-			}
-			if knotter.canTestMissingLoadBarrier(comm0, comm1) {
+			} else if knotter.canTestMissingLoadBarrier(comm0, comm1) {
 				knotter.formKnotForLoadBarrier(comm0, comm1)
 			}
 		}
@@ -344,15 +342,6 @@ func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication, 
 		knotter.testingStoreBarrier[knotHsh] = struct{}{}
 	} else {
 		knotter.testingLoadBarrier[knotHsh] = struct{}{}
-	}
-}
-
-func (knotter *Knotter) postProcessing() {
-	// XXX: I'm not sure this is helpful. Intuitively, if we can test
-	// a knot for both cases, it is possibly enough to test it for one
-	// among them.
-	for hsh := range knotter.testingStoreBarrier {
-		delete(knotter.testingLoadBarrier, hsh)
 	}
 }
 
