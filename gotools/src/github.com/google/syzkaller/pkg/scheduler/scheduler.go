@@ -40,7 +40,7 @@ func (knotter *Knotter) AddSequentialTrace(seq []interleaving.SerialAccess) bool
 }
 
 func (knotter *Knotter) ExcavateKnots() {
-	if knotter.seq == nil {
+	if knotter.seq0 == nil {
 		return
 	}
 	knotter.loopAllowed = loopAllowed
@@ -117,6 +117,9 @@ func (knotter *Knotter) buildAccessMap() {
 
 func (knotter *Knotter) buildAccessMapSerial(serial interleaving.SerialAccess) {
 	for _, acc := range serial {
+		if !(acc.Typ == interleaving.TypeStore || acc.Typ == interleaving.TypeLoad) {
+			continue
+		}
 		addr := wordify(acc.Addr)
 		knotter.accessMap[addr] = append(knotter.accessMap[addr], acc)
 	}
@@ -274,6 +277,8 @@ func (knotter *Knotter) duppedComm(comm interleaving.Communication) bool {
 
 func (knotter *Knotter) formKnots() {
 	knotter.knots = make(map[uint64][]interleaving.Knot)
+	knotter.testingLoadBarrier = make(map[uint64]struct{})
+	knotter.testingStoreBarrier = make(map[uint64]struct{})
 	comms := knotter.comms
 	for i := 0; i < len(comms); i++ {
 		for j := i + 1; j < len(comms); j++ {
@@ -352,6 +357,7 @@ func (knotter *Knotter) postProcessing() {
 }
 
 func canonicalize(comms []interleaving.Communication, i, j int) (comm0, comm1 interleaving.Communication, ok bool) {
+	comm0, comm1 = comms[i], comms[j]
 	if comm0.Former().Timestamp > comm1.Former().Timestamp {
 		comm0, comm1 = comm1, comm0
 	}
