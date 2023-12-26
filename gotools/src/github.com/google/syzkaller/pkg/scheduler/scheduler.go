@@ -54,6 +54,7 @@ func (knotter *Knotter) fastenKnots() {
 	knotter.chunknizeSerials()
 	knotter.formCommunications()
 	knotter.formKnots()
+	knotter.postProcessing()
 }
 
 func (knotter *Knotter) collectCommChans() {
@@ -338,6 +339,15 @@ func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication, 
 		knotter.delayingStores[knotHsh] = struct{}{}
 	} else {
 		knotter.prefetchingLoads[knotHsh] = struct{}{}
+	}
+}
+
+func (knotter *Knotter) postProcessing() {
+	// XXX: I'm not sure this is helpful. Intuitively, if we can test
+	// a knot for both cases, it is possibly enough to test it for one
+	// among them.
+	for hsh := range knotter.testingStoreBarrier {
+		delete(knotter.testingLoadBarrier, hsh)
 	}
 }
 
