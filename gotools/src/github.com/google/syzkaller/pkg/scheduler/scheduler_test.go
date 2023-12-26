@@ -74,6 +74,16 @@ func TestInSameChunk(t *testing.T) { //
 					{0x81c6f69d, 0x7b92930, 4, 0, 63089, 0}},
 					store:   true,
 					allowed: false},
+				{acc: [2]interleaving.Access{
+					{0x821fa4f2, 0x7b92930, 4, 1, 66942, 1},
+					{0x821f94a8, 0x7b9293c, 4, 1, 66947, 1}},
+					store:   false,
+					allowed: true},
+				{acc: [2]interleaving.Access{
+					{0x821fa4f2, 0x7b92930, 4, 1, 66942, 1},
+					{0x81703bc3, 0x7b92890, 4, 0, 67012, 1}},
+					store:   false,
+					allowed: false},
 			},
 		},
 	}
