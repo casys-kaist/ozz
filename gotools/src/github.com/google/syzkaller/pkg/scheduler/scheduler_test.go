@@ -110,6 +110,7 @@ func TestFastenKnots(t *testing.T) {
 	tests := []struct {
 		fn   string
 		hash uint64
+		load bool
 	}{
 		{
 			fn: "watchqueue",
@@ -117,6 +118,11 @@ func TestFastenKnots(t *testing.T) {
 			// scheduler_test.go:126: thread #0: 81c6f61c accesses fb5cf010 (size: 8, type: 0, timestamp: 63085) -> thread #1: 821f962f accesses fb5cf010 (size: 8, type: 0, timestamp: 66988)
 			// scheduler_test.go:127: thread #0: 81c6f69d accesses f7b92930 (size: 4, type: 0, timestamp: 63089) -> thread #1: 821f9408 accesses f7b92930 (size: 4, type: 1, timestamp: 66945)
 			hash: 0xa8759bd41e12b3d4,
+		},
+		{
+			fn:   "watchqueue2",
+			hash: 0xa8759bd41e12b3d4,
+			load: true,
 		},
 	}
 	for _, test := range tests {
@@ -137,11 +143,19 @@ func TestFastenKnots(t *testing.T) {
 		if !found {
 			t.Errorf("Failed to find a desired knot")
 		}
+		if test.load {
+			if _, ok := knotter.testingLoadBarrier[test.hash]; !ok {
+				t.Errorf("Wanted to test load reordering")
+			}
+		}
 	}
 }
 
 func TestRedundantKnots(t *testing.T) {
-	tests := []string{"watchqueue"}
+	tests := []string{
+		"watchqueue",
+		"watchqueue2",
+	}
 	for _, test := range tests {
 		seq := loadTestdata(t, test)
 		knotter := Knotter{}
