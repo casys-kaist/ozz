@@ -12,16 +12,13 @@ type Knotter struct {
 	loopAllowed []int
 	commChan    map[uint32]struct{}
 	accessMap   map[uint32][]interleaving.Access
-	numThr      int
+	commHsh     map[uint64]struct{}
 
-	// Per thread, map (access IDs --> Lock IDs)
+	// Per thread map (access IDs --> Lock IDs)
 	locks []map[uint32][]int
-	// Per thread, map (access IDs -> chunk IDs)
+	// Per thread map (access IDs -> chunk IDs)
 	storeChunks []map[uint32]int
 	loadChunks  []map[uint32]int
-
-	commHsh    map[uint64]struct{}
-	windowSize []int
 
 	// input
 	seq0 []interleaving.SerialAccess // Unmodified input
@@ -273,14 +270,13 @@ func (knotter *Knotter) duppedComm(comm interleaving.Communication) bool {
 
 func (knotter *Knotter) formKnots() {
 	knotter.knots = make(map[uint64][]interleaving.Knot)
-	knotter.doFormKnotsParallel()
-}
-
-func (knotter *Knotter) doFormKnotsParallel() {
 	comms := knotter.comms
 	for i := 0; i < len(comms); i++ {
 		for j := i + 1; j < len(comms); j++ {
-			comm0, comm1 := comms[i], comms[j]
+			comm0, comm1, ok := canonicalize(comms, i, j)
+			if !ok {
+				continue
+			}
 			if knotter.canTestMissingStoreBarrier(comm0, comm1) {
 				knotter.formKnotForStoreBarrier(comm0, comm1)
 			}
@@ -331,16 +327,19 @@ func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication, 
 	if !comm0.Parallel(comm1) {
 		panic("want parallel but comms are not parallel")
 	}
-	if comm0.Former().Timestamp > comm1.Former().Timestamp {
-		comm0, comm1 = comm1, comm0
-	}
-	knotter.formKnotSingleSorted(comm0, comm1)
-}
-
-func (knotter *Knotter) formKnotSingleSorted(comm0, comm1 interleaving.Communication) {
 	knot := interleaving.Knot{comm0, comm1}
 	hsh := comm1.Hash()
 	knotter.knots[hsh] = append(knotter.knots[hsh], knot)
+}
+
+func canonicalize(comms []interleaving.Communication, i, j int) (comm0, comm1 interleaving.Communication, ok bool) {
+	if comm0.Former().Timestamp > comm1.Former().Timestamp {
+		comm0, comm1 = comm1, comm0
+	}
+	// We don't need to test !ok case as it can be tested as a normal
+	// race condition
+	ok = !(comm0.Latter().Timestamp < comm1.Latter().Timestamp)
+	return
 }
 
 func wordify(addr uint32) uint32 {
