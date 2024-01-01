@@ -1,5 +1,7 @@
 package interleaving
 
+import "fmt"
+
 type Hint struct {
 	PrecedingInsts []Access
 	FollowingInsts []Access
@@ -9,10 +11,31 @@ type Hint struct {
 
 type HintType bool
 
+func (typ HintType) String() string {
+	if typ == TestingStoreBarrier {
+		return "Store reordering"
+	} else {
+		return "Load reordering"
+	}
+}
+
 const (
 	TestingStoreBarrier = true
 	TestingLoadBarrier  = false
 )
+
+func (hint Hint) String() string {
+	// Mostly for debugging
+	str := fmt.Sprintf("Type: %v\nCritical communication\n - %v -> %v\nPreceding insts\n", hint.Typ, hint.CriticalComm.Former(), hint.CriticalComm.Latter())
+	for _, acc := range hint.PrecedingInsts {
+		str += fmt.Sprintf(" - %v\n", acc)
+	}
+	str += "Following insts\n"
+	for _, acc := range hint.FollowingInsts {
+		str += fmt.Sprintf(" - %v\n", acc)
+	}
+	return str
+}
 
 func (hint Hint) Invalid() bool {
 	return len(hint.PrecedingInsts) == 0 || len(hint.FollowingInsts) == 0 || hint.invalidCriticalComm()
