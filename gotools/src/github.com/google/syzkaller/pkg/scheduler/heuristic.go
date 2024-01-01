@@ -10,6 +10,7 @@ func ComputeHints0(seq []interleaving.SerialAccess) []interleaving.Hint {
 	}
 	// TODO: optimzie
 	copySeq := func(s0, s1 interleaving.SerialAccess, first int) (seq []interleaving.SerialAccess) {
+		seq = make([]interleaving.SerialAccess, 2)
 		for i, acc := range s0 {
 			acc.Timestamp = uint32(i)
 			acc.Thread = uint64(first)
@@ -70,6 +71,9 @@ func aggregateHintWithConditions(critComm interleaving.Communication, grouped []
 	precedingInsts := []interleaving.Access{}
 	followingInsts := []interleaving.Access{}
 	for _, knot := range grouped {
+		if critComm.Hash() != knot[1].Hash() {
+			panic("wrong")
+		}
 		if _, ok := conds[knot.Hash()]; ok {
 			comm := knot[0]
 			precedingInsts = append(precedingInsts, comm.Former())
