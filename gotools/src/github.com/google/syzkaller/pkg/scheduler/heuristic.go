@@ -60,30 +60,54 @@ func ComputeHints(seq []interleaving.SerialAccess) []interleaving.Hint {
 
 func aggregateHints(critComm interleaving.Communication, grouped []interleaving.Knot, testingStoreBarrier, testingLoadBarrier map[uint64]struct{}) []interleaving.Hint {
 	hints := []interleaving.Hint{}
-	storeHint := aggregateHintWithConditions(critComm, grouped, testingStoreBarrier, interleaving.TestingStoreBarrier)
-	loadHint := aggregateHintWithConditions(critComm, grouped, testingLoadBarrier, interleaving.TestingLoadBarrier)
-	hints = append(hints, storeHint)
-	hints = append(hints, loadHint)
+	for _, opt := range []struct {
+		cond map[uint64]struct{}
+		typ  interleaving.HintType
+	}{
+		{testingStoreBarrier, interleaving.TestingStoreBarrier},
+		{testingLoadBarrier, interleaving.TestingLoadBarrier},
+	} {
+		hint, ok := aggregateHintWithConditions(critComm, grouped, opt.cond, opt.typ)
+		if ok {
+			hints = append(hints, hint)
+		}
+	}
 	return hints
 }
 
-func aggregateHintWithConditions(critComm interleaving.Communication, grouped []interleaving.Knot, conds map[uint64]struct{}, typ interleaving.HintType) interleaving.Hint {
-	precedingInsts := []interleaving.Access{}
-	followingInsts := []interleaving.Access{}
+func aggregateHintWithConditions(critComm interleaving.Communication, grouped []interleaving.Knot, conds map[uint64]struct{}, typ interleaving.HintType) (hint interleaving.Hint, ok bool) {
+	type instsT struct {
+		insts []interleaving.Access
+		ht    map[uint32]struct{}
+	}
+	f := func(insts *instsT, acc interleaving.Access) {
+		if _, ok := insts.ht[acc.Timestamp]; ok {
+			return
+		}
+		insts.ht[acc.Timestamp] = struct{}{}
+		insts.insts = append(insts.insts, acc)
+	}
+	preceding := instsT{ht: make(map[uint32]struct{})}
+	following := instsT{ht: make(map[uint32]struct{})}
 	for _, knot := range grouped {
 		if critComm.Hash() != knot[1].Hash() {
 			panic("wrong")
 		}
 		if _, ok := conds[knot.Hash()]; ok {
 			comm := knot[0]
-			precedingInsts = append(precedingInsts, comm.Former())
-			followingInsts = append(followingInsts, comm.Latter())
+			f(&preceding, comm.Former())
+			f(&following, comm.Latter())
 		}
 	}
-	return interleaving.Hint{
-		PrecedingInsts: precedingInsts,
-		FollowingInsts: followingInsts,
+	if len(preceding.insts) == 0 || len(following.insts) == 0 {
+		return
+	}
+	ok = true
+	hint = interleaving.Hint{
+		PrecedingInsts: preceding.insts,
+		FollowingInsts: following.insts,
 		CriticalComm:   critComm,
 		Typ:            typ,
 	}
+	return
 }
