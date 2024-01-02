@@ -46,6 +46,17 @@ func (hint Hint) String() string {
 	return str
 }
 
+func (hint Hint) Score() int {
+	var acc []Access
+	switch hint.Typ {
+	case TestingLoadBarrier:
+		acc = hint.FollowingInsts
+	case TestingStoreBarrier:
+		acc = hint.PrecedingInsts
+	}
+	return len(acc)
+}
+
 func (hint Hint) Invalid() bool {
 	return len(hint.PrecedingInsts) == 0 || len(hint.FollowingInsts) == 0 || hint.invalidCriticalComm()
 }
