@@ -112,12 +112,33 @@ func aggregateHintWithConditions(critComm interleaving.Communication, grouped []
 	if len(preceding) == 0 || len(following) == 0 {
 		return
 	}
-	ok = true
 	hint = interleaving.Hint{
 		PrecedingInsts: toSlice(preceding),
 		FollowingInsts: toSlice(following),
 		CriticalComm:   critComm,
 		Typ:            typ,
 	}
+	if !sanitizeHint(hint) {
+		// if sanitizeHint() fails, hint contains nothing to reorder
+		return
+	}
+	ok = true
 	return
+}
+
+func sanitizeHint(hint interleaving.Hint) bool {
+	var accs []interleaving.Access
+	var want uint32
+	switch hint.Typ {
+	case interleaving.TestingStoreBarrier:
+		accs, want = hint.PrecedingInsts, interleaving.TypeStore
+	case interleaving.TestingLoadBarrier:
+		accs, want = hint.FollowingInsts, interleaving.TypeLoad
+	}
+	for _, acc := range accs {
+		if acc.Typ == want {
+			return true
+		}
+	}
+	return false
 }
