@@ -76,36 +76,46 @@ func aggregateHints(critComm interleaving.Communication, grouped []interleaving.
 }
 
 func aggregateHintWithConditions(critComm interleaving.Communication, grouped []interleaving.Knot, conds map[uint64]struct{}, typ interleaving.HintType) (hint interleaving.Hint, ok bool) {
-	type instsT struct {
-		insts []interleaving.Access
-		ht    map[uint32]struct{}
-	}
-	f := func(insts *instsT, acc interleaving.Access) {
-		if _, ok := insts.ht[acc.Timestamp]; ok {
+	// TODO: Too many unnecessary memory operations (e.g., using a
+	// map, ...)?
+	type instsT map[uint32]interleaving.Access
+	f := func(insts instsT, acc interleaving.Access) {
+		if _, ok := insts[acc.Addr]; !ok {
+			insts[acc.Addr] = acc
 			return
 		}
-		insts.ht[acc.Timestamp] = struct{}{}
-		insts.insts = append(insts.insts, acc)
+		acc0 := insts[acc.Addr]
+		if acc0.Timestamp > acc.Timestamp {
+			return
+		}
+		insts[acc.Addr] = acc
 	}
-	preceding := instsT{ht: make(map[uint32]struct{})}
-	following := instsT{ht: make(map[uint32]struct{})}
+	toSlice := func(insts instsT) []interleaving.Access {
+		ret := make([]interleaving.Access, 0, len(insts))
+		for _, acc := range insts {
+			ret = append(ret, acc)
+		}
+		return ret
+	}
+	preceding := make(instsT)
+	following := make(instsT)
 	for _, knot := range grouped {
 		if critComm.Hash() != knot[1].Hash() {
 			panic("wrong")
 		}
 		if _, ok := conds[knot.Hash()]; ok {
 			comm := knot[0]
-			f(&preceding, comm.Former())
-			f(&following, comm.Latter())
+			f(preceding, comm.Former())
+			f(following, comm.Latter())
 		}
 	}
-	if len(preceding.insts) == 0 || len(following.insts) == 0 {
+	if len(preceding) == 0 || len(following) == 0 {
 		return
 	}
 	ok = true
 	hint = interleaving.Hint{
-		PrecedingInsts: preceding.insts,
-		FollowingInsts: following.insts,
+		PrecedingInsts: toSlice(preceding),
+		FollowingInsts: toSlice(following),
 		CriticalComm:   critComm,
 		Typ:            typ,
 	}
