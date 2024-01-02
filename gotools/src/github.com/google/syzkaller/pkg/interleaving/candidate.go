@@ -1,6 +1,9 @@
 package interleaving
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 type Hint struct {
 	PrecedingInsts []Access
@@ -26,12 +29,18 @@ const (
 
 func (hint Hint) String() string {
 	// Mostly for debugging
+	copySortedAccs := func(accs []Access) []Access {
+		cpy := make([]Access, len(accs))
+		copy(cpy, accs)
+		sort.Slice(cpy, func(i, j int) bool { return cpy[i].Timestamp < cpy[j].Timestamp })
+		return cpy
+	}
 	str := fmt.Sprintf("Type: %v\nCritical communication\n - %v -> %v\nPreceding insts\n", hint.Typ, hint.CriticalComm.Former(), hint.CriticalComm.Latter())
-	for _, acc := range hint.PrecedingInsts {
+	for _, acc := range copySortedAccs(hint.PrecedingInsts) {
 		str += fmt.Sprintf(" - %v\n", acc)
 	}
 	str += "Following insts\n"
-	for _, acc := range hint.FollowingInsts {
+	for _, acc := range copySortedAccs(hint.FollowingInsts) {
 		str += fmt.Sprintf(" - %v\n", acc)
 	}
 	return str
