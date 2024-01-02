@@ -686,7 +686,7 @@ bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
   LLVM_DEBUG(dbgs() << "Instrumenting a membarrier callback at " << *I << "\n");
   NumInstrumentedFlushes++;
   FunctionCallee callees[] = {SSBFlush, SSBLfence};
-  instrumentHelper(I, callees, 1, false);
+  instrumentHelper(I, callees, 2, false);
   return true;
 }
 
