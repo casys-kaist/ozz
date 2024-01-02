@@ -334,6 +334,9 @@ func (knotter *Knotter) formKnotSingle(comm0, comm1 interleaving.Communication, 
 	if !comm0.Parallel(comm1) {
 		panic("want parallel but comms are not parallel")
 	}
+	if comm0[0].Addr == comm1[0].Addr {
+		return
+	}
 	knot := interleaving.Knot{comm0, comm1}
 	critHsh := comm1.Hash()
 	knotHsh := knot.Hash()
