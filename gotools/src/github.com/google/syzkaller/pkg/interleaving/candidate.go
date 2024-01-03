@@ -89,3 +89,19 @@ func (hint Hint) GenerateSchedule() []Access {
 	c := hint.CriticalComm
 	return []Access{c.Former()}
 }
+
+func Select(s1, s2 []Hint) []Hint {
+	// Return hints in s1 that are also contained in s2,
+	s2Cov := make(Signal)
+	for _, hint := range s2 {
+		s2Cov.Merge(hint.Coverage())
+	}
+	res := []Hint{}
+	for _, hint := range s1 {
+		cov := hint.Coverage()
+		if len(s2Cov.Intersect(cov)) != 0 {
+			res = append(res, hint)
+		}
+	}
+	return res
+}
