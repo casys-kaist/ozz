@@ -57,6 +57,25 @@ func (hint Hint) Score() int {
 	return len(acc)
 }
 
+func (hint Hint) Coverage() Signal {
+	var accs []Access
+	var pivot Access
+	switch hint.Typ {
+	case TestingStoreBarrier:
+		accs = hint.PrecedingInsts
+		pivot = hint.CriticalComm.Former()
+	case TestingLoadBarrier:
+		accs = hint.FollowingInsts
+		pivot = hint.CriticalComm.Latter()
+	}
+	sign := make(Signal)
+	for _, acc := range accs {
+		s := acc.Inst ^ pivot.Inst
+		sign[s] = struct{}{}
+	}
+	return sign
+}
+
 func (hint Hint) Invalid() bool {
 	return len(hint.PrecedingInsts) == 0 || len(hint.FollowingInsts) == 0 || hint.invalidCriticalComm()
 }
@@ -68,8 +87,5 @@ func (hint Hint) invalidCriticalComm() bool {
 
 func (hint Hint) GenerateSchedule() []Access {
 	c := hint.CriticalComm
-	// NOTE: As long as we consider one critical communication for one
-	// hintidate, a schedule always contains one access which is the
-	// first access of the critcal comm.
 	return []Access{c.Former()}
 }
