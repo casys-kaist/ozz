@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-type Signal map[uint64]struct{}
+type Signal map[uint32]struct{}
 
 func (i Signal) Copy() Signal {
 	c := make(Signal, len(i))
@@ -35,7 +35,7 @@ func (i *Signal) Split(n int) Signal {
 	return c
 }
 
-type SerialSignal []uint64
+type SerialSignal []uint32
 
 func (i Signal) Serialize() SerialSignal {
 	ret := make(SerialSignal, 0, len(i))
@@ -64,18 +64,6 @@ func (i Signal) Diff(i0 Signal) Signal {
 			continue
 		}
 		diff[hsh] = struct{}{}
-	}
-	return diff
-}
-
-func (i *Signal) DiffRaw(prims []Segment) []Segment {
-	diff := []Segment{}
-	for _, prim := range prims {
-		hsh := prim.Hash()
-		if _, ok := (*i)[hsh]; ok {
-			continue
-		}
-		diff = append(diff, prim)
 	}
 	return diff
 }
@@ -111,7 +99,8 @@ func (i *Signal) FromHex(ret []byte) {
 	}
 	raws := bytes.Fields(ret)
 	for _, raw := range raws {
-		sig, err := strconv.ParseUint(string(raw), 16, 64)
+		sig64, err := strconv.ParseUint(string(raw), 16, 32)
+		sig := uint32(sig64)
 		if err != nil {
 			panic(err)
 		}
