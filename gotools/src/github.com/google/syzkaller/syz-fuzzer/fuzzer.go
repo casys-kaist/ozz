@@ -895,28 +895,33 @@ func (fuzzer *Fuzzer) checkNewCallSignal(p *prog.Prog, info *ipc.CallInfo, call 
 	return true
 }
 
-func (fuzzer *Fuzzer) checkNewInterleavingSignal(base *interleaving.Signal, sign interleaving.Signal) bool {
+func (fuzzer *Fuzzer) checkNewInterleavingSignal(sign interleaving.Signal) bool {
+	diff := fuzzer.maxInterleaving.Diff(sign)
+	if diff.Empty() {
+		return false
+	}
+	fuzzer.signalMu.RUnlock()
+	fuzzer.signalMu.Lock()
+	fuzzer.newInterleaving.Merge(diff)
+	fuzzer.maxInterleaving.Merge(diff)
+	fuzzer.signalMu.Unlock()
 	fuzzer.signalMu.RLock()
-	defer fuzzer.signalMu.RUnlock()
-	return len(base.Diff(sign)) != 0
+	return true
 }
 
 func (fuzzer *Fuzzer) getNewHints(hints []interleaving.Hint) []interleaving.Hint {
-	fuzzer.signalMu.Lock()
-	defer fuzzer.signalMu.Unlock()
-	for i, total := 0, len(hints); i < total; {
+	fuzzer.signalMu.RLock()
+	defer fuzzer.signalMu.RUnlock()
+	for i, total := 0, len(hints); i < total; i++ {
 		hint := hints[i]
 		if !fuzzer.testLoadReordering && hint.Typ == interleaving.TestingLoadBarrier {
 			continue
 		}
 		sign := hint.Coverage()
-		if fuzzer.checkNewInterleavingSignal(&fuzzer.maxInterleaving, sign) {
-			i++
-			fuzzer.newInterleaving.Merge(sign)
-			fuzzer.maxInterleaving.Merge(sign)
-		} else {
+		if !fuzzer.checkNewInterleavingSignal(sign) {
 			total--
 			hints[i] = hints[total]
+			i--
 		}
 	}
 	hints = hints[:total]
