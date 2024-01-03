@@ -448,33 +448,8 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 
 func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.ProgInfo {
 	// NOTE: The scheduling work is the only case reaching here
-	knots := proc.extractKnots(info, p.Contender)
-	if len(knots) == 0 {
-		log.Logf(1, "Failed to add sequential traces")
-		return info
-	}
-
-	if new := proc.fuzzer.newSegment(&proc.fuzzer.corpusInterleaving, knots); len(new) == 0 {
-		return info
-	}
-
-	cover := interleaving.Cover(knots)
-	signal := interleaving.FromCoverToSignal(cover)
-
-	data := p.Serialize()
-	log.Logf(2, "added new scheduled input to corpus:\n%s", data)
-	proc.fuzzer.sendScheduledInputToManager(rpctype.ScheduledInput{
-		Prog:   p.Serialize(),
-		Cover:  cover.Serialize(),
-		Signal: signal.Serialize(),
-	})
-	proc.fuzzer.addThreadedInputToCorpus(p, signal)
+	// TODO: implement
 	return info
-}
-
-func (proc *Proc) extractKnots(info *ipc.ProgInfo, calls prog.Contender) []interleaving.Segment {
-	// TODO: IMPLEMENT
-	return nil
 }
 
 func (proc *Proc) sequentialAccesses(info *ipc.ProgInfo, calls prog.Contender) (seq []interleaving.SerialAccess) {
