@@ -8,27 +8,35 @@ func ComputeHints0(seq []interleaving.SerialAccess) []interleaving.Hint {
 	if len(seq) != 2 {
 		return nil
 	}
-	// TODO: optimzie
-	copySeq := func(s0, s1 interleaving.SerialAccess, first int) (seq []interleaving.SerialAccess) {
-		seq = make([]interleaving.SerialAccess, 2)
-		for i, acc := range s0 {
-			acc.Timestamp = uint32(i)
-			acc.Thread = uint64(first)
-			seq[0] = append(seq[0], acc)
-		}
-		for i, acc := range s1 {
-			acc.Timestamp = uint32(i + len(seq[0]))
-			acc.Thread = uint64(1 - first)
-			seq[1] = append(seq[1], acc)
-		}
-		return seq
-	}
-	h0 := ComputeHints(copySeq(seq[0], seq[1], 0))
-	h1 := ComputeHints(copySeq(seq[1], seq[0], 1))
+	h0 := computeHints(copySeq(seq[0], seq[1], 0))
+	h1 := computeHints(copySeq(seq[1], seq[0], 1))
 	return append(h0, h1...)
 }
 
 func ComputeHints(seq []interleaving.SerialAccess) []interleaving.Hint {
+	if len(seq) != 2 {
+		return nil
+	}
+	return computeHints(copySeq(seq[0], seq[1], 0))
+}
+
+func copySeq(s0, s1 interleaving.SerialAccess, first int) (seq []interleaving.SerialAccess) {
+	// TODO: Optimize. copySeq() unnecessary overhead to copy serials
+	seq = make([]interleaving.SerialAccess, 2)
+	for i, acc := range s0 {
+		acc.Timestamp = uint32(i)
+		acc.Thread = uint64(first)
+		seq[0] = append(seq[0], acc)
+	}
+	for i, acc := range s1 {
+		acc.Timestamp = uint32(i + len(seq[0]))
+		acc.Thread = uint64(1 - first)
+		seq[1] = append(seq[1], acc)
+	}
+	return seq
+}
+
+func computeHints(seq []interleaving.SerialAccess) []interleaving.Hint {
 	// NOTE: This function assumes that seq[0] was executed before
 	// seq[1]
 	if len(seq) != 2 {

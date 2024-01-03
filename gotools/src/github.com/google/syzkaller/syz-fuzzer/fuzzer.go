@@ -60,6 +60,7 @@ type Fuzzer struct {
 	comparisonTracingEnabled bool
 	fetchRawCover            bool
 	randomReordering         bool
+	testLoadReordering       bool
 
 	corpusMu        sync.RWMutex
 	corpus          []*prog.Prog
@@ -239,19 +240,20 @@ func main() {
 	debug.SetGCPercent(50)
 
 	var (
-		flagName             = flag.String("name", "test", "unique name for manager")
-		flagOS               = flag.String("os", runtime.GOOS, "target OS")
-		flagArch             = flag.String("arch", runtime.GOARCH, "target arch")
-		flagManager          = flag.String("manager", "", "manager rpc address")
-		flagProcs            = flag.Int("procs", 1, "number of parallel test processes")
-		flagOutput           = flag.String("output", "stdout", "write programs to none/stdout/dmesg/file")
-		flagTest             = flag.Bool("test", false, "enable image testing mode")      // used by syz-ci
-		flagRunTest          = flag.Bool("runtest", false, "enable program testing mode") // used by pkg/runtest
-		flagRawCover         = flag.Bool("raw_cover", false, "fetch raw coverage")
-		flagGen              = flag.Bool("gen", true, "generate/mutate inputs")
-		flagShifter          = flag.String("shifter", "./shifter", "path to the shifter")
-		flagRandomReordering = flag.Bool("random-reordering", false, "")
-		flagTraceLock        = flag.Bool("trace-lock", true, "")
+		flagName               = flag.String("name", "test", "unique name for manager")
+		flagOS                 = flag.String("os", runtime.GOOS, "target OS")
+		flagArch               = flag.String("arch", runtime.GOARCH, "target arch")
+		flagManager            = flag.String("manager", "", "manager rpc address")
+		flagProcs              = flag.Int("procs", 1, "number of parallel test processes")
+		flagOutput             = flag.String("output", "stdout", "write programs to none/stdout/dmesg/file")
+		flagTest               = flag.Bool("test", false, "enable image testing mode")      // used by syz-ci
+		flagRunTest            = flag.Bool("runtest", false, "enable program testing mode") // used by pkg/runtest
+		flagRawCover           = flag.Bool("raw_cover", false, "fetch raw coverage")
+		flagGen                = flag.Bool("gen", true, "generate/mutate inputs")
+		flagShifter            = flag.String("shifter", "./shifter", "path to the shifter")
+		flagRandomReordering   = flag.Bool("random-reordering", false, "")
+		flagTraceLock          = flag.Bool("trace-lock", true, "")
+		flagTestLoadReordering = flag.Bool("test-load-reordering", false, "")
 	)
 	defer tool.Init()()
 	outputType := parseOutputType(*flagOutput)
@@ -387,10 +389,11 @@ func main() {
 		checkResult: r.CheckResult,
 		generate:    *flagGen,
 
-		fetchRawCover:    *flagRawCover,
-		randomReordering: *flagRandomReordering,
-		noMutate:         r.NoMutateCalls,
-		stats:            make([]uint64, StatCount),
+		fetchRawCover:      *flagRawCover,
+		randomReordering:   *flagRandomReordering,
+		testLoadReordering: *flagTestLoadReordering,
+		noMutate:           r.NoMutateCalls,
+		stats:              make([]uint64, StatCount),
 	}
 	gateCallback := fuzzer.useBugFrames(r, *flagProcs)
 	fuzzer.gate = ipc.NewGate(2**flagProcs, gateCallback)
@@ -892,22 +895,36 @@ func (fuzzer *Fuzzer) checkNewCallSignal(p *prog.Prog, info *ipc.CallInfo, call 
 	return true
 }
 
-func (fuzzer *Fuzzer) newSegment(base *interleaving.Signal, segs []interleaving.Segment) []interleaving.Segment {
+func (fuzzer *Fuzzer) checkNewInterleavingSignal(sign interleaving.Signal) bool {
+	diff := fuzzer.maxInterleaving.Diff(sign)
+	if diff.Empty() {
+		return false
+	}
+	fuzzer.signalMu.RUnlock()
+	fuzzer.signalMu.Lock()
+	fuzzer.newInterleaving.Merge(diff)
+	fuzzer.maxInterleaving.Merge(diff)
+	fuzzer.signalMu.Unlock()
 	fuzzer.signalMu.RLock()
-	defer fuzzer.signalMu.RUnlock()
-	return base.DiffRaw(segs)
+	return true
 }
 
 func (fuzzer *Fuzzer) getNewHints(hints []interleaving.Hint) []interleaving.Hint {
-	// diff := fuzzer.newSegment(&fuzzer.maxInterleaving, knots)
-	// if len(diff) == 0 {
-	// 	return nil
-	// }
-	// sign := interleaving.FromCoverToSignal(diff)
-	// fuzzer.signalMu.Lock()
-	// fuzzer.newInterleaving.Merge(sign)
-	// fuzzer.maxInterleaving.Merge(sign)
-	// fuzzer.signalMu.Unlock()
+	fuzzer.signalMu.RLock()
+	defer fuzzer.signalMu.RUnlock()
+	for i, total := 0, len(hints); i < total; i++ {
+		hint := hints[i]
+		if !fuzzer.testLoadReordering && hint.Typ == interleaving.TestingLoadBarrier {
+			continue
+		}
+		sign := hint.Coverage()
+		if !fuzzer.checkNewInterleavingSignal(sign) {
+			total--
+			hints[i] = hints[total]
+			i--
+		}
+	}
+	hints = hints[:total]
 	return hints
 }
 

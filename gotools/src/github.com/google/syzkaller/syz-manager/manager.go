@@ -1601,10 +1601,6 @@ func (mgr *Manager) newScheduledInput(inp rpctype.ScheduledInput, sign interleav
 	if old, ok := mgr.scheduledCorpus[sig]; ok {
 		sign.Merge(old.Signal.Deserialize())
 		old.Signal = sign.Serialize()
-		var cov interleaving.Cover
-		cov.Merge(old.Cover)
-		cov.Merge(inp.Cover)
-		old.Cover = cov.Serialize()
 		mgr.scheduledCorpus[sig] = old
 	} else {
 		mgr.scheduledCorpus[sig] = inp
