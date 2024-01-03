@@ -25,7 +25,6 @@ type Input struct {
 
 type ScheduledInput struct {
 	Prog   []byte
-	Cover  []uint32
 	Signal interleaving.SerialSignal
 }
 

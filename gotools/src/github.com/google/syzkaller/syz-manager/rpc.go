@@ -38,7 +38,6 @@ type RPCServer struct {
 	corpusSignal       signal.Signal
 	corpusCover        cover.Cover
 	corpusInterleaving interleaving.Signal
-	corpusKnots        interleaving.Cover
 	rotator            *prog.Rotator
 	rnd                *rand.Rand
 	checkFailures      int
@@ -362,8 +361,6 @@ func (serv *RPCServer) NewScheduledInput(a *rpctype.NewScheduledInputArgs, r *in
 	if !serv.mgr.newScheduledInput(a.ScheduledInput, inputSignal) {
 		return nil
 	}
-	serv.corpusKnots.Merge(a.Cover)
-	serv.stats.corpusKnots.set(len(serv.corpusKnots))
 	serv.corpusInterleaving.Merge(diff)
 	serv.stats.corpusInterleaving.set(serv.corpusInterleaving.Len())
 	serv.stats.newScheduledInputs.inc()
