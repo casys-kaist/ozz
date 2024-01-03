@@ -333,36 +333,33 @@ func (proc *Proc) smashInput(item *WorkSmash) {
 }
 
 func (proc *Proc) threadingInput(item *WorkThreading) {
-	// log.Logf(1, "proc #%v: threading an input", proc.pid)
+	log.Logf(1, "proc #%v: threading an input", proc.pid)
 
-	// proc.fuzzer.subCollection(CollectionThreadingHint, uint64(len(item.knots)))
+	proc.fuzzer.subCollection(CollectionThreadingHint, uint64(len(item.hints)))
 
-	// p := item.p.Clone()
-	// p.Threading(item.calls)
+	p := item.p.Clone()
+	p.Threading(item.calls)
 
-	// knots := proc.executeThreading(p)
-	// if len(knots) == 0 {
-	// 	return
-	// }
+	hints := proc.executeThreading(p)
+	if len(hints) == 0 {
+		return
+	}
 
-	// prev := proc.fuzzer.m.end()
-	// proc.fuzzer.m.start(calc2)
-	// defer func() {
-	// 	proc.fuzzer.m.end()
-	// 	proc.fuzzer.m.start(prev)
-	// }()
-	// // newly found knots during threading work
-	// newKnots := proc.fuzzer.getNewKnot(knots)
-	// // knots that actually occurred among speculated knots
-	// speculatedKnots := interleaving.Intersect(knots, item.knots)
-
-	// // schedule hint := {newly found knots during threading work}
-	// // \cup {speculated knots when picking up threading work}
-	// scheduleHint := append(newKnots, speculatedKnots...)
-	// if len(scheduleHint) == 0 {
-	// 	return
-	// }
-	// proc.fuzzer.bookScheduleGuide(p, scheduleHint)
+	prev := proc.fuzzer.m.end()
+	proc.fuzzer.m.start(calc2)
+	defer func() {
+		proc.fuzzer.m.end()
+		proc.fuzzer.m.start(prev)
+	}()
+	// newly found knots during threading work
+	newHints := proc.fuzzer.getNewHints(hints)
+	// hints that actually occurred among speculated hints
+	speculatedHints := interleaving.Select(item.hints, hints)
+	scheduleHint := append(newHints, speculatedHints...)
+	if len(scheduleHint) == 0 {
+		return
+	}
+	proc.fuzzer.bookScheduleGuide(p, scheduleHint)
 }
 
 func (proc *Proc) executeThreading(p *prog.Prog) []interleaving.Hint {
