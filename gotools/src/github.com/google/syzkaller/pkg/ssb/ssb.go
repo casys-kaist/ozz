@@ -90,10 +90,8 @@ func generateFlushVectorForHint(hint interleaving.Hint) FlushVector {
 	for _, acc := range hint.PrecedingInsts {
 		_add_entry(acc.Inst, 0)
 	}
-	// TODO: Reuse generated sched point
-	// Sched point (= first acc of crit comm) should be 1
-	schedPoint := hint.CriticalComm.Former()
-	_add_entry(schedPoint.Inst, 1)
+	critPoint := hint.CriticalComm.Former()
+	_add_entry(critPoint.Inst, 1)
 	return FlushVector{table: table}
 }
 

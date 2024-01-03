@@ -134,12 +134,6 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 			break
 		}
 		p, hint := proc.pickHint(tp)
-
-		// NOTE: This may not be necessary, but as we are exploring
-		// new research problems, we wanna know how hints are used and
-		// understand how the fuzzer can be improved futher.
-		proc.inspectUsedHint(hint)
-
 		p.MutateScheduleFromHint(proc.rnd, hint)
 		p.MutateFlushVectorFromHint(proc.rnd, hint, randomReordering)
 
@@ -167,10 +161,14 @@ retry:
 	log.Logf(0, "crit comm: %v --> %v", hint.CriticalComm.Former(), hint.CriticalComm.Latter())
 	log.Logf(0, "preceding insts: %v", hint.PrecedingInsts)
 	log.Logf(0, "following inst2: %v", hint.FollowingInsts)
+	proc.inspectUsedHint(hint)
 	return tp.P.Clone(), hint
 }
 
 func (proc *Proc) inspectUsedHint(hint interleaving.Hint) {
+	// NOTE: This may not be necessary, but as we are exploring
+	// new research problems, we wanna know how hints are used and
+	// understand how the fuzzer can be improved futher.
 	// TODO: What do we want to inspect?
 	// proc.sendUsedKnots(used)
 	// proc.countUsedInstructions(used)
