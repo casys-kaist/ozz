@@ -892,22 +892,28 @@ func (fuzzer *Fuzzer) checkNewCallSignal(p *prog.Prog, info *ipc.CallInfo, call 
 	return true
 }
 
-func (fuzzer *Fuzzer) newSegment(base *interleaving.Signal, segs []interleaving.Segment) []interleaving.Segment {
+func (fuzzer *Fuzzer) checkNewInterleavingSignal(base *interleaving.Signal, sign interleaving.Signal) bool {
 	fuzzer.signalMu.RLock()
 	defer fuzzer.signalMu.RUnlock()
-	return base.DiffRaw(segs)
+	return len(base.Diff(sign)) != 0
 }
 
 func (fuzzer *Fuzzer) getNewHints(hints []interleaving.Hint) []interleaving.Hint {
-	// diff := fuzzer.newSegment(&fuzzer.maxInterleaving, knots)
-	// if len(diff) == 0 {
-	// 	return nil
-	// }
-	// sign := interleaving.FromCoverToSignal(diff)
-	// fuzzer.signalMu.Lock()
-	// fuzzer.newInterleaving.Merge(sign)
-	// fuzzer.maxInterleaving.Merge(sign)
-	// fuzzer.signalMu.Unlock()
+	fuzzer.signalMu.Lock()
+	defer fuzzer.signalMu.Unlock()
+	for i, total := 0, len(hints); i < total; {
+		hint := hints[i]
+		sign := hint.Coverage()
+		if fuzzer.checkNewInterleavingSignal(&fuzzer.maxInterleaving, sign) {
+			i++
+			fuzzer.newInterleaving.Merge(sign)
+			fuzzer.maxInterleaving.Merge(sign)
+		} else {
+			total--
+			hints[i] = hints[total]
+		}
+	}
+	hints = hints[:total]
 	return hints
 }
 
