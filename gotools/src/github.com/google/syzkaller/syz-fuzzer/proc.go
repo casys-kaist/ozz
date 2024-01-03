@@ -124,71 +124,56 @@ func (proc *Proc) loop() {
 }
 
 func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
-	// randomReordering := proc.fuzzer.randomReordering
+	randomReordering := proc.fuzzer.randomReordering
 	// NOTE: proc.scheduleInput() does not queue additional works, so
 	// executing proc.scheduleInput() does not cause the workqueues
 	// exploding.
-	// for cnt := 0; cnt < 10; cnt++ {
-	// 	tp := fuzzerSnapshot.chooseThreadedProgram(proc.rnd)
-	// 	if tp == nil {
-	// 		break
-	// 	}
-	// 	p, hint := tp.P.Clone(), proc.pruneHint(tp.Hint)
+	for cnt := 0; cnt < 10; cnt++ {
+		tp := fuzzerSnapshot.chooseThreadedProgram(proc.rnd)
+		if tp == nil {
+			break
+		}
+		p, hint := proc.pickHint(tp)
 
-	// 	cand, used, remaining := scheduler.GenerateCandidates(proc.rnd, hint)
-	// 	// We exclude used knots from tp.Hint even if the schedule
-	// 	// mutation fails.
-	// 	proc.setHint(tp, remaining)
-	// 	if !canSchedule(p, cand) {
-	// 		// TODO: We may want to generate random scheduling points
-	// 		continue
-	// 	}
-	// 	// NOTE: This may not be necessary, but as we are exploring
-	// 	// new research problems, we wanna know what knots are used
-	// 	// and understand how the fuzzer can be improved futher.
-	// 	proc.inspectUsedKnots(used)
+		// NOTE: This may not be necessary, but as we are exploring
+		// new research problems, we wanna know how hints are used and
+		// understand how the fuzzer can be improved futher.
+		proc.inspectUsedHint(hint)
 
-	// 	p.MutateScheduleFromCandidate(proc.rnd, cand)
-	// 	p.MutateFlushVectorFromCandidate(proc.rnd, cand, randomReordering)
-	// 	// XXX: For easy debugging the kernel
-	// 	log.Logf(0, "crit comm: %v --> %v", cand.CriticalComm.Former(), cand.CriticalComm.Latter())
-	// 	log.Logf(0, "some inst1: %v", cand.DelayingInst)
-	// 	log.Logf(0, "some inst2: %v", cand.SomeInst)
+		p.MutateScheduleFromHint(proc.rnd, hint)
+		p.MutateFlushVectorFromHint(proc.rnd, hint, randomReordering)
 
-	// 	log.Logf(1, "proc #%v: scheduling an input", proc.pid)
-	// 	proc.execute(proc.execOptsCollide, p, ProgNormal, StatSchedule)
-	// 	if !proc.needScheduling() {
-	// 		break
-	// 	}
-	// }
-}
-
-func canSchedule(p *prog.Prog, hint interleaving.Hint) bool {
-	return len(p.Contenders()) == 2 && !hint.Invalid()
-}
-
-func (proc *Proc) pruneHint(hint []interleaving.Segment) []interleaving.Segment {
-	pruned := make([]interleaving.Segment, 0, len(hint))
-	for _, h := range hint {
-		hsh := h.Hash()
-		if _, ok := proc.fuzzer.corpusInterleaving[hsh]; !ok {
-			pruned = append(pruned, h)
+		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
+		proc.execute(proc.execOptsCollide, p, ProgNormal, StatSchedule)
+		if !proc.needScheduling() {
+			break
 		}
 	}
-	return pruned
 }
 
-func (proc *Proc) setHint(tp *prog.ConcurrentCalls, remaining []interleaving.Hint) {
-	used := len(tp.Hint) - len(remaining)
-	proc.fuzzer.subCollection(CollectionScheduleHint, uint64(used))
+func (proc *Proc) pickHint(tp *prog.ConcurrentCalls) (*prog.Prog, interleaving.Hint) {
+retry:
+	hints, l := tp.Hint, len(tp.Hint)
+	hint := hints[l-1]
+	hints = hints[:l-1]
+	proc.fuzzer.subCollection(CollectionScheduleHint, 1)
 	proc.fuzzer.corpusMu.Lock()
-	defer proc.fuzzer.corpusMu.Unlock()
-	tp.Hint = remaining
+	tp.Hint = hints
+	proc.fuzzer.corpusMu.Unlock()
+	if hint.Invalid() {
+		goto retry
+	}
+	// To debug the kernel easily
+	log.Logf(0, "crit comm: %v --> %v", hint.CriticalComm.Former(), hint.CriticalComm.Latter())
+	log.Logf(0, "preceding insts: %v", hint.PrecedingInsts)
+	log.Logf(0, "following inst2: %v", hint.FollowingInsts)
+	return tp.P.Clone(), hint
 }
 
-func (proc *Proc) inspectUsedKnots(used []interleaving.Segment) {
-	proc.sendUsedKnots(used)
-	proc.countUsedInstructions(used)
+func (proc *Proc) inspectUsedHint(hint interleaving.Hint) {
+	// TODO: What do we want to inspect?
+	// proc.sendUsedKnots(used)
+	// proc.countUsedInstructions(used)
 }
 
 func (proc *Proc) sendUsedKnots(used []interleaving.Segment) {
