@@ -118,12 +118,3 @@ func (i *Signal) FromHex(ret []byte) {
 		(*i)[sig] = struct{}{}
 	}
 }
-
-func FromCoverToSignal(c Cover) Signal {
-	interleaving := make(Signal)
-	for _, c := range c {
-		hsh := c.Hash()
-		interleaving[hsh] = struct{}{}
-	}
-	return interleaving
-}
