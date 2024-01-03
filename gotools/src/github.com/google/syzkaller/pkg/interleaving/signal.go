@@ -107,3 +107,13 @@ func (i *Signal) FromHex(ret []byte) {
 		(*i)[sig] = struct{}{}
 	}
 }
+
+func (s1 Signal) Intersect(s2 Signal) Signal {
+	sign := make(Signal)
+	for s := range s1 {
+		if _, ok := s2[s]; ok {
+			sign[s] = struct{}{}
+		}
+	}
+	return sign
+}
