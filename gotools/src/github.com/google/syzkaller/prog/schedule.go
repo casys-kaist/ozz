@@ -19,28 +19,22 @@ type Schedule struct {
 	filter []uint32
 }
 
-func (sched Schedule) Len() int {
-	return len(sched.points)
+func (p *Prog) MutateScheduleFromHint(r *rand.Rand, hint interleaving.Hint, randomReordering bool) {
+	schedule := hint.GenerateSchedule()
+	vec := hint.GenerateFlushVector(r, randomReordering)
+	p.applySchedule(schedule)
+	p.attachFlushVector(vec)
+	p.storeHint(hint)
 }
 
-func (sched Schedule) Match(c *Call) Schedule {
-	res := Schedule{}
-	for _, point := range sched.points {
-		if point.call == c {
-			res.points = append(res.points, point)
-		}
-	}
-	return res
+func (p *Prog) attachFlushVector(vec interleaving.FlushVector) {
+	p.FlushVector = vec
 }
 
-func (sched Schedule) CallIndex(call *Call, p *Prog) int {
-	for ci, c := range p.Calls {
-		if c == call {
-			return ci
-		}
-	}
-	// something wrong. sched does not have Call.
-	return -1
+func (p *Prog) storeHint(hint interleaving.Hint) {
+	// XXX: This seems bad. I want to keep hint to decide that the
+	// fuzzer tested the hint after executing p.
+	p.Hint = hint
 }
 
 func (p *Prog) appendDummyPoints() {
@@ -78,22 +72,9 @@ func (p *Prog) removeDummyPoints() {
 	p.Schedule.points = p.Schedule.points[:i+1]
 }
 
-func (p *Prog) MutateScheduleFromCandidate(rs rand.Source, cand interleaving.Candidate) {
-	schedule := cand.GenerateSchedule()
-	p.applySchedule(schedule)
-}
-
 func (p *Prog) applySchedule(schedule []interleaving.Access) {
 	shapeScheduleFromAccesses(p, schedule)
 	p.appendDummyPoints()
-}
-
-func (sched *Schedule) AttachScheduleFilter(filter []uint32) {
-	sched.filter = append([]uint32{}, filter...)
-}
-
-func (sched Schedule) Filter() []uint32 {
-	return sched.filter
 }
 
 func shapeScheduleFromAccesses(p *Prog, schedule []interleaving.Access) {
@@ -119,6 +100,38 @@ func shapeScheduleFromAccesses(p *Prog, schedule []interleaving.Access) {
 		order++
 	}
 	p.Schedule = sched
+}
+
+func (sched Schedule) Len() int {
+	return len(sched.points)
+}
+
+func (sched Schedule) Match(c *Call) Schedule {
+	res := Schedule{}
+	for _, point := range sched.points {
+		if point.call == c {
+			res.points = append(res.points, point)
+		}
+	}
+	return res
+}
+
+func (sched Schedule) CallIndex(call *Call, p *Prog) int {
+	for ci, c := range p.Calls {
+		if c == call {
+			return ci
+		}
+	}
+	// something wrong. sched does not have Call.
+	return -1
+}
+
+func (sched *Schedule) AttachScheduleFilter(filter []uint32) {
+	sched.filter = append([]uint32{}, filter...)
+}
+
+func (sched Schedule) Filter() []uint32 {
+	return sched.filter
 }
 
 const dummyAddr = ^uint64(0)

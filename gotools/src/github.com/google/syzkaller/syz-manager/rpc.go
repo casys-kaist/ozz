@@ -38,7 +38,6 @@ type RPCServer struct {
 	corpusSignal       signal.Signal
 	corpusCover        cover.Cover
 	corpusInterleaving interleaving.Signal
-	corpusKnots        interleaving.Cover
 	rotator            *prog.Rotator
 	rnd                *rand.Rand
 	checkFailures      int
@@ -74,7 +73,6 @@ type RPCManagerView interface {
 	candidateBatch(size int) []rpctype.Candidate
 	rotateCorpus() bool
 	getPhase() int
-	recordKnot(knot interleaving.Knot)
 }
 
 func startRPCServer(mgr *Manager) (*RPCServer, error) {
@@ -362,8 +360,6 @@ func (serv *RPCServer) NewScheduledInput(a *rpctype.NewScheduledInputArgs, r *in
 	if !serv.mgr.newScheduledInput(a.ScheduledInput, inputSignal) {
 		return nil
 	}
-	serv.corpusKnots.Merge(a.Cover)
-	serv.stats.corpusKnots.set(len(serv.corpusKnots))
 	serv.corpusInterleaving.Merge(diff)
 	serv.stats.corpusInterleaving.set(serv.corpusInterleaving.Len())
 	serv.stats.newScheduledInputs.inc()
@@ -468,21 +464,6 @@ func (serv *RPCServer) accumulateInstCount(a *rpctype.PollArgs) {
 		}
 	}
 	serv.stats.instBlacklist.set(len(serv.instBlacklist))
-}
-
-func (serv *RPCServer) SendUsedKnots(a *rpctype.SendUsedKnotsArg, r *int) error {
-	for _, insts := range a.Insts {
-		// XXX: Tentative implementation. Seems really terrible.
-		knot := interleaving.Knot{
-			{{Inst: insts[0]}, {Inst: insts[1]}},
-			{{Inst: insts[2]}, {Inst: insts[3]}},
-		}
-		// XXX: corpusInterleaving is not intended to count the number
-		// of used hints. whatever.
-		serv.stats.corpusInterleaving.inc()
-		serv.mgr.recordKnot(knot)
-	}
-	return nil
 }
 
 func (serv *RPCServer) shutdownInstance(name string) []byte {

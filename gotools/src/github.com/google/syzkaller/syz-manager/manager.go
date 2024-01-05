@@ -55,6 +55,7 @@ var (
 	flagDumpCoverage     = flag.Bool("dump-coverage", false, "for experiments. dump both coverages periodically")
 	flagOneShot          = flag.Bool("one-shot", false, "quit after a crash occurs")
 	flagRandomReordering = flag.Bool("random-reordering", false, "")
+	flagTraceLock        = flag.Bool("trace-lock", true, "")
 )
 
 type Manager struct {
@@ -1006,6 +1007,7 @@ func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Re
 		Generate:         *flagGen,
 		Pinning:          true,
 		RandomReordering: *flagRandomReordering,
+		TraceLock:        *flagTraceLock,
 		Optional: &instance.OptionalFuzzerArgs{
 			Slowdown:   mgr.cfg.Timeouts.Slowdown,
 			RawCover:   mgr.cfg.RawCover,
@@ -1599,10 +1601,6 @@ func (mgr *Manager) newScheduledInput(inp rpctype.ScheduledInput, sign interleav
 	if old, ok := mgr.scheduledCorpus[sig]; ok {
 		sign.Merge(old.Signal.Deserialize())
 		old.Signal = sign.Serialize()
-		var cov interleaving.Cover
-		cov.Merge(old.Cover)
-		cov.Merge(inp.Cover)
-		old.Cover = cov.Serialize()
 		mgr.scheduledCorpus[sig] = old
 	} else {
 		mgr.scheduledCorpus[sig] = inp
@@ -1810,14 +1808,6 @@ func (mgr *Manager) dumpCoverageToFile(dir, filename string, cov bytes.Buffer) {
 	if _, err := codef.Write(cov.Bytes()); err != nil {
 		log.Fatalf("failed to write coverage to file (%s): %v", filename, err)
 	}
-}
-
-func (mgr *Manager) recordKnot(knot interleaving.Knot) {
-	// XXX: Tentative implementation. Definitely terrible.
-	mgr.usedKnotFile.WriteString(
-		fmt.Sprintf("%x --> %x\n%x --> %x\n---------------------\n",
-			knot[0].Former().Inst, knot[0].Latter().Inst,
-			knot[1].Former().Inst, knot[1].Latter().Inst))
 }
 
 func publicWebAddr(addr string) string {
