@@ -35,7 +35,7 @@ func (hint Hint) String() string {
 		sort.Slice(cpy, func(i, j int) bool { return cpy[i].Timestamp < cpy[j].Timestamp })
 		return cpy
 	}
-	str := fmt.Sprintf("Type: %v\nCritical communication\n - %v -> %v\nPreceding insts\n", hint.Typ, hint.CriticalComm.Former(), hint.CriticalComm.Latter())
+	str := fmt.Sprintf("Type: %v\nScore: %v\nCritical communication\n - %v -> %v\nPreceding insts\n", hint.Typ, hint.Score(), hint.CriticalComm.Former(), hint.CriticalComm.Latter())
 	for _, acc := range copySortedAccs(hint.PrecedingInsts) {
 		str += fmt.Sprintf(" - %v\n", acc)
 	}

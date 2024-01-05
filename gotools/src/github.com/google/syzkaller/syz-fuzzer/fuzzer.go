@@ -1026,7 +1026,11 @@ func pickBin(hints []interleaving.Hint) int {
 			maxBin = bin
 		}
 	}
-	return 0
+	if maxBin > BinLarge {
+		maxBin = BinLarge
+	}
+	log.Logf(2, "picking bin %d", maxBin)
+	return maxBin
 }
 
 func signalPrio(p *prog.Prog, info *ipc.CallInfo, call int) (prio uint8) {
