@@ -919,13 +919,11 @@ func (fuzzer *Fuzzer) checkNewInterleavingSignal(sign interleaving.Signal) bool 
 func (fuzzer *Fuzzer) getNewHints(hints []interleaving.Hint) []interleaving.Hint {
 	fuzzer.signalMu.RLock()
 	defer fuzzer.signalMu.RUnlock()
-	for i, total := 0, len(hints); i < total; i++ {
+	var i, total int
+	for i, total = 0, len(hints); i < total; i++ {
 		hint := hints[i]
-		if !fuzzer.testLoadReordering && hint.Typ == interleaving.TestingLoadBarrier {
-			continue
-		}
 		sign := hint.Coverage()
-		if !fuzzer.checkNewInterleavingSignal(sign) {
+		if (!fuzzer.testLoadReordering && hint.Typ == interleaving.TestingLoadBarrier) || !fuzzer.checkNewInterleavingSignal(sign) {
 			total--
 			hints[i] = hints[total]
 			i--
