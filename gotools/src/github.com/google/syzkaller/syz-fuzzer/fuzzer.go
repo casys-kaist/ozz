@@ -979,28 +979,6 @@ func (fuzzer *Fuzzer) countInstructionInKnot(knot interleaving.Knot) {
 	}
 }
 
-func (fuzzer *Fuzzer) sendUsedKnots(used []interleaving.Segment) {
-	// XXX: At this point, we knot that instructions in thread0 were
-	// executed before instructions in thread1. As we want to track
-	// instruction addresses only, flatten the knot in a simple way.
-	a := rpctype.SendUsedKnotsArg{}
-	// XXX: Also we know that len(used) == 1 for now.
-	for _, knot0 := range used {
-		knot, ok := knot0.(interleaving.Knot)
-		if !ok {
-			panic("wrong")
-		}
-		insts := []uint32{}
-		for _, comm := range knot {
-			insts = append(insts, comm.Former().Inst, comm.Latter().Inst)
-		}
-		a.Insts = append(a.Insts, insts)
-	}
-	if err := fuzzer.manager.Call("Manager.SendUsedKnots", a, nil); err != nil {
-		log.Fatalf("failed to call Manager.Connect(): %v ", err)
-	}
-}
-
 func (fuzzer *Fuzzer) collectionWorkqueue(tricand, cand, tri, smash, thr uint64) {
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()

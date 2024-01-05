@@ -1810,14 +1810,6 @@ func (mgr *Manager) dumpCoverageToFile(dir, filename string, cov bytes.Buffer) {
 	}
 }
 
-func (mgr *Manager) recordKnot(knot interleaving.Knot) {
-	// XXX: Tentative implementation. Definitely terrible.
-	mgr.usedKnotFile.WriteString(
-		fmt.Sprintf("%x --> %x\n%x --> %x\n---------------------\n",
-			knot[0].Former().Inst, knot[0].Latter().Inst,
-			knot[1].Former().Inst, knot[1].Latter().Inst))
-}
-
 func publicWebAddr(addr string) string {
 	_, port, err := net.SplitHostPort(addr)
 	if err == nil && port != "" {
