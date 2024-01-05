@@ -117,3 +117,10 @@ func (s1 Signal) Intersect(s2 Signal) Signal {
 	}
 	return sign
 }
+
+func CheckCoverage(seq []SerialAccess, hint Hint) Signal {
+	if len(seq) != 2 {
+		return nil
+	}
+	return nil
+}

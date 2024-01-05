@@ -416,7 +416,9 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 
 func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.ProgInfo {
 	// NOTE: The scheduling work is the only case reaching here
-	// TODO: implement
+	seq := proc.sequentialAccesses(info, p.Contender)
+	sign := interleaving.CheckCoverage(seq, p.Hint)
+	_ = sign
 	return info
 }
 
