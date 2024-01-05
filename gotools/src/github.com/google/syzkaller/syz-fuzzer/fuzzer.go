@@ -803,7 +803,7 @@ func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hints []interleaving.Hint)
 	fuzzer.addCollection(CollectionScheduleHint, uint64(len(hints)))
 	fuzzer.addCollection(CollectionConcurrentCalls, 1)
 	sort.Slice(hints, func(i, j int) bool {
-		return hints[i].Score() > hints[j].Score()
+		return hints[i].Score() < hints[j].Score()
 	})
 	tp := &prog.ConcurrentCalls{
 		P:    p,
