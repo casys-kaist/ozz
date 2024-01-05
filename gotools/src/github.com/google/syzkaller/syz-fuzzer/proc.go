@@ -161,9 +161,7 @@ retry:
 		proc.fuzzer.subCollection(CollectionConcurrentCalls, 1)
 	}
 	// To debug the kernel easily
-	log.Logf(0, "crit comm: %v --> %v", hint.CriticalComm.Former(), hint.CriticalComm.Latter())
-	log.Logf(0, "preceding insts: %v", hint.PrecedingInsts)
-	log.Logf(0, "following inst2: %v", hint.FollowingInsts)
+	log.Logf(0, "%v", hint)
 	return tp.P.Clone(), hint
 }
 
@@ -396,11 +394,8 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 	start := time.Now()
 	log.Logf(0, "pick up threading works at %v", start)
 	for dist := 1; dist < maxDist; dist++ {
-		for c1 := 0; c1 < len(p.Calls); c1++ {
+		for c1 := 0; c1 < len(p.Calls) && c1+dist < len(p.Calls); c1++ {
 			c2 := c1 + dist
-			if c2 >= len(p.Calls) {
-				break
-			}
 			cont := prog.Contender{Calls: []int{c1, c2}}
 			seq := proc.sequentialAccesses(info, cont)
 			hints := scheduler.ComputeHints0(seq)

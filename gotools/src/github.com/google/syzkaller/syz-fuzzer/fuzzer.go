@@ -791,6 +791,7 @@ func (fuzzer *Fuzzer) __bookScheduleGuide(tp *prog.ConcurrentCalls) {
 	if len(tp.Hint) == 0 {
 		panic("wrong")
 	}
+	// NOTE: assuming hints are sorted according to their scores
 	bin := pickBin(tp.Hint)
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()
@@ -801,6 +802,9 @@ func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hints []interleaving.Hint)
 	log.Logf(2, "book a schedule guide")
 	fuzzer.addCollection(CollectionScheduleHint, uint64(len(hints)))
 	fuzzer.addCollection(CollectionConcurrentCalls, 1)
+	sort.Slice(hints, func(i, j int) bool {
+		return hints[i].Score() > hints[j].Score()
+	})
 	tp := &prog.ConcurrentCalls{
 		P:    p,
 		Hint: hints,
