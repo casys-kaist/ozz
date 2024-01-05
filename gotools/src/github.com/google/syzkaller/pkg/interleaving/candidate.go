@@ -47,14 +47,20 @@ func (hint Hint) String() string {
 }
 
 func (hint Hint) Score() int {
-	var acc []Access
+	var accs []Access
+	var accTyp, score int
 	switch hint.Typ {
 	case TestingLoadBarrier:
-		acc = hint.FollowingInsts
+		accs, accTyp = hint.FollowingInsts, TypeLoad
 	case TestingStoreBarrier:
-		acc = hint.PrecedingInsts
+		accs, accTyp = hint.PrecedingInsts, TypeStore
 	}
-	return len(acc)
+	for _, acc := range accs {
+		if acc.Typ == uint32(accTyp) {
+			score++
+		}
+	}
+	return score
 }
 
 func (hint Hint) Coverage() Signal {
