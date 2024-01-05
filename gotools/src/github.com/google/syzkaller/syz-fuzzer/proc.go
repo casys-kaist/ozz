@@ -128,20 +128,18 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 	// NOTE: proc.scheduleInput() does not queue additional works, so
 	// executing proc.scheduleInput() does not cause the workqueues
 	// exploding.
-	for cnt := 0; cnt < 10; cnt++ {
+	for cnt := 0; cnt < 10 && proc.needScheduling(); cnt++ {
 		tp := fuzzerSnapshot.chooseThreadedProgram(proc.rnd)
 		if tp == nil {
 			break
 		}
 		p, hint := proc.pickHint(tp)
+
 		p.MutateScheduleFromHint(proc.rnd, hint)
 		p.MutateFlushVectorFromHint(proc.rnd, hint, randomReordering)
 
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
 		proc.execute(proc.execOptsCollide, p, ProgNormal, StatSchedule)
-		if !proc.needScheduling() {
-			break
-		}
 	}
 }
 
@@ -157,36 +155,16 @@ retry:
 	if hint.Invalid() {
 		goto retry
 	}
+	if len(tp.Hint) != 0 {
+		proc.fuzzer.__bookScheduleGuide(tp)
+	} else {
+		proc.fuzzer.subCollection(CollectionConcurrentCalls, 1)
+	}
 	// To debug the kernel easily
 	log.Logf(0, "crit comm: %v --> %v", hint.CriticalComm.Former(), hint.CriticalComm.Latter())
 	log.Logf(0, "preceding insts: %v", hint.PrecedingInsts)
 	log.Logf(0, "following inst2: %v", hint.FollowingInsts)
-	proc.inspectUsedHint(hint)
 	return tp.P.Clone(), hint
-}
-
-func (proc *Proc) inspectUsedHint(hint interleaving.Hint) {
-	// NOTE: This may not be necessary, but as we are exploring
-	// new research problems, we wanna know how hints are used and
-	// understand how the fuzzer can be improved futher.
-	// TODO: What do we want to inspect?
-	// proc.sendUsedKnots(used)
-	// proc.countUsedInstructions(used)
-}
-
-func (proc *Proc) sendUsedKnots(used []interleaving.Segment) {
-	// XXX: This may degrade the runtime performance as it keeps
-	// invoking RPC calls. Not sure we want to keep this.
-	proc.fuzzer.sendUsedKnots(used)
-}
-
-func (proc *Proc) countUsedInstructions(used []interleaving.Segment) {
-	proc.fuzzer.signalMu.Lock()
-	defer proc.fuzzer.signalMu.Unlock()
-	for _, _knot := range used {
-		knot := _knot.(interleaving.Knot)
-		proc.fuzzer.countInstructionInKnot(knot)
-	}
 }
 
 func (proc *Proc) triageInput(item *WorkTriage) {

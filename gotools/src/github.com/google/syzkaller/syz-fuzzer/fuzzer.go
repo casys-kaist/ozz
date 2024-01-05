@@ -67,7 +67,7 @@ type Fuzzer struct {
 	corpusHashes    map[hash.Sig]struct{}
 	corpusPrios     []int64
 	sumPrios        int64
-	concurrentCalls []*prog.ConcurrentCalls
+	concurrentCalls [BinCount]map[*prog.ConcurrentCalls]struct{}
 
 	signalMu     sync.RWMutex
 	corpusSignal signal.Signal // signal of inputs in corpus
@@ -96,13 +96,23 @@ type Fuzzer struct {
 
 type FuzzerSnapshot struct {
 	corpus          []*prog.Prog
-	concurrentCalls []*prog.ConcurrentCalls
+	concurrentCalls [BinCount]map[*prog.ConcurrentCalls]struct{}
 	corpusPrios     []int64
 	sumPrios        int64
 	fuzzer          *Fuzzer
 }
 
 type Collection int
+
+const (
+	Bin1 = iota
+	Bin2
+	Bin4
+	Bin8
+	Bin16
+	BinLarge
+	BinCount
+)
 
 const (
 	// Stats of collected data
@@ -361,6 +371,10 @@ func main() {
 	}
 
 	shifter := readShifter(*flagShifter)
+	bins := [BinCount]map[*prog.ConcurrentCalls]struct{}{}
+	for bin := Bin1; bin < BinCount; bin++ {
+		bins[bin] = make(map[*prog.ConcurrentCalls]struct{})
+	}
 
 	needPoll := make(chan struct{}, 1)
 	needPoll <- struct{}{}
@@ -379,6 +393,7 @@ func main() {
 		corpusHashes:             make(map[hash.Sig]struct{}),
 		shifter:                  shifter,
 
+		concurrentCalls:    bins,
 		corpusInterleaving: make(interleaving.Signal),
 		maxInterleaving:    make(interleaving.Signal),
 		newInterleaving:    make(interleaving.Signal),
@@ -729,14 +744,20 @@ func (fuzzer *FuzzerSnapshot) chooseProgram(r *rand.Rand) *prog.Prog {
 }
 
 func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.ConcurrentCalls {
-	// TODO: Prioritize inputs according to the number of
-	// hints.
-	for retry := 0; len(fuzzer.concurrentCalls) != 0 && retry < 100; retry++ {
-		idx := r.Intn(len(fuzzer.concurrentCalls))
-		tp := fuzzer.concurrentCalls[idx]
-		if len(tp.Hint) != 0 {
-			return tp
+	fuzzer.fuzzer.corpusMu.Lock()
+	defer fuzzer.fuzzer.corpusMu.Unlock()
+	for bin := BinLarge; bin >= Bin1; bin-- {
+		l := len(fuzzer.concurrentCalls[bin])
+		if l == 0 {
+			continue
 		}
+		var tp *prog.ConcurrentCalls
+		for tp = range fuzzer.concurrentCalls[bin] {
+			break
+		}
+		// Now this violates the purpose of FuzzerSnapshot...
+		delete(fuzzer.concurrentCalls[bin], tp)
+		return tp
 	}
 	return nil
 }
@@ -766,16 +787,25 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 	}
 }
 
-func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hint []interleaving.Hint) {
-	log.Logf(2, "book a schedule guide")
-	fuzzer.addCollection(CollectionScheduleHint, uint64(len(hint)))
-	fuzzer.addCollection(CollectionConcurrentCalls, 1)
+func (fuzzer *Fuzzer) __bookScheduleGuide(tp *prog.ConcurrentCalls) {
+	if len(tp.Hint) == 0 {
+		panic("wrong")
+	}
+	bin := pickBin(tp.Hint)
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()
-	fuzzer.concurrentCalls = append(fuzzer.concurrentCalls, &prog.ConcurrentCalls{
+	fuzzer.concurrentCalls[bin][tp] = struct{}{}
+}
+
+func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hints []interleaving.Hint) {
+	log.Logf(2, "book a schedule guide")
+	fuzzer.addCollection(CollectionScheduleHint, uint64(len(hints)))
+	fuzzer.addCollection(CollectionConcurrentCalls, 1)
+	tp := &prog.ConcurrentCalls{
 		P:    p,
-		Hint: hint,
-	})
+		Hint: hints,
+	}
+	fuzzer.__bookScheduleGuide(tp)
 }
 
 func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, sign interleaving.Signal) {
@@ -789,7 +819,6 @@ func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, sign interleaving.S
 }
 
 func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
-	fuzzer.removeExhaustedConcurrentCalls()
 	fuzzer.corpusMu.RLock()
 	defer fuzzer.corpusMu.RUnlock()
 	return FuzzerSnapshot{
@@ -798,28 +827,6 @@ func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
 		fuzzer.corpusPrios,
 		fuzzer.sumPrios,
 		fuzzer,
-	}
-}
-
-func (fuzzer *Fuzzer) removeExhaustedConcurrentCalls() {
-	fuzzer.corpusMu.Lock()
-	removed := uint64(0)
-	ln := len(fuzzer.concurrentCalls)
-	for i := 0; i < ln; {
-		c := fuzzer.concurrentCalls[i]
-		if len(c.Hint) != 0 {
-			i++
-			continue
-		}
-		// remove the exhausted concurrent call
-		fuzzer.concurrentCalls[i] = fuzzer.concurrentCalls[ln-1]
-		fuzzer.concurrentCalls = fuzzer.concurrentCalls[:ln-1]
-		ln--
-	}
-	fuzzer.corpusMu.Unlock()
-	if removed != 0 {
-		log.Logf(2, "removed %d concurrent calls", removed)
-		fuzzer.subCollection(CollectionConcurrentCalls, removed)
 	}
 }
 
@@ -1000,6 +1007,24 @@ func (fuzzer *Fuzzer) collectionWorkqueue(tricand, cand, tri, smash, thr uint64)
 	fuzzer.collection[CollectionWQTriage] = tri
 	fuzzer.collection[CollectionWQSmash] = smash
 	fuzzer.collection[CollectionWQThreading] = thr
+}
+
+func pickBin(hints []interleaving.Hint) int {
+	maxBin := -1
+	pow := func(n int) int {
+		k := 1
+		for k < n {
+			k = k << 1
+		}
+		return k
+	}
+	for _, hint := range hints {
+		bin := pow(hint.Score())
+		if maxBin < bin {
+			maxBin = bin
+		}
+	}
+	return 0
 }
 
 func signalPrio(p *prog.Prog, info *ipc.CallInfo, call int) (prio uint8) {
