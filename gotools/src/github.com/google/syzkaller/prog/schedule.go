@@ -24,10 +24,17 @@ func (p *Prog) MutateScheduleFromHint(r *rand.Rand, hint interleaving.Hint, rand
 	vec := hint.GenerateFlushVector(r, randomReordering)
 	p.applySchedule(schedule)
 	p.attachFlushVector(vec)
+	p.storeHint(hint)
 }
 
 func (p *Prog) attachFlushVector(vec interleaving.FlushVector) {
 	p.FlushVector = vec
+}
+
+func (p *Prog) storeHint(hint interleaving.Hint) {
+	// XXX: This seems bad. I want to keep hint to decide that the
+	// fuzzer tested the hint after executing p.
+	p.Hint = hint
 }
 
 func (p *Prog) appendDummyPoints() {
