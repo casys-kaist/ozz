@@ -1,10 +1,8 @@
-package ssb
+package interleaving
 
 import (
 	"fmt"
 	"math/rand"
-
-	"github.com/google/syzkaller/pkg/interleaving"
 )
 
 type tableEntry struct {
@@ -58,7 +56,7 @@ func (vec FlushVector) SerializeTable() []uint64 {
 	return r
 }
 
-func GenerateFlushVector(r *rand.Rand, hint interleaving.Hint, randomReordering bool) FlushVector {
+func (hint Hint) GenerateFlushVector(r *rand.Rand, randomReordering bool) FlushVector {
 	doRandom := func() bool {
 		if r == nil || !randomReordering {
 			return false
@@ -74,7 +72,7 @@ func GenerateFlushVector(r *rand.Rand, hint interleaving.Hint, randomReordering 
 	}
 }
 
-func generateFlushVectorForHint(hint interleaving.Hint) FlushVector {
+func generateFlushVectorForHint(hint Hint) FlushVector {
 	uext := func(v uint32) uint64 {
 		return uint64(v) | 0xffffffff00000000
 	}

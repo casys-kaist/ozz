@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/google/syzkaller/pkg/ssb"
+	"github.com/google/syzkaller/pkg/interleaving"
 )
 
 type Prog struct {
@@ -20,7 +20,7 @@ type Prog struct {
 	Threaded bool
 	Contender
 	Schedule
-	ssb.FlushVector
+	interleaving.FlushVector
 }
 
 // These properties are parsed and serialized according to the tag and the type

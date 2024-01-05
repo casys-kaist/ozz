@@ -134,10 +134,7 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 			break
 		}
 		p, hint := proc.pickHint(tp)
-
-		p.MutateScheduleFromHint(proc.rnd, hint)
-		p.MutateFlushVectorFromHint(proc.rnd, hint, randomReordering)
-
+		p.MutateScheduleFromHint(proc.rnd, hint, randomReordering)
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
 		proc.execute(proc.execOptsCollide, p, ProgNormal, StatSchedule)
 	}
