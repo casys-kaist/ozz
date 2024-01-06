@@ -75,8 +75,16 @@ func (hint Hint) Coverage() Signal {
 		pivot = hint.CriticalComm.Latter()
 	}
 	sign := make(Signal)
+	const (
+		offset_bias = 0x01000193
+		prime       = 0x01000193
+	)
 	for _, acc := range accs {
-		s := acc.Inst ^ pivot.Inst
+		s := uint32(offset_bias)
+		s ^= pivot.Inst
+		s *= prime
+		s ^= acc.Inst
+		s *= prime
 		sign[s] = struct{}{}
 	}
 	return sign
