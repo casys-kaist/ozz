@@ -139,7 +139,8 @@ func (knotter *Knotter) annotateLocksInSerial(tid uint32, serial interleaving.Se
 	knotter.locks[tid] = make(map[uint32][]int)
 	// NOTE: Unless there is a deadlock, traces of lock operations are
 	// always a form of a stack.
-	locks, head := make([]int, 16), 0
+	const MAX_LOCK_COUNT = 32
+	locks, head := make([]int, MAX_LOCK_COUNT), 0
 loop:
 	for _, acc := range serial {
 		switch typ := acc.Typ; typ {
@@ -147,9 +148,11 @@ loop:
 			memID := getMemID(acc)
 			knotter.locks[tid][memID] = append([]int{}, locks[:head]...)
 		case interleaving.TypeLockAcquire:
-			lockID := getLockID(acc)
-			locks[head] = lockID
-			head++
+			if head < MAX_LOCK_COUNT {
+				lockID := getLockID(acc)
+				locks[head] = lockID
+				head++
+			}
 		case interleaving.TypeLockRelease:
 			lockID := getLockID(acc)
 			// NOTE: KMemcov does not record if a lock acquire is
