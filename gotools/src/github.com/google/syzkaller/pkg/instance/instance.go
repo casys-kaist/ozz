@@ -468,6 +468,7 @@ type FuzzerCmdArgs struct {
 	Generate         bool
 	Pinning          bool
 	RandomReordering bool
+	TraceLock        bool
 	Optional         *OptionalFuzzerArgs
 }
 
@@ -503,10 +504,10 @@ func FuzzerCmd(args *FuzzerCmdArgs) string {
 	// Monitor memory usage if debug mode
 	monitor := args.Debug
 	return fmt.Sprintf("%v %v -executor=%v -shifter=%v -name=%v -arch=%v%v -manager=%v -sandbox=%v"+
-		" -procs=%v -cover=%v -debug=%v -test=%v%v%v%v -gen=%v -monitor-memory-usage=%v -random-reordering=%v",
+		" -procs=%v -cover=%v -debug=%v -test=%v%v%v%v -gen=%v -monitor-memory-usage=%v -random-reordering=%v -trace-lock=%v",
 		taskset, args.Fuzzer, args.Executor, args.Shifter, args.Name, args.Arch, osArg, args.FwdAddr, args.Sandbox,
 		args.Procs, args.Cover, args.Debug, args.Test, runtestArg, verbosityArg, optionalArg, args.Generate, monitor,
-		args.RandomReordering)
+		args.RandomReordering, args.TraceLock)
 }
 
 func OldFuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox string, sandboxArg, procs int,

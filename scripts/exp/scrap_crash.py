@@ -5,10 +5,44 @@ import shutil
 import sys
 
 
-def scrap_crash(crash, report_dir):
+def get_kernel_hash(crash):
+    crash = os.path.realpath(crash)
+    crashes_dir = os.path.basename(os.path.dirname(crash))
+    PREFIX = "crashes-"
+    if crashes_dir.startswith(PREFIX):
+        kernel_hsh = crashes_dir[len(PREFIX) :]
+    else:
+        kernel_hsh = "unknown"
+    return kernel_hsh
+
+
+def get_kernel_info(crash, kernels_dir):
+    kernel_hsh = get_kernel_hash(crash)
+
+    try:
+        with open(os.path.join(kernels_dir, "guest", "BUILD_HISTORY")) as f:
+            build_history = f.readlines()
+            assert len(build_history) > 0
+    except:
+        build_history = ["unknown"]
+
+    kernel_info = ""
+    kernel_info += build_history[0]
+    for h in build_history[1:]:
+        if h.find(kernel_hsh) != -1:
+            kernel_info += h
+    print(kernel_info)
+    return kernel_info
+
+
+def scrap_crash(crash, exp_dir, kernels_dir):
+    crash = os.path.normpath(crash)
+
+    report_dir = os.path.join(exp_dir, "report")
+
     crash_hash = os.path.basename(crash)
     outdir = os.path.join(report_dir, crash_hash)
-    os.makedirs(outdir)
+    os.makedirs(outdir, exist_ok=True)
     for root, _, files in os.walk(crash):
         for file in files:
             if file.startswith("machineInfo"):
@@ -17,12 +51,25 @@ def scrap_crash(crash, report_dir):
             dst = os.path.join(outdir, file)
             shutil.copyfile(src, dst)
 
+    kernel_info = get_kernel_info(crash, kernels_dir)
+    try:
+        with open(os.path.join(outdir, "kernel_info"), "w") as f:
+            f.write(kernel_info)
+    except:
+        pass
+
+    misc = "misc"
+    misc_file = os.path.join(report_dir, misc)
+    if os.path.isfile(misc_file):
+        dst = os.path.join(outdir, misc)
+        shutil.copyfile(misc_file, dst)
+
 
 def scrap_crashes(crashes):
     exp_dir = os.environ["EXP_DIR"]
-    report_dir = os.path.join(exp_dir, "report")
+    kernels_dir = os.environ["KERNELS_DIR"]
     for crash in crashes:
-        scrap_crash(crash, report_dir)
+        scrap_crash(crash, exp_dir, kernels_dir)
 
 
 def main():

@@ -70,7 +70,7 @@ type WorkSmash struct {
 type WorkThreading struct {
 	p     *prog.Prog
 	calls prog.Contender
-	knots []interleaving.Segment
+	hints []interleaving.Hint
 }
 
 func newWorkQueue(procs int, needCandidates chan struct{}) *WorkQueue {
@@ -78,6 +78,14 @@ func newWorkQueue(procs int, needCandidates chan struct{}) *WorkQueue {
 		procs:          procs,
 		needCandidates: needCandidates,
 	}
+}
+
+func (wq *WorkQueue) stats() (uint64, uint64, uint64, uint64, uint64) {
+	return uint64(len(wq.triageCandidate)),
+		uint64(len(wq.candidate)),
+		uint64(len(wq.triage)),
+		uint64(len(wq.smash)),
+		uint64(len(wq.threading))
 }
 
 func (wq *WorkQueue) enqueue(item interface{}) {

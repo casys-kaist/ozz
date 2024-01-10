@@ -163,5 +163,5 @@ type ScheduledProg struct {
 
 type ConcurrentCalls struct {
 	P    *Prog
-	Hint []interleaving.Segment
+	Hint []interleaving.Hint
 }

@@ -31,17 +31,10 @@ type Proc struct {
 	execOptsCollide *ipc.ExecOpts
 	execOptsCover   *ipc.ExecOpts
 
-	knotterOptsPreThreading scheduler.KnotterOpts
-	knotterOptsThreading    scheduler.KnotterOpts
-	knotterOptsSchedule     scheduler.KnotterOpts
-
 	// To give a half of computing power for scheduling. We don't use
 	// proc.fuzzer.Stats and proc.env.StatExec as it is periodically
 	// set to 0.
 	balancer balancer
-	// If scheduled is too large, we block Proc.pickupThreadingWorks()
-	// to give more chance to sequential-fuzzing.
-	threadingPlugged bool
 }
 
 func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
@@ -57,31 +50,22 @@ func newProc(fuzzer *Fuzzer, pid int) (*Proc, error) {
 	execOptsCover := *fuzzer.execOpts
 	execOptsCover.Flags |= ipc.FlagCollectCover
 
-	defaultKnotterOpts := scheduler.KnotterOpts{
-		Signal: &fuzzer.maxInterleaving,
-		Mu:     &fuzzer.signalMu,
-		// In RelRazzer, we want to track/test only parallel knots
-		Flags: scheduler.FlagWantParallel,
-	}
-	knotterOptsPreThreading := defaultKnotterOpts
-	knotterOptsPreThreading.Flags |= scheduler.FlagReassignThreadID
-	knotterOptsThreading := defaultKnotterOpts
-	knotterOptsSchedule := defaultKnotterOpts
-	knotterOptsSchedule.Flags |= scheduler.FlagStrictTimestamp
-
 	proc := &Proc{
-		fuzzer:                  fuzzer,
-		pid:                     pid,
-		env:                     env,
-		rnd:                     rnd,
-		execOpts:                fuzzer.execOpts,
-		execOptsCollide:         &execOptsCollide,
-		execOptsCover:           &execOptsCover,
-		knotterOptsPreThreading: knotterOptsPreThreading,
-		knotterOptsThreading:    knotterOptsThreading,
-		knotterOptsSchedule:     knotterOptsSchedule,
+		fuzzer:          fuzzer,
+		pid:             pid,
+		env:             env,
+		rnd:             rnd,
+		execOpts:        fuzzer.execOpts,
+		execOptsCollide: &execOptsCollide,
+		execOptsCover:   &execOptsCover,
 	}
 	return proc, nil
+}
+
+func (proc *Proc) startCollectingAccess() {
+	proc.execOpts.Flags |= ipc.FlagCollectAccess
+	proc.execOptsCollide.Flags |= ipc.FlagCollectAccess
+	proc.execOptsCover.Flags |= ipc.FlagCollectAccess
 }
 
 func (proc *Proc) loop() {
@@ -91,19 +75,24 @@ func (proc *Proc) loop() {
 		// because fallback signal is weak.
 		generatePeriod = 2
 	}
-	for i := 0; ; i++ {
-		proc.powerSchedule(i%100 == 0)
 
+	for i := 0; ; i++ {
+		proc.fuzzer.m.end()
+		proc.powerSchedule()
 		item := proc.fuzzer.workQueue.dequeue()
 		if item != nil {
 			switch item := item.(type) {
 			case *WorkTriage:
+				proc.fuzzer.m.start(triage)
 				proc.triageInput(item)
 			case *WorkCandidate:
+				proc.fuzzer.m.start(candidate)
 				proc.executeCandidate(item)
 			case *WorkSmash:
+				proc.fuzzer.m.start(smash)
 				proc.smashInput(item)
 			case *WorkThreading:
+				proc.fuzzer.m.start(threading)
 				proc.threadingInput(item)
 			default:
 				log.Fatalf("unknown work type: %#v", item)
@@ -114,17 +103,20 @@ func (proc *Proc) loop() {
 		ct := proc.fuzzer.choiceTable
 		fuzzerSnapshot := proc.fuzzer.snapshot()
 		if (len(fuzzerSnapshot.corpus) == 0 || i%generatePeriod == 0) && proc.fuzzer.generate {
+			proc.fuzzer.m.start(gen)
 			// Generate a new prog.
 			p := proc.fuzzer.target.Generate(proc.rnd, prog.RecommendedCalls, ct)
 			log.Logf(1, "#%v: generated", proc.pid)
 			proc.executeAndCollide(proc.execOpts, p, ProgNormal, StatGenerate)
 		} else if i%2 == 1 && proc.fuzzer.generate {
+			proc.fuzzer.m.start(fuzz)
 			// Mutate an existing prog.
 			p := fuzzerSnapshot.chooseProgram(proc.rnd).Clone()
 			p.Mutate(proc.rnd, prog.RecommendedCalls, ct, proc.fuzzer.noMutate, fuzzerSnapshot.corpus)
 			log.Logf(1, "#%v: mutated", proc.pid)
 			proc.executeAndCollide(proc.execOpts, p, ProgNormal, StatFuzz)
 		} else {
+			proc.fuzzer.m.start(schedule)
 			// Mutate a schedule of an existing prog.
 			proc.scheduleInput(fuzzerSnapshot)
 		}
@@ -136,83 +128,38 @@ func (proc *Proc) scheduleInput(fuzzerSnapshot FuzzerSnapshot) {
 	// NOTE: proc.scheduleInput() does not queue additional works, so
 	// executing proc.scheduleInput() does not cause the workqueues
 	// exploding.
-	for cnt := 0; cnt < 10; cnt++ {
+	for cnt := 0; cnt < 10 && proc.needScheduling(); cnt++ {
 		tp := fuzzerSnapshot.chooseThreadedProgram(proc.rnd)
 		if tp == nil {
 			break
 		}
-		p, hint := tp.P.Clone(), proc.pruneHint(tp.Hint)
-
-		cand, used, remaining := scheduler.GenerateCandidates(proc.rnd, hint)
-		// We exclude used knots from tp.Hint even if the schedule
-		// mutation fails.
-		proc.setHint(tp, remaining)
-		if !canSchedule(p, cand) {
-			// TODO: We may want to generate random scheduling points
-			continue
-		}
-		// NOTE: This may not be necessary, but as we are exploring
-		// new research problems, we wanna know what knots are used
-		// and understand how the fuzzer can be improved futher.
-		proc.inspectUsedKnots(used)
-
-		p.MutateScheduleFromCandidate(proc.rnd, cand)
-		p.MutateFlushVectorFromCandidate(proc.rnd, cand, randomReordering)
-		// XXX: For easy debugging the kernel
-		log.Logf(0, "crit comm: %v --> %v", cand.CriticalComm.Former(), cand.CriticalComm.Latter())
-		log.Logf(0, "some inst1: %v", cand.DelayingInst)
-		log.Logf(0, "some inst2: %v", cand.SomeInst)
-
+		p, hint := proc.pickHint(tp)
+		p.MutateScheduleFromHint(proc.rnd, hint, randomReordering)
 		log.Logf(1, "proc #%v: scheduling an input", proc.pid)
 		proc.execute(proc.execOptsCollide, p, ProgNormal, StatSchedule)
-		if !proc.needScheduling() {
-			break
-		}
 	}
 }
 
-func canSchedule(p *prog.Prog, cand interleaving.Candidate) bool {
-	return len(p.Contenders()) == 2 && !cand.Invalid()
-}
-
-func (proc *Proc) pruneHint(hint []interleaving.Segment) []interleaving.Segment {
-	pruned := make([]interleaving.Segment, 0, len(hint))
-	for _, h := range hint {
-		hsh := h.Hash()
-		if _, ok := proc.fuzzer.corpusInterleaving[hsh]; !ok {
-			pruned = append(pruned, h)
-		}
-	}
-	return pruned
-}
-
-func (proc *Proc) setHint(tp *prog.ConcurrentCalls, remaining []interleaving.Segment) {
-	debugHint(tp, remaining)
-	used := len(tp.Hint) - len(remaining)
-	proc.fuzzer.subCollection(CollectionScheduleHint, uint64(used))
+func (proc *Proc) pickHint(tp *prog.ConcurrentCalls) (*prog.Prog, interleaving.Hint) {
+retry:
+	hints, l := tp.Hint, len(tp.Hint)
+	hint := hints[l-1]
+	hints = hints[:l-1]
+	proc.fuzzer.subCollection(CollectionScheduleHint, 1)
 	proc.fuzzer.corpusMu.Lock()
-	defer proc.fuzzer.corpusMu.Unlock()
-	tp.Hint = remaining
-}
-
-func (proc *Proc) inspectUsedKnots(used []interleaving.Segment) {
-	proc.sendUsedKnots(used)
-	proc.countUsedInstructions(used)
-}
-
-func (proc *Proc) sendUsedKnots(used []interleaving.Segment) {
-	// XXX: This may degrade the runtime performance as it keeps
-	// invoking RPC calls. Not sure we want to keep this.
-	proc.fuzzer.sendUsedKnots(used)
-}
-
-func (proc *Proc) countUsedInstructions(used []interleaving.Segment) {
-	proc.fuzzer.signalMu.Lock()
-	defer proc.fuzzer.signalMu.Unlock()
-	for _, _knot := range used {
-		knot := _knot.(interleaving.Knot)
-		proc.fuzzer.countInstructionInKnot(knot)
+	tp.Hint = hints
+	proc.fuzzer.corpusMu.Unlock()
+	if hint.Invalid() {
+		goto retry
 	}
+	if len(tp.Hint) != 0 {
+		proc.fuzzer.__bookScheduleGuide(tp)
+	} else {
+		proc.fuzzer.subCollection(CollectionConcurrentCalls, 1)
+	}
+	// To debug the kernel easily
+	log.Logf(0, "%v", hint)
+	return tp.P.Clone(), hint
 }
 
 func (proc *Proc) triageInput(item *WorkTriage) {
@@ -294,8 +241,9 @@ func (proc *Proc) triageInput(item *WorkTriage) {
 
 	proc.fuzzer.addInputToCorpus(item.p, inputSignal, sig)
 
-	if item.flags&ProgSmashed == 0 && proc.fuzzer.generate {
+	if item.flags&ProgSmashed == 0 && proc.fuzzer.generate && false {
 		proc.fuzzer.workQueue.enqueue(&WorkSmash{item.p, item.call})
+		proc.fuzzer.collectionWorkqueue(proc.fuzzer.workQueue.stats())
 	}
 }
 
@@ -343,37 +291,44 @@ func (proc *Proc) smashInput(item *WorkSmash) {
 func (proc *Proc) threadingInput(item *WorkThreading) {
 	log.Logf(1, "proc #%v: threading an input", proc.pid)
 
-	proc.fuzzer.subCollection(CollectionThreadingHint, uint64(len(item.knots)))
+	proc.fuzzer.subCollection(CollectionThreadingHint, uint64(len(item.hints)))
 
 	p := item.p.Clone()
 	p.Threading(item.calls)
 
-	knots := proc.executeThreading(p)
-	if len(knots) == 0 {
+	hints := proc.executeThreading(p)
+	if len(hints) == 0 {
 		return
 	}
 
+	prev := proc.fuzzer.m.end()
+	proc.fuzzer.m.start(calc2)
+	defer func() {
+		proc.fuzzer.m.end()
+		proc.fuzzer.m.start(prev)
+	}()
 	// newly found knots during threading work
-	newKnots := proc.fuzzer.getNewKnot(knots)
-	// knots that actually occurred among speculated knots
-	speculatedKnots := interleaving.Intersect(knots, item.knots)
-
-	// schedule hint := {newly found knots during threading work}
-	// \cup {speculated knots when picking up threading work}
-	scheduleHint := append(newKnots, speculatedKnots...)
+	newHints := proc.fuzzer.getNewHints(hints)
+	// hints that actually occurred among speculated hints
+	speculatedHints := interleaving.Select(item.hints, hints)
+	scheduleHint := append(newHints, speculatedHints...)
 	if len(scheduleHint) == 0 {
 		return
 	}
 	proc.fuzzer.bookScheduleGuide(p, scheduleHint)
 }
 
-func (proc *Proc) executeThreading(p *prog.Prog) []interleaving.Segment {
-	hints := []interleaving.Segment{}
+func (proc *Proc) executeThreading(p *prog.Prog) []interleaving.Hint {
+	hints := []interleaving.Hint{}
 	for i := 0; i < 2; i++ {
 		inf := proc.executeRaw(proc.execOpts, p, StatThreading)
+		prev := proc.fuzzer.m.end()
+		proc.fuzzer.m.start(calc2)
 		seq := proc.sequentialAccesses(inf, p.Contender)
 		hints = append(hints, scheduler.ComputeHints(seq)...)
 		p.Reverse()
+		proc.fuzzer.m.end()
+		proc.fuzzer.m.start(prev)
 	}
 	return hints
 }
@@ -405,6 +360,7 @@ func (proc *Proc) execute(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes,
 	if !p.Threaded {
 		return proc.postExecute(p, flags, info)
 	} else {
+		// We run concurrent calls only after triaging corpus
 		return proc.postExecuteThreaded(p, info)
 	}
 }
@@ -418,33 +374,41 @@ func (proc *Proc) postExecute(p *prog.Prog, flags ProgTypes, info *ipc.ProgInfo)
 	if extra {
 		proc.enqueueCallTriage(p, flags, -1, info.Extra)
 	}
-	proc.pickupThreadingWorks(p, info)
+	if proc.fuzzer.schedule {
+		proc.pickupThreadingWorks(p, info)
+	}
 	return info
 }
 
 func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
-	if proc.threadingPlugged {
-		return
-	}
-
-	notTooFar := func(c1, c2 int) bool {
-		maxIntermediateCalls := 5
-		dist := (c2 - c1 - 1)
-		return dist < maxIntermediateCalls
-	}
-	for c1 := 0; c1 < len(p.Calls); c1++ {
-		for c2 := c1 + 1; c2 < len(p.Calls) && notTooFar(c1, c2); c2++ {
-			if proc.fuzzer.shutOffThreading(p) {
-				return
-			}
+	prev := proc.fuzzer.m.end()
+	proc.fuzzer.m.start(calc1)
+	defer func() {
+		proc.fuzzer.m.end()
+		proc.fuzzer.m.start(prev)
+	}()
+	const maxDist = 5
+	start := time.Now()
+	log.Logf(0, "pick up threading works at %v", start)
+	for dist := 1; dist < maxDist; dist++ {
+		for c1 := 0; c1 < len(p.Calls) && c1+dist < len(p.Calls); c1++ {
+			c2 := c1 + dist
 			cont := prog.Contender{Calls: []int{c1, c2}}
 			seq := proc.sequentialAccesses(info, cont)
 			hints := scheduler.ComputeHints0(seq)
 			if len(hints) == 0 {
 				continue
 			}
-			if newHints := proc.fuzzer.getNewKnot(hints); len(newHints) != 0 {
+			if newHints := proc.fuzzer.getNewHints(hints); len(newHints) != 0 {
 				proc.enqueueThreading(p, cont, newHints)
+			}
+			if time.Since(start) > 10*time.Minute {
+				// At this point computing hints can be very slow and
+				// I suspect that it can cause "no output from test
+				// machine". Stop calculating hints if it takes too
+				// long time.
+				atomic.AddUint64(&proc.fuzzer.stats[StatThreadWorkTimeout], 1)
+				return
 			}
 		}
 	}
@@ -452,45 +416,10 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 
 func (proc *Proc) postExecuteThreaded(p *prog.Prog, info *ipc.ProgInfo) *ipc.ProgInfo {
 	// NOTE: The scheduling work is the only case reaching here
-	knots := proc.extractKnots(info, p.Contender, proc.knotterOptsSchedule)
-	if len(knots) == 0 {
-		log.Logf(1, "Failed to add sequential traces")
-		return info
-	}
-
-	if new := proc.fuzzer.newSegment(&proc.fuzzer.corpusInterleaving, knots); len(new) == 0 {
-		return info
-	}
-
-	cover := interleaving.Cover(knots)
-	signal := interleaving.FromCoverToSignal(cover)
-
-	data := p.Serialize()
-	log.Logf(2, "added new scheduled input to corpus:\n%s", data)
-	proc.fuzzer.sendScheduledInputToManager(rpctype.ScheduledInput{
-		Prog:   p.Serialize(),
-		Cover:  cover.Serialize(),
-		Signal: signal.Serialize(),
-	})
-	proc.fuzzer.addThreadedInputToCorpus(p, signal)
+	seq := proc.sequentialAccesses(info, p.Contender)
+	sign := interleaving.CheckCoverage(seq, p.Hint)
+	_ = sign
 	return info
-}
-
-func (proc *Proc) extractHints(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) []interleaving.Segment {
-	knotter := scheduler.GetKnotter(opts)
-
-	seq := proc.sequentialAccesses(info, calls)
-	if !knotter.AddSequentialTrace(seq) {
-		return nil
-	}
-	knotter.ExcavateKnots()
-
-	return knotter.GetKnots()
-}
-
-func (proc *Proc) extractKnots(info *ipc.ProgInfo, calls prog.Contender, opts scheduler.KnotterOpts) []interleaving.Segment {
-	// TODO: IMPLEMENT
-	return nil
 }
 
 func (proc *Proc) sequentialAccesses(info *ipc.ProgInfo, calls prog.Contender) (seq []interleaving.SerialAccess) {
@@ -535,6 +464,7 @@ func (proc *Proc) enqueueCallTriage(p *prog.Prog, flags ProgTypes, callIndex int
 		info:  info,
 		flags: flags,
 	})
+	proc.fuzzer.collectionWorkqueue(proc.fuzzer.workQueue.stats())
 }
 
 func (proc *Proc) executeAndCollide(execOpts *ipc.ExecOpts, p *prog.Prog, flags ProgTypes, stat Stat) {
@@ -558,13 +488,14 @@ func (proc *Proc) randomCollide(origP *prog.Prog) *prog.Prog {
 	return p
 }
 
-func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, knots []interleaving.Segment) {
-	proc.fuzzer.addCollection(CollectionThreadingHint, uint64(len(knots)))
+func (proc *Proc) enqueueThreading(p *prog.Prog, calls prog.Contender, hints []interleaving.Hint) {
+	proc.fuzzer.addCollection(CollectionThreadingHint, uint64(len(hints)))
 	proc.fuzzer.workQueue.enqueue(&WorkThreading{
 		p:     p.Clone(),
 		calls: calls,
-		knots: knots,
+		hints: hints,
 	})
+	proc.fuzzer.collectionWorkqueue(proc.fuzzer.workQueue.stats())
 }
 
 func (proc *Proc) executeRaw(opts *ipc.ExecOpts, p *prog.Prog, stat Stat) *ipc.ProgInfo {

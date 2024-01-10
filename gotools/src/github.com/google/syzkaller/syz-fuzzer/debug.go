@@ -1,35 +1,12 @@
 package main
 
 import (
+	"sync"
+	"time"
+
 	"github.com/google/syzkaller/pkg/interleaving"
 	"github.com/google/syzkaller/pkg/log"
-	"github.com/google/syzkaller/prog"
 )
-
-func debugHint(tp *prog.ConcurrentCalls, remaining []interleaving.Segment) {
-	if !_debug {
-		return
-	}
-	before := testingHints(tp.Hint)
-	after := testingHints(remaining)
-	if before && !after {
-		log.Logf(0, "This input should crash")
-	}
-}
-
-// XXX: For the dedug purpose
-func testingHints(hint []interleaving.Segment) bool {
-	var answer = interleaving.Knot{
-		{{Inst: 0x81f9ebf6, Size: 4, Typ: interleaving.TypeStore}, {Inst: 0x81f9f2e8, Size: 4, Typ: interleaving.TypeLoad}},
-		{{Inst: 0x8d576644, Size: 4, Typ: interleaving.TypeStore}, {Inst: 0x8d5924a3, Size: 4, Typ: interleaving.TypeLoad}}}
-	for _, knot0 := range hint {
-		knot := knot0.(interleaving.Knot)
-		if knot.Same(answer) {
-			return true
-		}
-	}
-	return false
-}
 
 func printSeq(seq []interleaving.SerialAccess) {
 	for i, serial := range seq {
@@ -38,6 +15,67 @@ func printSeq(seq []interleaving.SerialAccess) {
 			log.Logf(0, "%v", acc)
 		}
 	}
+}
+
+const (
+	idle = iota
+	triage
+	candidate
+	smash
+	threading
+	gen
+	fuzz
+	schedule
+	calc1
+	calc2
+	total
+	count
+)
+
+type monitor struct {
+	ts    time.Time
+	typ   int
+	rec   [count]time.Duration
+	total time.Duration
+	sync.RWMutex
+}
+
+func (m *monitor) start(t int) {
+	if !_debug {
+		return
+	}
+	m.Lock()
+	defer m.Unlock()
+	m.ts = time.Now()
+	m.typ = t
+}
+
+func (m *monitor) end() int {
+	if !_debug || m.typ == idle {
+		return idle
+	}
+	m.Lock()
+	defer m.Unlock()
+	e := time.Since(m.ts)
+	if !(0 < m.typ && m.typ < total) {
+		panic("debug wrong")
+	}
+	m.rec[m.typ] += e
+	m.rec[total] += e
+	r := m.typ
+	m.typ = idle
+	return r
+}
+
+func (m *monitor) get() map[Stat]uint64 {
+	m.Lock()
+	defer m.Unlock()
+	res := make(map[Stat]uint64)
+	for i := 1; i < count; i++ {
+		res[StatDurationTriage+Stat(i)-1] = uint64(m.rec[i].Nanoseconds())
+		m.rec[i] = 0
+	}
+	return res
 }
 
 var _debug bool = true

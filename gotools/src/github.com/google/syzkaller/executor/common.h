@@ -709,9 +709,7 @@ static void loop(void)
 #if SYZ_EXECUTOR && SYZ_EXECUTOR_USES_SHMEM
 			close(kOutPipeFd);
 #endif
-			enable_kssb();
 			execute_one();
-			disable_kssb();
 #if SYZ_HAVE_CLOSE_FDS && !SYZ_THREADED
 			close_fds();
 #endif

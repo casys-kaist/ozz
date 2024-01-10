@@ -221,6 +221,7 @@ static bool flag_threaded;
 static bool flag_coverage_filter;
 
 static bool flag_turn_on_kssb;
+static bool flag_collect_access;
 
 // If true, then executor should write the comparisons data to fuzzer.
 static bool flag_comparisons;
@@ -789,6 +790,7 @@ void receive_execute()
 	flag_threaded = true;
 	flag_coverage_filter = req.exec_flags & (1 << 5);
 	flag_turn_on_kssb = req.exec_flags & (1 << 10);
+	flag_collect_access = req.exec_flags & (1 << 11);
 	if (flag_turn_on_kssb)
 		// Enabling kssb makes syscalls about 10x slower.
 		slowdown_scale *= 10;
@@ -975,10 +977,32 @@ bool run_in_epoch(thread_t* th)
 	return __run_in_epoch(th->epoch, global_epoch);
 }
 
+void prepare_kssb(void)
+{
+	int num_th = (flag_turn_on_kssb ? 2 : 1);
+	// After enabling kssb, syscalls can be slow down 10x, meaning
+	// creating threads also takes so much time. Preparew worker
+	// threads to reduce the thread-creating latency.
+	for (int i = 0; i < num_th; i++) {
+		thread_t* th = get_thread(i);
+		if (!th->created)
+			thread_create(th, i, cover_collection_required());
+	}
+	WARN_ON_NOT_NULL(hypercall(HCALL_RESET, 0, 0, 0), "HCALL_RESET");
+	if (flag_collect_access)
+		enable_kssb();
+}
+
+void finalize_kssb(void)
+{
+	if (flag_collect_access)
+		disable_kssb();
+}
+
 // execute_one executes program stored in input_data.
 void execute_one()
 {
-	WARN_ON_NOT_NULL(hypercall(HCALL_RESET, 0, 0, 0), "HCALL_RESET");
+	prepare_kssb();
 #if SYZ_EXECUTOR_USES_SHMEM
 	realloc_output_data();
 	output_pos = output_data;
@@ -1230,6 +1254,7 @@ void execute_one()
 		sleep_ms(kSleepMs);
 		write_extra_output();
 	}
+	finalize_kssb();
 }
 
 void feed_flush_vector(int* vector, int vector_size, struct kssb_flush_table_entry* table, int table_size)
@@ -1637,7 +1662,6 @@ void write_extra_output()
 void thread_create(thread_t* th, int id, bool need_coverage)
 {
 	debug("creating a thread %d (need_coverage: %d)\n", id, need_coverage);
-	disable_kssb();
 	th->created = true;
 	th->id = id;
 	th->executing = false;
@@ -1655,7 +1679,6 @@ void thread_create(thread_t* th, int id, bool need_coverage)
 	event_set(&th->done);
 	if (flag_threaded)
 		thread_start(worker_thread, th);
-	enable_kssb();
 }
 
 void thread_mmap_cover(cover_t* cov)

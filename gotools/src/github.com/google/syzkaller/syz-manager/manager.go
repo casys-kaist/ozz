@@ -55,6 +55,7 @@ var (
 	flagDumpCoverage     = flag.Bool("dump-coverage", false, "for experiments. dump both coverages periodically")
 	flagOneShot          = flag.Bool("one-shot", false, "quit after a crash occurs")
 	flagRandomReordering = flag.Bool("random-reordering", false, "")
+	flagTraceLock        = flag.Bool("trace-lock", true, "")
 )
 
 type Manager struct {
@@ -115,6 +116,8 @@ type Manager struct {
 	coverFilter        map[uint32]uint32
 	coverFilterBitmap  []byte
 	modulesInitialized bool
+
+	durations []int64
 
 	assetStorage *asset.Storage
 	usedKnotFile *os.File
@@ -197,6 +200,11 @@ func RunManager(cfg *mgrconfig.Config) {
 
 	crashdir := filepath.Join(cfg.Workdir, fmt.Sprintf("crashes-%v", hex.EncodeToString(hsh)))
 	osutil.MkdirAll(crashdir)
+	crashSym := filepath.Join(cfg.Workdir, fmt.Sprintf("crashes"))
+	if _, err := os.Lstat(crashSym); err == nil {
+		os.Remove(crashSym)
+	}
+	os.Symlink(crashdir, crashSym)
 
 	reporter, err := report.NewReporter(cfg)
 	if err != nil {
@@ -233,6 +241,7 @@ func RunManager(cfg *mgrconfig.Config) {
 		usedFiles:        make(map[string]time.Time),
 		saturatedCalls:   make(map[string]bool),
 		seedType:         *flagSeed,
+		durations:        make([]int64, 10),
 		binImage:         binImage,
 	}
 
@@ -998,6 +1007,7 @@ func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Re
 		Generate:         *flagGen,
 		Pinning:          true,
 		RandomReordering: *flagRandomReordering,
+		TraceLock:        *flagTraceLock,
 		Optional: &instance.OptionalFuzzerArgs{
 			Slowdown:   mgr.cfg.Timeouts.Slowdown,
 			RawCover:   mgr.cfg.RawCover,
@@ -1569,9 +1579,11 @@ func (mgr *Manager) newInput(inp rpctype.Input, sign signal.Signal) bool {
 			Cover:   inp.Cover,
 			Updates: []CorpusItemUpdate{update},
 		}
-		mgr.corpusDB.Save(sig, inp.Prog, 0)
-		if err := mgr.corpusDB.Flush(); err != nil {
-			log.Logf(0, "failed to save corpus database: %v", err)
+		if *flagCorpus {
+			mgr.corpusDB.Save(sig, inp.Prog, 0)
+			if err := mgr.corpusDB.Flush(); err != nil {
+				log.Logf(0, "failed to save corpus database: %v", err)
+			}
 		}
 	}
 	return true
@@ -1589,10 +1601,6 @@ func (mgr *Manager) newScheduledInput(inp rpctype.ScheduledInput, sign interleav
 	if old, ok := mgr.scheduledCorpus[sig]; ok {
 		sign.Merge(old.Signal.Deserialize())
 		old.Signal = sign.Serialize()
-		var cov interleaving.Cover
-		cov.Merge(old.Cover)
-		cov.Merge(inp.Cover)
-		old.Cover = cov.Serialize()
 		mgr.scheduledCorpus[sig] = old
 	} else {
 		mgr.scheduledCorpus[sig] = inp
@@ -1728,13 +1736,12 @@ func (mgr *Manager) dumpCoverage() {
 		codeCovFilename         = "code"
 		interleavingCovFilename = "knot"
 		hintCovFilename         = "hint"
-		commCovFilename         = "communication"
 
 		instCountFilename     = "instCount"
 		instBlacklistFilename = "instBlacklist"
 	)
 
-	codecov, intcov, hintcov, commcov := mgr.serializeCoverage()
+	codecov, intcov, hintcov := mgr.serializeCoverage()
 	instCount, instBlacklist := mgr.serializeInstInfo()
 
 	dir := filepath.Join(mgr.cfg.Workdir, coverageDir, hex.EncodeToString(mgr.kernelHash))
@@ -1743,19 +1750,18 @@ func (mgr *Manager) dumpCoverage() {
 	mgr.dumpCoverageToFile(dir, codeCovFilename, codecov)
 	mgr.dumpCoverageToFile(dir, interleavingCovFilename, intcov)
 	mgr.dumpCoverageToFile(dir, hintCovFilename, hintcov)
-	mgr.dumpCoverageToFile(dir, commCovFilename, commcov)
 
 	mgr.dumpCoverageToFile(dir, instCountFilename, instCount)
 	mgr.dumpCoverageToFile(dir, instBlacklistFilename, instBlacklist)
 }
 
-func (mgr *Manager) serializeCoverage() (bytes.Buffer, bytes.Buffer, bytes.Buffer, bytes.Buffer) {
+func (mgr *Manager) serializeCoverage() (bytes.Buffer, bytes.Buffer, bytes.Buffer) {
 	mgr.serv.mu.Lock()
 	defer mgr.serv.mu.Unlock()
 
 	start := time.Now()
 
-	var codecov, intcov, hintcov, commcov bytes.Buffer
+	var codecov, intcov, hintcov bytes.Buffer
 
 	code := mgr.serv.corpusCover.Serialize()
 	for _, cc := range code {
@@ -1774,7 +1780,7 @@ func (mgr *Manager) serializeCoverage() (bytes.Buffer, bytes.Buffer, bytes.Buffe
 
 	log.Logf(0, "Serializing coverage takes %v", time.Since(start))
 
-	return codecov, intcov, hintcov, commcov
+	return codecov, intcov, hintcov
 }
 
 func (mgr *Manager) serializeInstInfo() (bytes.Buffer, bytes.Buffer) {
@@ -1790,6 +1796,10 @@ func (mgr *Manager) serializeInstInfo() (bytes.Buffer, bytes.Buffer) {
 	return instCount, instBlacklist
 }
 
+func (mgr *Manager) getPhase() int {
+	return mgr.phase
+}
+
 func (mgr *Manager) dumpCoverageToFile(dir, filename string, cov bytes.Buffer) {
 	codef, err := os.OpenFile(filepath.Join(dir, filename), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, osutil.DefaultFilePerm)
 	if err != nil {
@@ -1798,14 +1808,6 @@ func (mgr *Manager) dumpCoverageToFile(dir, filename string, cov bytes.Buffer) {
 	if _, err := codef.Write(cov.Bytes()); err != nil {
 		log.Fatalf("failed to write coverage to file (%s): %v", filename, err)
 	}
-}
-
-func (mgr *Manager) recordKnot(knot interleaving.Knot) {
-	// XXX: Tentative implementation. Definitely terrible.
-	mgr.usedKnotFile.WriteString(
-		fmt.Sprintf("%x --> %x\n%x --> %x\n---------------------",
-			knot[0].Former().Inst, knot[0].Latter().Inst,
-			knot[1].Former().Inst, knot[1].Latter().Inst))
 }
 
 func publicWebAddr(addr string) string {

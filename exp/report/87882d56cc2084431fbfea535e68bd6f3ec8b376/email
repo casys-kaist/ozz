@@ -1,0 +1,52 @@
+Hello,
+
+It seems watch_queue_set_size() and post_one_notification() miss
+memory barriers, potentially causing a kernel crash in the following
+scenario:
+
+CPU0                           CPU1
+watch_queue_set_size()         post_one_notification()
+-----                          -----
+wqueue->notes_bitmap;
+wqueue->nr_notes = nr_notes;
+                               // In find_first_bit()
+                               // In _find_first_bit()
+                               for (idx = 0;
+                                    idx * BITS_PER_LONG < wqueue->nr_notes;
+                                    idx++) {
+                                   wqueue->notes_bitmap[idx];
+                               }
+
+In the above scenario, it seems that nothing prevents reordering of
+accesses to wqueue->notes_bitmap and wqueue->nr_notes in both
+functions.
+
+Our research prototype found the following issue, which seems to be
+due to the above scenario.
+
+BUG: kernel NULL pointer dereference, address: 0000000000000000
+<...>
+ _find_first_bit+0x18d/0x1a0 lib/find_bit.c:101
+ find_first_bit include/linux/find.h:208 [inline]
+ post_one_notification+0x197/0xbd0 kernel/watch_queue.c:115
+ __post_watch_notification+0x5ac/0x1080 kernel/watch_queue.c:225
+ post_watch_notification include/linux/watch_queue.h:108 [inline]
+ notify_key security/keys/internal.h:197 [inline]
+ __key_update security/keys/key.c:775 [inline]
+ __key_create_or_update+0xec0/0xfb0 security/keys/key.c:968
+ key_create_or_update+0x3e/0x50 security/keys/key.c:1011
+ __do_sys_add_key security/keys/keyctl.c:134 [inline]
+ __se_sys_add_key+0x2f3/0x3f0 security/keys/keyctl.c:74
+ do_syscall_x64 arch/x86/entry/common.c:51 [inline]
+ do_syscall_64+0x50/0xa0 arch/x86/entry/common.c:82
+ entry_SYSCALL_64_after_hwframe+0x63/0xcd
+
+
+Please note that this issue is found by a research prototype which
+significantly transforms a kernel binary. So, I can't guarantee that
+the issue is not a false positive, although I tried my best to
+analyze and understand the issue.
+
+
+Best regards,
+Dae R. Jeong

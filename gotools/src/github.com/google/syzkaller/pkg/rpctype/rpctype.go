@@ -25,7 +25,6 @@ type Input struct {
 
 type ScheduledInput struct {
 	Prog   []byte
-	Cover  []uint32
 	Signal interleaving.SerialSignal
 }
 
@@ -99,6 +98,7 @@ type PollRes struct {
 	MaxSignal       signal.Serial
 	MaxInterleaving interleaving.SerialSignal
 	InstBlacklist   []uint32
+	ManagerPhase    int
 }
 
 type RunnerConnectArgs struct {
@@ -217,8 +217,4 @@ type RunTestDoneArgs struct {
 	Output []byte
 	Info   []*ipc.ProgInfo
 	Error  string
-}
-
-type SendUsedKnotsArg struct {
-	Insts [][]uint32
 }

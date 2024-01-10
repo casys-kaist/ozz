@@ -202,7 +202,7 @@ private:
   bool isIRQEntryOfTargetArch(Function &F);
   bool isSyscallEntryOfTargetArch(Function &F);
   BasicBlock *SSBDoEmulateHelper(Instruction *I);
-  void instrumentHelper(Instruction *I, FunctionCallee callback,
+  void instrumentHelper(Instruction *I, FunctionCallee *callbacks, int count,
                         bool requireReturnAddress);
   void SetNoSanitizeMetadata(Instruction *I) {
     I->setMetadata(I->getModule()->getMDKindID("nosanitize"),
@@ -224,6 +224,7 @@ private:
   FunctionCallee SSBLoad[kNumberOfAccessSizes];
   FunctionCallee SSBStore[kNumberOfAccessSizes];
   FunctionCallee SSBFlush;
+  FunctionCallee SSBLfence;
   FunctionCallee SSBRetCheck;
   FunctionCallee SSBFuncEntry;
   Constant *SSBDoEmulate;
@@ -661,7 +662,8 @@ bool SoftStoreBuffer::instrumentLoadOrStore(Instruction *I,
   return true;
 }
 
-void SoftStoreBuffer::instrumentHelper(Instruction *I, FunctionCallee callback,
+void SoftStoreBuffer::instrumentHelper(Instruction *I,
+                                       FunctionCallee *callbacks, int count,
                                        bool requireReturnAddress) {
   BasicBlock *ThenBlock = SSBDoEmulateHelper(I);
   IRBuilder<> IRBThen(ThenBlock->getFirstNonPHI());
@@ -673,7 +675,8 @@ void SoftStoreBuffer::instrumentHelper(Instruction *I, FunctionCallee callback,
         IRBThen.getInt32(0));
     Args.push_back(ReturnAddress);
   }
-  IRBThen.CreateCall(callback, Args);
+  for (int i = 0; i < count; i++)
+    IRBThen.CreateCall(callbacks[i], Args);
 }
 
 bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
@@ -682,7 +685,8 @@ bool SoftStoreBuffer::instrumentFlush(Instruction *I) {
 
   LLVM_DEBUG(dbgs() << "Instrumenting a membarrier callback at " << *I << "\n");
   NumInstrumentedFlushes++;
-  instrumentHelper(I, SSBFlush, false);
+  FunctionCallee callees[] = {SSBFlush, SSBLfence};
+  instrumentHelper(I, callees, 2, false);
   return true;
 }
 
@@ -692,7 +696,7 @@ bool SoftStoreBuffer::instrumentRetCheck(Instruction *I) {
     return false;
   LLVM_DEBUG(dbgs() << "Instrumenting a retchk callback at " << *I << "\n");
   NumInstrumentedRetCheck++;
-  instrumentHelper(I, SSBRetCheck, true);
+  instrumentHelper(I, &SSBRetCheck, 1, true);
   return true;
 }
 
@@ -704,7 +708,7 @@ bool SoftStoreBuffer::instrumentFuncEntry(Instruction *I) {
   LLVM_DEBUG(dbgs() << "Instrumenting an function-entry callback at " << *I
                     << "\n");
   NumInstrumentedFuncEntry++;
-  instrumentHelper(I, SSBFuncEntry, true);
+  instrumentHelper(I, &SSBFuncEntry, 1, true);
   return true;
 }
 
@@ -758,6 +762,8 @@ void SoftStoreBuffer::initialize(Module &M) {
         M.getOrInsertFunction(LoadName, Attr, IntNTy, IRB.getInt8PtrTy());
     SmallString<32> FlushName("__ssb_" + TargetMemoryModelStr + "_flush");
     SSBFlush = M.getOrInsertFunction(FlushName, Attr, IRB.getVoidTy());
+    SmallString<32> LfenceName("__ssb_" + TargetMemoryModelStr + "_lfence");
+    SSBLfence = M.getOrInsertFunction(LfenceName, Attr, IRB.getVoidTy());
     SmallString<32> RetCheckName("__ssb_" + TargetMemoryModelStr + "_retchk");
     SSBRetCheck = M.getOrInsertFunction(RetCheckName, Attr, IRB.getVoidTy(),
                                         IRB.getInt8PtrTy());

@@ -60,13 +60,14 @@ type Fuzzer struct {
 	comparisonTracingEnabled bool
 	fetchRawCover            bool
 	randomReordering         bool
+	testLoadReordering       bool
 
 	corpusMu        sync.RWMutex
 	corpus          []*prog.Prog
 	corpusHashes    map[hash.Sig]struct{}
 	corpusPrios     []int64
 	sumPrios        int64
-	concurrentCalls []*prog.ConcurrentCalls
+	concurrentCalls [BinCount]map[*prog.ConcurrentCalls]struct{}
 
 	signalMu     sync.RWMutex
 	corpusSignal signal.Signal // signal of inputs in corpus
@@ -85,6 +86,9 @@ type Fuzzer struct {
 	// Mostly for debugging scheduling mutation. If generate is false,
 	// procs do not generate/mutate inputs but schedule.
 	generate bool
+	schedule bool
+
+	m monitor
 
 	checkResult *rpctype.CheckArgs
 	logMu       sync.Mutex
@@ -92,7 +96,7 @@ type Fuzzer struct {
 
 type FuzzerSnapshot struct {
 	corpus          []*prog.Prog
-	concurrentCalls []*prog.ConcurrentCalls
+	concurrentCalls [BinCount]map[*prog.ConcurrentCalls]struct{}
 	corpusPrios     []int64
 	sumPrios        int64
 	fuzzer          *Fuzzer
@@ -101,21 +105,37 @@ type FuzzerSnapshot struct {
 type Collection int
 
 const (
+	Bin1 = iota
+	Bin2
+	Bin4
+	Bin8
+	Bin16
+	BinLarge
+	BinCount
+)
+
+const (
 	// Stats of collected data
 	CollectionScheduleHint Collection = iota
 	CollectionThreadingHint
 	CollectionConcurrentCalls
-	CollectionPlug
-	CollectionUnplug
+	CollectionWQTriage
+	CollectionWQTriageCandidate
+	CollectionWQCandidate
+	CollectionWQSmash
+	CollectionWQThreading
 	CollectionCount
 )
 
 var collectionNames = [CollectionCount]string{
-	CollectionScheduleHint:    "schedule hint",
-	CollectionThreadingHint:   "threading hint",
-	CollectionConcurrentCalls: "concurrent calls",
-	CollectionPlug:            "plug",
-	CollectionUnplug:          "unplug",
+	CollectionScheduleHint:      "schedule hint",
+	CollectionThreadingHint:     "threading hint",
+	CollectionConcurrentCalls:   "concurrent calls",
+	CollectionWQTriage:          "workqueue triage",
+	CollectionWQTriageCandidate: "workqueue triage candidate",
+	CollectionWQCandidate:       "workqueue candidate",
+	CollectionWQSmash:           "workqueue smash",
+	CollectionWQThreading:       "workqueue threading",
 }
 
 type Stat int
@@ -133,22 +153,44 @@ const (
 	StatBufferTooSmall
 	StatThreading
 	StatSchedule
+	StatThreadWorkTimeout
+	StatDurationTriage
+	StatDurationCandidate
+	StatDurationSmash
+	StatDurationThreading
+	StatDurationGen
+	StatDurationFuzz
+	StatDurationSchedule
+	StatDurationCalc1
+	StatDurationCalc2
+	StatDurationTotal
 	StatCount
 )
 
 var statNames = [StatCount]string{
-	StatGenerate:       "exec gen",
-	StatFuzz:           "exec fuzz",
-	StatCandidate:      "exec candidate",
-	StatTriage:         "exec triage",
-	StatMinimize:       "exec minimize",
-	StatSmash:          "exec smash",
-	StatHint:           "exec hints",
-	StatSeed:           "exec seeds",
-	StatCollide:        "exec collide",
-	StatThreading:      "exec threadings",
-	StatSchedule:       "exec schedulings",
-	StatBufferTooSmall: "buffer too small",
+	StatGenerate:          "exec gen",
+	StatFuzz:              "exec fuzz",
+	StatCandidate:         "exec candidate",
+	StatTriage:            "exec triage",
+	StatMinimize:          "exec minimize",
+	StatSmash:             "exec smash",
+	StatHint:              "exec hints",
+	StatSeed:              "exec seeds",
+	StatCollide:           "exec collide",
+	StatThreading:         "exec threadings",
+	StatSchedule:          "exec schedulings",
+	StatBufferTooSmall:    "buffer too small",
+	StatThreadWorkTimeout: "threading work timeout",
+	StatDurationTriage:    "duration triage",
+	StatDurationCandidate: "duration candidate",
+	StatDurationSmash:     "duration smash",
+	StatDurationThreading: "duration threading",
+	StatDurationGen:       "duration gen",
+	StatDurationFuzz:      "duration fuzz",
+	StatDurationSchedule:  "duration schedule",
+	StatDurationCalc1:     "duration calc1",
+	StatDurationCalc2:     "duration calc2",
+	StatDurationTotal:     "duration total",
 }
 
 type OutputType int
@@ -190,24 +232,38 @@ func createIPCConfig(features *host.Features, config *ipc.Config) {
 	}
 }
 
+func setupKMemCov(traceLock bool) {
+	log.Logf(0, "Trace lock: %v", traceLock)
+	if !traceLock {
+		return
+	}
+	const fn = "/sys/kernel/debug/kmemcov_trace_lock"
+	data := []byte(fmt.Sprintf("%d", 1))
+	if err := osutil.WriteFile(fn, data); err != nil {
+		log.Logf(0, "Failed to setup kmemcov")
+	}
+}
+
 // nolint: funlen
 func main() {
 	golog.SetPrefix("[FUZZER] ")
 	debug.SetGCPercent(50)
 
 	var (
-		flagName             = flag.String("name", "test", "unique name for manager")
-		flagOS               = flag.String("os", runtime.GOOS, "target OS")
-		flagArch             = flag.String("arch", runtime.GOARCH, "target arch")
-		flagManager          = flag.String("manager", "", "manager rpc address")
-		flagProcs            = flag.Int("procs", 1, "number of parallel test processes")
-		flagOutput           = flag.String("output", "stdout", "write programs to none/stdout/dmesg/file")
-		flagTest             = flag.Bool("test", false, "enable image testing mode")      // used by syz-ci
-		flagRunTest          = flag.Bool("runtest", false, "enable program testing mode") // used by pkg/runtest
-		flagRawCover         = flag.Bool("raw_cover", false, "fetch raw coverage")
-		flagGen              = flag.Bool("gen", true, "generate/mutate inputs")
-		flagShifter          = flag.String("shifter", "./shifter", "path to the shifter")
-		flagRandomReordering = flag.Bool("random-reordering", false, "")
+		flagName               = flag.String("name", "test", "unique name for manager")
+		flagOS                 = flag.String("os", runtime.GOOS, "target OS")
+		flagArch               = flag.String("arch", runtime.GOARCH, "target arch")
+		flagManager            = flag.String("manager", "", "manager rpc address")
+		flagProcs              = flag.Int("procs", 1, "number of parallel test processes")
+		flagOutput             = flag.String("output", "stdout", "write programs to none/stdout/dmesg/file")
+		flagTest               = flag.Bool("test", false, "enable image testing mode")      // used by syz-ci
+		flagRunTest            = flag.Bool("runtest", false, "enable program testing mode") // used by pkg/runtest
+		flagRawCover           = flag.Bool("raw_cover", false, "fetch raw coverage")
+		flagGen                = flag.Bool("gen", true, "generate/mutate inputs")
+		flagShifter            = flag.String("shifter", "./shifter", "path to the shifter")
+		flagRandomReordering   = flag.Bool("random-reordering", false, "")
+		flagTraceLock          = flag.Bool("trace-lock", true, "")
+		flagTestLoadReordering = flag.Bool("test-load-reordering", false, "")
 	)
 	defer tool.Init()()
 	outputType := parseOutputType(*flagOutput)
@@ -307,6 +363,7 @@ func main() {
 		log.Logf(0, "%v: %v", feat.Name, feat.Reason)
 	}
 	createIPCConfig(r.CheckResult.Features, config)
+	setupKMemCov(*flagTraceLock)
 
 	if *flagRunTest {
 		runTest(target, manager, *flagName, config.Executor)
@@ -314,6 +371,10 @@ func main() {
 	}
 
 	shifter := readShifter(*flagShifter)
+	bins := [BinCount]map[*prog.ConcurrentCalls]struct{}{}
+	for bin := Bin1; bin < BinCount; bin++ {
+		bins[bin] = make(map[*prog.ConcurrentCalls]struct{})
+	}
 
 	needPoll := make(chan struct{}, 1)
 	needPoll <- struct{}{}
@@ -332,6 +393,7 @@ func main() {
 		corpusHashes:             make(map[hash.Sig]struct{}),
 		shifter:                  shifter,
 
+		concurrentCalls:    bins,
 		corpusInterleaving: make(interleaving.Signal),
 		maxInterleaving:    make(interleaving.Signal),
 		newInterleaving:    make(interleaving.Signal),
@@ -342,10 +404,11 @@ func main() {
 		checkResult: r.CheckResult,
 		generate:    *flagGen,
 
-		fetchRawCover:    *flagRawCover,
-		randomReordering: *flagRandomReordering,
-		noMutate:         r.NoMutateCalls,
-		stats:            make([]uint64, StatCount),
+		fetchRawCover:      *flagRawCover,
+		randomReordering:   *flagRandomReordering,
+		testLoadReordering: *flagTestLoadReordering,
+		noMutate:           r.NoMutateCalls,
+		stats:              make([]uint64, StatCount),
 	}
 	gateCallback := fuzzer.useBugFrames(r, *flagProcs)
 	fuzzer.gate = ipc.NewGate(2**flagProcs, gateCallback)
@@ -505,6 +568,10 @@ func (fuzzer *Fuzzer) pollLoop() {
 				stats[statNames[stat]] = v
 				execTotal += v
 			}
+			for s, v := range fuzzer.m.get() {
+				name := statNames[s]
+				stats[name] = v / 1000 / 1000 / 1000 // ns -> s
+			}
 			collections := make(map[string]uint64)
 			for collection := Collection(0); collection < CollectionCount; collection++ {
 				name := fuzzer.name + "-" + collectionNames[collection]
@@ -526,6 +593,9 @@ func (fuzzer *Fuzzer) serializeInstCount(instCount *map[uint32]uint32) []uint32 
 		ret = append(ret, k, v)
 	}
 	*instCount = make(map[uint32]uint32)
+	if len(fuzzer.instCount) != 0 {
+		panic("wrong")
+	}
 	return ret
 }
 
@@ -541,11 +611,7 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 		MaxInterleaving: fuzzer.grabNewInterleaving().Serialize(),
 		Stats:           stats,
 		Collections:     collections,
-
-		InstCount: fuzzer.serializeInstCount(&fuzzer.instCount),
-	}
-	if len(fuzzer.instCount) != 0 {
-		panic("wrong")
+		InstCount:       fuzzer.serializeInstCount(&fuzzer.instCount),
 	}
 
 	r := &rpctype.PollRes{}
@@ -556,6 +622,14 @@ func (fuzzer *Fuzzer) poll(needCandidates bool, stats, collections map[string]ui
 	maxInterleaving := r.MaxInterleaving.Deserialize()
 	log.Logf(1, "poll: candidates=%v inputs=%v signal=%v interleaving=%v",
 		len(r.Candidates), len(r.NewInputs), maxSignal.Len(), maxInterleaving.Len())
+
+	const phaseTriagedCorpus = 2
+	if r.ManagerPhase >= phaseTriagedCorpus {
+		fuzzer.schedule = true
+		for _, proc := range fuzzer.procs {
+			proc.startCollectingAccess()
+		}
+	}
 
 	fuzzer.signalMu.Lock()
 	for _, inst := range r.InstBlacklist {
@@ -623,6 +697,7 @@ func (fuzzer *Fuzzer) addCandidateInput(candidate rpctype.Candidate) {
 		p:     p,
 		flags: flags,
 	})
+	fuzzer.collectionWorkqueue(fuzzer.workQueue.stats())
 }
 
 func (fuzzer *Fuzzer) deserializeInput(inp []byte) *prog.Prog {
@@ -669,14 +744,20 @@ func (fuzzer *FuzzerSnapshot) chooseProgram(r *rand.Rand) *prog.Prog {
 }
 
 func (fuzzer *FuzzerSnapshot) chooseThreadedProgram(r *rand.Rand) *prog.ConcurrentCalls {
-	// TODO: Prioritize inputs according to the number of
-	// hints.
-	for retry := 0; len(fuzzer.concurrentCalls) != 0 && retry < 100; retry++ {
-		idx := r.Intn(len(fuzzer.concurrentCalls))
-		tp := fuzzer.concurrentCalls[idx]
-		if len(tp.Hint) != 0 {
-			return tp
+	fuzzer.fuzzer.corpusMu.Lock()
+	defer fuzzer.fuzzer.corpusMu.Unlock()
+	for bin := BinLarge; bin >= Bin1; bin-- {
+		l := len(fuzzer.concurrentCalls[bin])
+		if l == 0 {
+			continue
 		}
+		var tp *prog.ConcurrentCalls
+		for tp = range fuzzer.concurrentCalls[bin] {
+			break
+		}
+		// Now this violates the purpose of FuzzerSnapshot...
+		delete(fuzzer.concurrentCalls[bin], tp)
+		return tp
 	}
 	return nil
 }
@@ -706,16 +787,29 @@ func (fuzzer *Fuzzer) addInputToCorpus(p *prog.Prog, sign signal.Signal, sig has
 	}
 }
 
-func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hint []interleaving.Segment) {
-	log.Logf(2, "book a schedule guide")
-	fuzzer.addCollection(CollectionScheduleHint, uint64(len(hint)))
-	fuzzer.addCollection(CollectionConcurrentCalls, 1)
+func (fuzzer *Fuzzer) __bookScheduleGuide(tp *prog.ConcurrentCalls) {
+	if len(tp.Hint) == 0 {
+		panic("wrong")
+	}
+	// NOTE: assuming hints are sorted according to their scores
+	bin := pickBin(tp.Hint)
 	fuzzer.corpusMu.Lock()
 	defer fuzzer.corpusMu.Unlock()
-	fuzzer.concurrentCalls = append(fuzzer.concurrentCalls, &prog.ConcurrentCalls{
-		P:    p,
-		Hint: hint,
+	fuzzer.concurrentCalls[bin][tp] = struct{}{}
+}
+
+func (fuzzer *Fuzzer) bookScheduleGuide(p *prog.Prog, hints []interleaving.Hint) {
+	log.Logf(2, "book a schedule guide")
+	fuzzer.addCollection(CollectionScheduleHint, uint64(len(hints)))
+	fuzzer.addCollection(CollectionConcurrentCalls, 1)
+	sort.Slice(hints, func(i, j int) bool {
+		return hints[i].Score() < hints[j].Score()
 	})
+	tp := &prog.ConcurrentCalls{
+		P:    p,
+		Hint: hints,
+	}
+	fuzzer.__bookScheduleGuide(tp)
 }
 
 func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, sign interleaving.Signal) {
@@ -729,7 +823,6 @@ func (fuzzer *Fuzzer) addThreadedInputToCorpus(p *prog.Prog, sign interleaving.S
 }
 
 func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
-	fuzzer.removeExhaustedConcurrentCalls()
 	fuzzer.corpusMu.RLock()
 	defer fuzzer.corpusMu.RUnlock()
 	return FuzzerSnapshot{
@@ -738,28 +831,6 @@ func (fuzzer *Fuzzer) snapshot() FuzzerSnapshot {
 		fuzzer.corpusPrios,
 		fuzzer.sumPrios,
 		fuzzer,
-	}
-}
-
-func (fuzzer *Fuzzer) removeExhaustedConcurrentCalls() {
-	fuzzer.corpusMu.Lock()
-	removed := uint64(0)
-	ln := len(fuzzer.concurrentCalls)
-	for i := 0; i < ln; {
-		c := fuzzer.concurrentCalls[i]
-		if len(c.Hint) != 0 {
-			i++
-			continue
-		}
-		// remove the exhausted concurrent call
-		fuzzer.concurrentCalls[i] = fuzzer.concurrentCalls[ln-1]
-		fuzzer.concurrentCalls = fuzzer.concurrentCalls[:ln-1]
-		ln--
-	}
-	fuzzer.corpusMu.Unlock()
-	if removed != 0 {
-		log.Logf(2, "removed %d concurrent calls", removed)
-		fuzzer.subCollection(CollectionConcurrentCalls, removed)
 	}
 }
 
@@ -835,23 +906,35 @@ func (fuzzer *Fuzzer) checkNewCallSignal(p *prog.Prog, info *ipc.CallInfo, call 
 	return true
 }
 
-func (fuzzer *Fuzzer) newSegment(base *interleaving.Signal, segs []interleaving.Segment) []interleaving.Segment {
+func (fuzzer *Fuzzer) checkNewInterleavingSignal(sign interleaving.Signal) bool {
+	diff := fuzzer.maxInterleaving.Diff(sign)
+	if diff.Empty() {
+		return false
+	}
+	fuzzer.signalMu.RUnlock()
+	fuzzer.signalMu.Lock()
+	fuzzer.newInterleaving.Merge(diff)
+	fuzzer.maxInterleaving.Merge(diff)
+	fuzzer.signalMu.Unlock()
 	fuzzer.signalMu.RLock()
-	defer fuzzer.signalMu.RUnlock()
-	return base.DiffRaw(segs)
+	return true
 }
 
-func (fuzzer *Fuzzer) getNewKnot(knots []interleaving.Segment) []interleaving.Segment {
-	diff := fuzzer.newSegment(&fuzzer.maxInterleaving, knots)
-	if len(diff) == 0 {
-		return nil
+func (fuzzer *Fuzzer) getNewHints(hints []interleaving.Hint) []interleaving.Hint {
+	fuzzer.signalMu.RLock()
+	defer fuzzer.signalMu.RUnlock()
+	var i, total int
+	for i, total = 0, len(hints); i < total; i++ {
+		hint := hints[i]
+		sign := hint.Coverage()
+		if (!fuzzer.testLoadReordering && hint.Typ == interleaving.TestingLoadBarrier) || !fuzzer.checkNewInterleavingSignal(sign) {
+			total--
+			hints[i] = hints[total]
+			i--
+		}
 	}
-	sign := interleaving.FromCoverToSignal(diff)
-	fuzzer.signalMu.Lock()
-	fuzzer.newInterleaving.Merge(sign)
-	fuzzer.maxInterleaving.Merge(sign)
-	fuzzer.signalMu.Unlock()
-	return diff
+	hints = hints[:total]
+	return hints
 }
 
 func (fuzzer *Fuzzer) shutOffThreading(p *prog.Prog) bool {
@@ -896,26 +979,36 @@ func (fuzzer *Fuzzer) countInstructionInKnot(knot interleaving.Knot) {
 	}
 }
 
-func (fuzzer *Fuzzer) sendUsedKnots(used []interleaving.Segment) {
-	// XXX: At this point, we knot that instructions in thread0 were
-	// executed before instructions in thread1. As we want to track
-	// instruction addresses only, flatten the knot in a simple way.
-	a := rpctype.SendUsedKnotsArg{}
-	// XXX: Also we know that len(used) == 1 for now.
-	for _, knot0 := range used {
-		knot, ok := knot0.(interleaving.Knot)
-		if !ok {
-			panic("wrong")
+func (fuzzer *Fuzzer) collectionWorkqueue(tricand, cand, tri, smash, thr uint64) {
+	fuzzer.corpusMu.Lock()
+	defer fuzzer.corpusMu.Unlock()
+	fuzzer.collection[CollectionWQTriageCandidate] = tricand
+	fuzzer.collection[CollectionWQCandidate] = cand
+	fuzzer.collection[CollectionWQTriage] = tri
+	fuzzer.collection[CollectionWQSmash] = smash
+	fuzzer.collection[CollectionWQThreading] = thr
+}
+
+func pickBin(hints []interleaving.Hint) int {
+	maxBin := -1
+	pow := func(n int) int {
+		k := 1
+		for k < n {
+			k = k << 1
 		}
-		insts := []uint32{}
-		for _, comm := range knot {
-			insts = append(insts, comm.Former().Inst, comm.Latter().Inst)
+		return k
+	}
+	for _, hint := range hints {
+		bin := pow(hint.Score())
+		if maxBin < bin {
+			maxBin = bin
 		}
-		a.Insts = append(a.Insts, insts)
 	}
-	if err := fuzzer.manager.Call("Manager.SendUsedKnots", a, nil); err != nil {
-		log.Fatalf("failed to call Manager.Connect(): %v ", err)
+	if maxBin > BinLarge {
+		maxBin = BinLarge
 	}
+	log.Logf(2, "picking bin %d", maxBin)
+	return maxBin
 }
 
 func signalPrio(p *prog.Prog, info *ipc.CallInfo, call int) (prio uint8) {

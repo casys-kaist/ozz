@@ -4,144 +4,149 @@ import (
 	"github.com/google/syzkaller/pkg/interleaving"
 )
 
-type chunk interleaving.SerialAccess
-
-// TODO: Not sure the current implementation is what we
-// want. Currently, ComputeHints assumes that two given serials are
-// executed in order and finds out hints with strict timestamps
-// assumed. Although this is fine for delaying stores, but we may need
-// to change it if we want to prefetching loads.
-
-type temp struct {
-	inst, addr uint32
-}
-
-func ComputeHints0(seq []interleaving.SerialAccess) []interleaving.Segment {
+func ComputeHints0(seq []interleaving.SerialAccess) []interleaving.Hint {
 	if len(seq) != 2 {
 		return nil
 	}
-	// TODO: optimzie
-	copySeq := func(s0, s1 interleaving.SerialAccess, first int) []interleaving.SerialAccess {
-		ht := make(map[temp]struct{})
-		serial0 := interleaving.SerialAccess{}
-		for i, acc := range s0 {
-			t := temp{inst: acc.Inst, addr: acc.Addr}
-			if _, ok := ht[t]; ok {
-				continue
-			}
-			ht[t] = struct{}{}
-			acc.Timestamp = uint32(i)
-			acc.Thread = uint64(first)
-			serial0 = append(serial0, acc)
-		}
-		serial1 := interleaving.SerialAccess{}
-		for i, acc := range s1 {
-			acc.Timestamp = uint32(i + len(serial0))
-			acc.Thread = uint64(1 - first)
-			serial1 = append(serial1, acc)
-		}
-		return []interleaving.SerialAccess{serial0, serial1}
-	}
-	h0 := ComputeHints(copySeq(seq[0], seq[1], 0))
-	h1 := ComputeHints(copySeq(seq[1], seq[0], 1))
+	h0 := computeHints(copySeq(seq[0], seq[1], 0))
+	h1 := computeHints(copySeq(seq[1], seq[0], 1))
 	return append(h0, h1...)
 }
 
-func ComputeHints(seq []interleaving.SerialAccess) []interleaving.Segment {
-	// XXX: This function assumes that seq[0] was executed before
+func ComputeHints(seq []interleaving.SerialAccess) []interleaving.Hint {
+	if len(seq) != 2 {
+		return nil
+	}
+	return computeHints(copySeq(seq[0], seq[1], 0))
+}
+
+func copySeq(s0, s1 interleaving.SerialAccess, first int) (seq []interleaving.SerialAccess) {
+	// TODO: Optimize. copySeq() unnecessary overhead to copy serials
+	seq = make([]interleaving.SerialAccess, 2)
+	for i, acc := range s0 {
+		acc.Timestamp = uint32(i)
+		acc.Thread = uint64(first)
+		seq[0] = append(seq[0], acc)
+	}
+	for i, acc := range s1 {
+		acc.Timestamp = uint32(i + len(seq[0]))
+		acc.Thread = uint64(1 - first)
+		seq[1] = append(seq[1], acc)
+	}
+	return seq
+}
+
+func computeHints(seq []interleaving.SerialAccess) []interleaving.Hint {
+	// NOTE: This function assumes that seq[0] was executed before
 	// seq[1]
 	if len(seq) != 2 {
 		return nil
 	}
-	cs0, cs1 := chunknize(seq[0]), chunknize(seq[1])
-	// TODO: optimize
-	pso := computeHintsPSO(cs0, cs1, seq)
-	tso := computeHintsTSO(cs0, cs1, seq)
-
-	ht := make(map[uint64]struct{})
-	res := []interleaving.Segment{}
-	// TODO: Is this a bug? Why do we have dupped knots in {pso,tso}?
-	dedup_append := func(knots []interleaving.Segment) {
-		for _, knot := range knots {
-			hsh := knot.Hash()
-			if _, ok := ht[hsh]; ok {
-				continue
-			}
-			ht[hsh] = struct{}{}
-			res = append(res, knot)
-		}
-	}
-	dedup_append(pso)
-	dedup_append(tso)
-	return res
-}
-
-func chunknize(serial interleaving.SerialAccess) []chunk {
-	chunks := []chunk{}
-	start := 0
-	size := 0
-	create, has_store := false, false
-	for i, acc := range serial {
-		if acc.Typ == interleaving.TypeStore {
-			has_store = true
-		} else if acc.Typ == interleaving.TypeFlush {
-			size = i - start
-			create = true
-		} else if i == len(serial)-1 {
-			size = len(serial) - start
-			create = true
-		}
-
-		if create {
-			if size > 1 && has_store {
-				new := append(chunk{}, serial[start:i]...)
-				chunks = append(chunks, new)
-			}
-			start = i + 1
-			create, has_store = false, false
-		}
-	}
-	return chunks
-}
-
-func computeHintsPSO(cs0, cs1 []chunk, seq []interleaving.SerialAccess) []interleaving.Segment {
-	knots := []interleaving.Segment{}
-	for _, c0 := range cs0 {
-		knots = append(knots, __computeHints(c0, chunk(seq[1]), psoOpts)...)
-	}
-	return knots
-}
-
-var psoOpts = KnotterOpts{
-	Flags: FlagWantMessagePassing,
-}
-
-func computeHintsTSO(cs0, cs1 []chunk, seq []interleaving.SerialAccess) []interleaving.Segment {
-	knots := []interleaving.Segment{}
-	for _, c0 := range cs0 {
-		for _, c1 := range cs1 {
-			knots = append(knots, __computeHints(c0, c1, tsoOpts)...)
-		}
-	}
-	return knots
-}
-
-func __computeHints(c0, c1 chunk, opts KnotterOpts) []interleaving.Segment {
-	commonFlags := (FlagStrictTimestamp |
-		FlagWantParallel |
-		FlagDifferentAccessTypeOnly |
-		FlagMultiVariableOnly)
-	opts.Flags |= commonFlags
-	knotter := GetKnotter(opts)
-	knotter.AddSequentialTrace(
-		[]interleaving.SerialAccess{
-			interleaving.SerializeAccess(c0),
-			interleaving.SerializeAccess(c1),
-		})
+	knotter := Knotter{}
+	knotter.AddSequentialTrace(seq)
 	knotter.ExcavateKnots()
-	return knotter.GetKnots()
+	knots := knotter.knots
+	testingStoreBarrier := knotter.testingStoreBarrier
+	testingLoadBarrier := knotter.testingLoadBarrier
+
+	hints := []interleaving.Hint{}
+	for hsh, grouped := range knots {
+		for _, knot := range grouped {
+			if hsh != knot[1].Hash() {
+				panic("wrong")
+			}
+		}
+		if len(grouped) == 0 {
+			continue
+		}
+		critComm := grouped[0][1]
+		hints0 := aggregateHints(critComm, grouped, testingStoreBarrier, testingLoadBarrier)
+		hints = append(hints, hints0...)
+	}
+	return hints
 }
 
-var tsoOpts = KnotterOpts{
-	Flags: FlagWantOOTA,
+func aggregateHints(critComm interleaving.Communication, grouped []interleaving.Knot, testingStoreBarrier, testingLoadBarrier map[uint64]struct{}) []interleaving.Hint {
+	hints := []interleaving.Hint{}
+	for _, opt := range []struct {
+		cond map[uint64]struct{}
+		typ  interleaving.HintType
+	}{
+		{testingStoreBarrier, interleaving.TestingStoreBarrier},
+		{testingLoadBarrier, interleaving.TestingLoadBarrier},
+	} {
+		hint, ok := aggregateHintWithConditions(critComm, grouped, opt.cond, opt.typ)
+		if ok {
+			hints = append(hints, hint)
+		}
+	}
+	return hints
+}
+
+func aggregateHintWithConditions(critComm interleaving.Communication, grouped []interleaving.Knot, conds map[uint64]struct{}, typ interleaving.HintType) (hint interleaving.Hint, ok bool) {
+	// TODO: Too many unnecessary memory operations (e.g., using a
+	// map, ...)?
+	type instsT map[uint32]interleaving.Access
+	f := func(insts instsT, acc interleaving.Access) {
+		if _, ok := insts[acc.Addr]; !ok {
+			insts[acc.Addr] = acc
+			return
+		}
+		acc0 := insts[acc.Addr]
+		if acc0.Timestamp > acc.Timestamp {
+			return
+		}
+		insts[acc.Addr] = acc
+	}
+	toSlice := func(insts instsT) []interleaving.Access {
+		ret := make([]interleaving.Access, 0, len(insts))
+		for _, acc := range insts {
+			ret = append(ret, acc)
+		}
+		return ret
+	}
+	preceding := make(instsT)
+	following := make(instsT)
+	for _, knot := range grouped {
+		if critComm.Hash() != knot[1].Hash() {
+			panic("wrong")
+		}
+		if _, ok := conds[knot.Hash()]; ok {
+			comm := knot[0]
+			f(preceding, comm.Former())
+			f(following, comm.Latter())
+		}
+	}
+	if len(preceding) == 0 || len(following) == 0 {
+		return
+	}
+	hint = interleaving.Hint{
+		PrecedingInsts: toSlice(preceding),
+		FollowingInsts: toSlice(following),
+		CriticalComm:   critComm,
+		Typ:            typ,
+	}
+	if !sanitizeHint(hint) {
+		// if sanitizeHint() fails, hint contains nothing to reorder
+		return
+	}
+	ok = true
+	return
+}
+
+func sanitizeHint(hint interleaving.Hint) bool {
+	var accs []interleaving.Access
+	var want uint32
+	switch hint.Typ {
+	case interleaving.TestingStoreBarrier:
+		accs, want = hint.PrecedingInsts, interleaving.TypeStore
+	case interleaving.TestingLoadBarrier:
+		accs, want = hint.FollowingInsts, interleaving.TypeLoad
+	}
+	for _, acc := range accs {
+		if acc.Typ == want {
+			return true
+		}
+	}
+	return false
 }

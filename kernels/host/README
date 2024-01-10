@@ -67,3 +67,12 @@ into
 I also changed the directory name of the linux source code (i.e.,
 kernels/linux) to some randome name (i.e., kernels/asdf) because
 __stringify() macro somehow changes the string "linux" into "1".
+
+
+# For ArchLinux
+
+I use ArchLinux and to build the custom ArchLinux kernel, I rely on
+ArchBuildSystem [1]. The arch/ directory contains a patch that I use
+for the kernel 6.5.7-arch1.
+
+[1]: https://wiki.archlinux.org/title/Kernel/Arch_build_system

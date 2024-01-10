@@ -1,0 +1,59 @@
+Hello,
+
+It seems xsk_poll() is missing a read memory barrer. In the concurrent
+execution of setsockopt(XDP_{RX,TX}_RING) and xsk_poll(), xsk_poll()
+may crash due to instruction reordering:
+
+CPU0                                CPU1
+xsk_setsockopt(XDP_{RX,TX}_RING)    xsk_poll()
+-----                               -----
+// in xskq_create
+q = kzalloc()
+q->ring = vmalloc_user();    - (1)
+// in xsk_init_queue
+smp_wmb();
+WRITE_ONCE(xs->{rx, tx}, q); - (2)
+                                    skip_tx:
+                                    if (xs->rx (3) && !xskq_prod_is_empty(xs->rx) (4))
+                                        mask |= EPOLLIN | EPOLLRDNORM;
+                                    if (xs->tx (5) && xsk_tx_writeable(xs) (6))
+                                        mask |= EPOLLOUT | EPOLLWRNORM;
+
+(I expand code for brevity) In this execution, xsk_setsockopt() use a
+write memory barrier which prevents reordering between (1) and (2),
+but in xsk_poll(), nothing prevents reordering between (3) and (4),
+and (5) and (6).
+
+I think we need something like this. Could you check this please?
+
+diff --git a/net/xdp/xsk.c b/net/xdp/xsk.c
+index 55f8b9b0e06d..3b4f9453e421 100644
+--- a/net/xdp/xsk.c
++++ b/net/xdp/xsk.c
+@@ -914,6 +914,7 @@ static __poll_t xsk_poll(struct file *file, struct socket *sock,
+ 	struct sock *sk = sock->sk;
+ 	struct xdp_sock *xs = xdp_sk(sk);
+ 	struct xsk_buff_pool *pool;
++	struct xsk_queue *rx, *tx;
+ 
+ 	sock_poll_wait(file, sock, wait);
+ 
+@@ -932,9 +933,13 @@ static __poll_t xsk_poll(struct file *file, struct socket *sock,
+ 	}
+ 
+ skip_tx:
+-	if (xs->rx && !xskq_prod_is_empty(xs->rx))
++	rx = xs->rx;
++	tx = xs->tx;
++	/* Matches the smp_wmb() in xsk_init_queue */
++	smp_rmb();
++	if (rx && !xskq_prod_is_empty(rx))
+ 		mask |= EPOLLIN | EPOLLRDNORM;
+-	if (xs->tx && xsk_tx_writeable(xs))
++	if (tx && xsk_tx_writeable(xs))
+ 		mask |= EPOLLOUT | EPOLLWRNORM;
+ 
+ 	rcu_read_unlock();
+
+Best regards,
+Dae R. Jeong

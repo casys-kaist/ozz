@@ -30,7 +30,7 @@ func MonitorMemUsage() {
 	log.Logf(0, "\tNumGC = %v\n", m.NumGC)
 }
 
-func (proc *Proc) powerSchedule(adjustPlug bool) {
+func (proc *Proc) powerSchedule() {
 	// Most of computation in proc.loop() is used to handle workqueue
 	// items. So proc.loop() has a little bit low chance to go fuzz
 	// (i.e., gen, fuzz, sched). To compensate it, execute
@@ -38,9 +38,6 @@ func (proc *Proc) powerSchedule(adjustPlug bool) {
 	proc.relieveMemoryPressure()
 	proc.investComputingToSchedule()
 	proc.balancer.print()
-	if adjustPlug {
-		proc.adjustPlug()
-	}
 }
 
 func (proc *Proc) relieveMemoryPressure() {
@@ -53,9 +50,13 @@ func (proc *Proc) relieveMemoryPressure() {
 	for cnt := 0; (needSchedule || needThreading) && cnt < 10; cnt++ {
 		log.Logf(2, "Relieving memory pressure schedule=%v threading=%v", needSchedule, needThreading)
 		if needSchedule {
+			proc.fuzzer.m.start(schedule)
 			proc.scheduleInput(fuzzerSnapshot)
+			proc.fuzzer.m.end()
 		} else if item := proc.fuzzer.workQueue.dequeueThreading(); item != nil {
+			proc.fuzzer.m.start(threading)
 			proc.threadingInput(item)
+			proc.fuzzer.m.end()
 		}
 		needSchedule, needThreading = proc.fuzzer.spillScheduling(), proc.fuzzer.spillThreading()
 	}
@@ -63,8 +64,16 @@ func (proc *Proc) relieveMemoryPressure() {
 
 func (proc *Proc) investComputingToSchedule() {
 	fuzzerSnapshot := proc.fuzzer.snapshot()
-	for cnt := 0; proc.needScheduling() && cnt < 5; cnt++ {
+	if len(fuzzerSnapshot.concurrentCalls) == 0 {
+		if item := proc.fuzzer.workQueue.dequeueThreading(); item != nil {
+			proc.fuzzer.m.start(threading)
+			proc.threadingInput(item)
+			proc.fuzzer.m.end()
+		}
+	} else {
+		proc.fuzzer.m.start(schedule)
 		proc.scheduleInput(fuzzerSnapshot)
+		proc.fuzzer.m.end()
 	}
 }
 
@@ -82,28 +91,6 @@ func (fuzzer *Fuzzer) spillThreading() bool {
 
 func (fuzzer *Fuzzer) spillScheduling() bool {
 	return fuzzer.spillCollection(CollectionScheduleHint, spillThreshold)
-}
-
-func (proc *Proc) adjustPlug() {
-	if proc.threadingPlugged {
-		proc.unplugThreading()
-	} else {
-		proc.plugThreading()
-	}
-}
-
-func (proc *Proc) unplugThreading() {
-	if proc.balancer.scheduled < uint64(float64(proc.balancer.executed)*0.4) {
-		proc.fuzzer.addCollection(CollectionUnplug, 1)
-		proc.threadingPlugged = false
-	}
-}
-
-func (proc *Proc) plugThreading() {
-	if proc.balancer.scheduled > uint64(float64(proc.balancer.executed)*0.7) {
-		proc.fuzzer.addCollection(CollectionPlug, 1)
-		proc.threadingPlugged = true
-	}
 }
 
 type balancer struct {
@@ -141,9 +128,9 @@ func (proc *Proc) needScheduling() bool {
 }
 
 func (bal balancer) needScheduling(r *rand.Rand) bool {
-	// prob = 1 / (1 + exp(-25 * (-x + 0.25))) where x = (scheduled/executed)
+	// prob = 1 / (1 + exp(-40 * (-x + 0.5))) where x = (scheduled/executed)
 	x := float64(bal.scheduled) / float64(bal.executed)
-	prob1000 := int(1 / (1 + math.Exp(-30*(-1*x+0.25))) * 1000)
+	prob1000 := int(1 / (1 + math.Exp(-40*(-1*x+0.5))) * 1000)
 	if prob1000 < 50 {
 		prob1000 = 50
 	}

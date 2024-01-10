@@ -7,20 +7,18 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/google/syzkaller/pkg/ssb"
+	"github.com/google/syzkaller/pkg/interleaving"
 )
 
 type Prog struct {
 	Target   *Target
 	Calls    []*Call
 	Comments []string
-	// TODO: Razzer mechanism. if Threaded is true, p is already
-	// threaded so we don't thread it more. This is possibly a
-	// limittation of Razzer. Improve this if possible.
 	Threaded bool
 	Contender
 	Schedule
-	ssb.FlushVector
+	interleaving.FlushVector
+	interleaving.Hint
 }
 
 // These properties are parsed and serialized according to the tag and the type

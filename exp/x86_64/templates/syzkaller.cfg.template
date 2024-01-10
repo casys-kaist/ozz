@@ -1,7 +1,7 @@
 {
 	"name": "kssb",
 	"target": "linux/amd64",
-	"http": "127.0.0.1:56741",
+	"http": ":56741",
 	"workdir": "$PWD/workdir",
 	"kernel_obj": "$KERNEL_X86_64",
 	"image": "$IMAGE_X86_64/bullseye.img",

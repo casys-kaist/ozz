@@ -58,6 +58,7 @@ const (
 	FlagThreaded                                   // use multiple threads to mitigate blocked syscalls
 	FlagEnableCoverageFilter                       // setup and use bitmap to do coverage filter
 	FlagTurnOnKSSB           ExecFlags = 1 << 10
+	FlagCollectAccess        ExecFlags = 1 << 11
 )
 
 type ExecOpts struct {

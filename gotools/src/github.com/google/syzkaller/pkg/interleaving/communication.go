@@ -1,9 +1,15 @@
 package interleaving
 
+import "fmt"
+
 // NOTE: Communicadtion[0] must/will happen before Communication[1]
 // NOTE: Assumption: Accesses's timestamps in SerialAccess have
 // the same order as the program order
 type Communication [2]Access
+
+func (comm Communication) String() string {
+	return fmt.Sprintf("%v -> %v", comm.Former(), comm.Latter())
+}
 
 func (inner Communication) Imply(outer Communication) bool {
 	// If inner --> outer
@@ -11,14 +17,6 @@ func (inner Communication) Imply(outer Communication) bool {
 	// inner[0]
 	//             inner[1]
 	//             outer[1]
-	chk := func(acc1, acc2 Access) bool {
-		return acc1.Context == CommonPath ||
-			acc2.Context == CommonPath ||
-			acc1.Context == acc2.Context
-	}
-	if !chk(inner.Former(), outer.Former()) || !chk(inner.Latter(), outer.Latter()) {
-		return false
-	}
 	return inner.Former().Timestamp >= outer.Former().Timestamp &&
 		inner.Latter().Timestamp <= outer.Latter().Timestamp
 }

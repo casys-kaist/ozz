@@ -15,6 +15,9 @@ enum kmemcov_access_type {
   KMEMCOV_ACCESS_STORE,
   KMEMCOV_ACCESS_LOAD,
   KMEMCOV_ACCESS_FLUSH,
+  KMEMCOV_ACCESS_LFENCE,
+  KMEMCOV_ACCESS_ACQUIRE,
+  KMEMCOV_ACCESS_RELEASE,
   KMEMCOV_ACCESS_TOTAL,
 };
 
@@ -51,11 +54,7 @@ void run(void (*fn)(void)) {
   n = __atomic_load_n((unsigned long *)&cover[0], __ATOMIC_RELAXED);
   printf("%d\n", n);
 
-  char c[KMEMCOV_ACCESS_TOTAL] = {
-      'W',
-      'R',
-      'F',
-  };
+  char c[KMEMCOV_ACCESS_TOTAL] = {'W', 'R', 'F', 'L', 'A', 'X'};
   for (i = 0; i < n; i++)
     printf("0x%lx    0x%lx    %c\n", cover[i + 1].inst, cover[i + 1].addr,
            c[cover[i + 1].type]);
