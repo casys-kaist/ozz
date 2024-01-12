@@ -101,7 +101,17 @@ func (hint Hint) invalidCriticalComm() bool {
 
 func (hint Hint) GenerateSchedule() []Access {
 	c := hint.CriticalComm
-	return []Access{c.Former()}
+	switch hint.Typ {
+	case TestingStoreBarrier:
+		return []Access{c.Former()}
+	case TestingLoadBarrier:
+		const callInstSize = 5
+		res := []Access{c.Latter(), c.Former()}
+		res[0].Inst -= callInstSize
+		return res
+	default:
+		panic("should not reach here")
+	}
 }
 
 func Select(s1, s2 []Hint) []Hint {

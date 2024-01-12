@@ -85,10 +85,20 @@ func generateFlushVectorForHint(hint Hint) FlushVector {
 		ht[i] = struct{}{}
 		table = append(table, tableEntry{inst: uext(i), value: v})
 	}
-	for _, acc := range hint.PrecedingInsts {
+
+	accs := []Access{}
+	var critPoint Access
+	switch hint.Typ {
+	case TestingStoreBarrier:
+		accs = hint.PrecedingInsts
+		critPoint = hint.CriticalComm.Former()
+	case TestingLoadBarrier:
+		accs = hint.FollowingInsts
+		critPoint = hint.CriticalComm.Latter()
+	}
+	for _, acc := range accs {
 		_add_entry(acc.Inst, 0)
 	}
-	critPoint := hint.CriticalComm.Former()
 	_add_entry(critPoint.Inst, 1)
 	return FlushVector{table: table}
 }
