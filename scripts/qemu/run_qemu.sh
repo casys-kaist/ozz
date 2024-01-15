@@ -30,7 +30,7 @@ fi
 
 if [ $ARCH = "x86_64" ]; then
 	QEMU=$QEMU_X86
-	IMAGE="$KERNELS_DIR/guest/images/x86_64/bullseye.img"
+	IMAGE="$KERNELS_DIR/guest/images/x86_64/bookworm.img"
 	KERNEL="$KERNELS_DIR/guest/builds/x86_64/arch/x86_64/boot/bzImage"
 	NETWORK="-netdev user,id=vnet0,hostfwd=tcp::$PORT-:22 \
 		-device virtio-net-pci,netdev=vnet0"
