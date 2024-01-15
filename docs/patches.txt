@@ -4,6 +4,7 @@ Below patches are introduced to fix race condition caused by missing
 memory barriers. It is not proved that our fuzzer can find them
 though. Analyze them if necessary.
 
+- c2da049f419417808466c529999170f5c3ef7d3d
 - 7ee47dcfff1835ff75a794d1075b6b5f5462cfed
 - 45247a85614b49b07b9dc59a4e6783b17e766ff2
 - c1102e9d49eb36c0be18cb3e16f6e46ffb717964
