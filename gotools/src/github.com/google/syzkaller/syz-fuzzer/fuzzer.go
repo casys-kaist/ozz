@@ -232,16 +232,23 @@ func createIPCConfig(features *host.Features, config *ipc.Config) {
 	}
 }
 
-func setupKMemCov(traceLock bool) {
-	log.Logf(0, "Trace lock: %v", traceLock)
-	if !traceLock {
-		return
+func setupRelrazzer(traceLock, enableLoadHistory bool) {
+	const (
+		traceLockFn   = "/sys/kernel/debug/kmemcov_trace_lock"
+		loadHistoryFn = "/sys/kernel/debug/kssb/load_prefetch_enabled"
+	)
+	setup := func(fn string, enable bool, print string) {
+		log.Logf(0, "%s: %v", print, enable)
+		if !enable {
+			return
+		}
+		data := []byte(fmt.Sprintf("%d", 1))
+		if err := osutil.WriteFile(fn, data); err != nil {
+			log.Logf(0, "Failed to setup: %v", print)
+		}
 	}
-	const fn = "/sys/kernel/debug/kmemcov_trace_lock"
-	data := []byte(fmt.Sprintf("%d", 1))
-	if err := osutil.WriteFile(fn, data); err != nil {
-		log.Logf(0, "Failed to setup kmemcov")
-	}
+	setup(traceLockFn, traceLock, "trace lock")
+	setup(loadHistoryFn, enableLoadHistory, "load history")
 }
 
 // nolint: funlen
@@ -363,7 +370,7 @@ func main() {
 		log.Logf(0, "%v: %v", feat.Name, feat.Reason)
 	}
 	createIPCConfig(r.CheckResult.Features, config)
-	setupKMemCov(*flagTraceLock)
+	setupRelrazzer(*flagTraceLock, *flagTestLoadReordering)
 
 	if *flagRunTest {
 		runTest(target, manager, *flagName, config.Executor)
