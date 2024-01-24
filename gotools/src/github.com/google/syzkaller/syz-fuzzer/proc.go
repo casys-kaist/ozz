@@ -152,6 +152,12 @@ retry:
 	if hint.Invalid() {
 		goto retry
 	}
+	switch hint.Typ {
+	case interleaving.TestingStoreBarrier:
+		atomic.AddUint64(&proc.fuzzer.stats[StatTestStoreReordering], 1)
+	case interleaving.TestingLoadBarrier:
+		atomic.AddUint64(&proc.fuzzer.stats[StatTestLoadReordering], 1)
+	}
 	if len(tp.Hint) != 0 {
 		proc.fuzzer.__bookScheduleGuide(tp)
 	} else {

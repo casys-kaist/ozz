@@ -164,33 +164,37 @@ const (
 	StatDurationCalc1
 	StatDurationCalc2
 	StatDurationTotal
+	StatTestStoreReordering
+	StatTestLoadReordering
 	StatCount
 )
 
 var statNames = [StatCount]string{
-	StatGenerate:          "exec gen",
-	StatFuzz:              "exec fuzz",
-	StatCandidate:         "exec candidate",
-	StatTriage:            "exec triage",
-	StatMinimize:          "exec minimize",
-	StatSmash:             "exec smash",
-	StatHint:              "exec hints",
-	StatSeed:              "exec seeds",
-	StatCollide:           "exec collide",
-	StatThreading:         "exec threadings",
-	StatSchedule:          "exec schedulings",
-	StatBufferTooSmall:    "buffer too small",
-	StatThreadWorkTimeout: "threading work timeout",
-	StatDurationTriage:    "duration triage",
-	StatDurationCandidate: "duration candidate",
-	StatDurationSmash:     "duration smash",
-	StatDurationThreading: "duration threading",
-	StatDurationGen:       "duration gen",
-	StatDurationFuzz:      "duration fuzz",
-	StatDurationSchedule:  "duration schedule",
-	StatDurationCalc1:     "duration calc1",
-	StatDurationCalc2:     "duration calc2",
-	StatDurationTotal:     "duration total",
+	StatGenerate:            "exec gen",
+	StatFuzz:                "exec fuzz",
+	StatCandidate:           "exec candidate",
+	StatTriage:              "exec triage",
+	StatMinimize:            "exec minimize",
+	StatSmash:               "exec smash",
+	StatHint:                "exec hints",
+	StatSeed:                "exec seeds",
+	StatCollide:             "exec collide",
+	StatThreading:           "exec threadings",
+	StatSchedule:            "exec schedulings",
+	StatBufferTooSmall:      "buffer too small",
+	StatThreadWorkTimeout:   "threading work timeout",
+	StatDurationTriage:      "duration triage",
+	StatDurationCandidate:   "duration candidate",
+	StatDurationSmash:       "duration smash",
+	StatDurationThreading:   "duration threading",
+	StatDurationGen:         "duration gen",
+	StatDurationFuzz:        "duration fuzz",
+	StatDurationSchedule:    "duration schedule",
+	StatDurationCalc1:       "duration calc1",
+	StatDurationCalc2:       "duration calc2",
+	StatDurationTotal:       "duration total",
+	StatTestStoreReordering: "store reordering",
+	StatTestLoadReordering:  "load reordering",
 }
 
 type OutputType int
