@@ -1,0 +1,88 @@
+BUG: unable to handle page fault for address: ffffffffffffffc0
+kssb_pso: Store buffer entries:
+kssb_pso: 0 entries
+#PF: supervisor read access in kernel mode
+#PF: error_code(0x0000) - not-present page
+PGD 12f2b067 P4D 12f2b067 PUD 12f2d067 PMD 0 
+Oops: 0000 [#1] PREEMPT SMP KASAN
+CPU: 2 PID: 10221 Comm: syz-executor.0 Not tainted 6.8.0-rc1-g3c16635962f2 #4
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
+RIP: 0010:__ssb_pso_load2+0xe/0x10 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/kssb/callback.h:132
+Code: ff ff 48 8b 44 24 18 44 8b 30 e9 1c fe ff ff 48 8b 44 24 18 4c 8b 30 80 3d 30 51 ab 16 00 75 7b e9 06 fe ff ff 48 8b 44 24 18 <44> 0f b7 30 80 3d 19 51 ab 16 00 75 64 e9 ef fd ff ff 48 8b 44 24
+RSP: 0018:ffffc9000d9379c0 EFLAGS: 00010097
+RAX: ffffffffffffffc0 RBX: 0000000000158fd3 RCX: ffffffffffffffc0
+RDX: 0000000000000237 RSI: 0000000000000200 RDI: 0000000000000000
+RBP: 0000000000158fd3 R08: 0000000000000000 R09: 0000000000000000
+R10: 0000000000000000 R11: ffffffff93129680 R12: 0000000000000000
+R13: ffffffff948aec70 R14: ffffffffffffffc0 R15: 0000000000000282
+FS:  00007f59e9b38700(0000) GS:ffff888062100000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: ffffffffffffffc0 CR3: 000000002d953000 CR4: 00000000003506f0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+Call Trace:
+ <TASK>
+ __ssb_pso_load2+0xe/0x10 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/kssb/callback.h:132
+ deliver_ptype_list_skb home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/net/core/dev.c:2216 [inline]
+ __netif_receive_skb_core+0x377b/0x4a70 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/net/core/dev.c:5485
+ __netif_receive_skb_one_core home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/net/core/dev.c:5532 [inline]
+ __netif_receive_skb+0xb8/0x580 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/net/core/dev.c:5648
+ netif_receive_skb_internal+0x1bd/0x6d0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/net/core/dev.c:5734
+ netif_receive_skb+0x28/0x60 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/net/core/dev.c:5793
+ tun_get_user+0x3caf/0x54f0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/net/tun.c:2002
+ tun_chr_write_iter+0x16c/0x230 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/drivers/net/tun.c:2048
+ call_write_iter home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/include/linux/fs.h:2085 [inline]
+ new_sync_write home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/read_write.c:497 [inline]
+ vfs_write+0xbe9/0x12a0 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/read_write.c:590
+ ksys_write+0x16f/0x300 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/read_write.c:643
+ __do_sys_write home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/read_write.c:655 [inline]
+ __se_sys_write home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/read_write.c:652 [inline]
+ __x64_sys_write+0xa9/0x110 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/fs/read_write.c:652
+ do_syscall_x64 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:53 [inline]
+ do_syscall_64+0xf9/0x240 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/arch/x86/entry/common.c:85
+ entry_SYSCALL_64_after_hwframe+0x63/0x6b
+RIP: 0033:0x41a9d7
+Code: 44 00 00 41 54 55 49 89 d4 53 48 89 f5 89 fb 48 83 ec 10 e8 8b fd ff ff 4c 89 e2 41 89 c0 48 89 ee 89 df b8 01 00 00 00 0f 05 <48> 3d 00 f0 ff ff 77 35 44 89 c7 48 89 44 24 08 e8 c4 fd ff ff 48
+RSP: 002b:00007f59e9b37b90 EFLAGS: 00000293 ORIG_RAX: 0000000000000001
+RAX: ffffffffffffffda RBX: 00000000000000c8 RCX: 000000000041a9d7
+RDX: 0000000000000226 RSI: 00000000200001c0 RDI: 00000000000000c8
+RBP: 00000000200001c0 R08: 0000000000000000 R09: 0000000000000000
+R10: 0000000000000226 R11: 0000000000000293 R12: 0000000000000226
+R13: 00000000007a1434 R14: 00000000007a1428 R15: 00007ffd4cad4f40
+ </TASK>
+Modules linked in:
+CR2: ffffffffffffffc0
+---[ end trace 0000000000000000 ]---
+RIP: 0010:__ssb_pso_load2+0xe/0x10 home/daeryong/workspace/relrazzer-project/relrazzer/kernels/linux/kernel/kssb/callback.h:132
+Code: ff ff 48 8b 44 24 18 44 8b 30 e9 1c fe ff ff 48 8b 44 24 18 4c 8b 30 80 3d 30 51 ab 16 00 75 7b e9 06 fe ff ff 48 8b 44 24 18 <44> 0f b7 30 80 3d 19 51 ab 16 00 75 64 e9 ef fd ff ff 48 8b 44 24
+RSP: 0018:ffffc9000d9379c0 EFLAGS: 00010097
+RAX: ffffffffffffffc0 RBX: 0000000000158fd3 RCX: ffffffffffffffc0
+RDX: 0000000000000237 RSI: 0000000000000200 RDI: 0000000000000000
+RBP: 0000000000158fd3 R08: 0000000000000000 R09: 0000000000000000
+R10: 0000000000000000 R11: ffffffff93129680 R12: 0000000000000000
+R13: ffffffff948aec70 R14: ffffffffffffffc0 R15: 0000000000000282
+FS:  00007f59e9b38700(0000) GS:ffff888062100000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: ffffffffffffffc0 CR3: 000000002d953000 CR4: 00000000003506f0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+----------------
+Code disassembly (best guess), 1 bytes skipped:
+   0:	ff 48 8b             	decl   -0x75(%rax)
+   3:	44 24 18             	rex.R and $0x18,%al
+   6:	44 8b 30             	mov    (%rax),%r14d
+   9:	e9 1c fe ff ff       	jmpq   0xfffffe2a
+   e:	48 8b 44 24 18       	mov    0x18(%rsp),%rax
+  13:	4c 8b 30             	mov    (%rax),%r14
+  16:	80 3d 30 51 ab 16 00 	cmpb   $0x0,0x16ab5130(%rip)        # 0x16ab514d
+  1d:	75 7b                	jne    0x9a
+  1f:	e9 06 fe ff ff       	jmpq   0xfffffe2a
+  24:	48 8b 44 24 18       	mov    0x18(%rsp),%rax
+* 29:	44 0f b7 30          	movzwl (%rax),%r14d <-- trapping instruction
+  2d:	80 3d 19 51 ab 16 00 	cmpb   $0x0,0x16ab5119(%rip)        # 0x16ab514d
+  34:	75 64                	jne    0x9a
+  36:	e9 ef fd ff ff       	jmpq   0xfffffe2a
+  3b:	48                   	rex.W
+  3c:	8b                   	.byte 0x8b
+  3d:	44                   	rex.R
+  3e:	24                   	.byte 0x24
