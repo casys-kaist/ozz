@@ -227,7 +227,10 @@ func (knotter *Knotter) formCommunicationAddr(accesses []interleaving.Access) {
 			// in fact reads a value from another atomic. To handle
 			// the cases, we discasd cases only when both accesses
 			// have the load type.
-			if (acc0.Typ == interleaving.TypeLoad) && (acc1.Typ == interleaving.TypeLoad) {
+			// XXX: It may create many unlikely candidates for
+			// critical communication, slowing fuzzing. Temporarily
+			// discard cases when both are store type.
+			if acc0.Typ == acc1.Typ {
 				continue
 			}
 
