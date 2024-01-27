@@ -393,7 +393,7 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 		proc.fuzzer.m.end()
 		proc.fuzzer.m.start(prev)
 	}()
-	const maxDist = 5
+	const maxDist = 10
 	start := time.Now()
 	log.Logf(0, "pick up threading works at %v", start)
 	for dist := 1; dist < maxDist; dist++ {
