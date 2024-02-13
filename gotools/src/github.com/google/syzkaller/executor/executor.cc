@@ -96,6 +96,7 @@ const int kCPUMask[kMaxCPU] = {
 __attribute__((unused))
 const int kCPUMaskAll = 0xff;
 const int kCoverSize = 256 << 10;
+const int kMemCoverSize = kCoverSize << 3;
 const int kFailStatus = 67;
 
 const int kSSBSwitch = 503;
