@@ -71,7 +71,7 @@ typedef unsigned char uint8;
 // Note: zircon max fd is 256.
 // Some common_OS.h files know about this constant for RLIMIT_NOFILE.
 const int kMaxFd = 250;
-const int kMaxThreads = 4;
+const int kMaxThreads = 2;
 const int kMaxSchedule = 128;
 const int kMaxVector = 32;
 const int kMaxFallbackThreads = 3;
@@ -192,7 +192,7 @@ static uint32* write_output(uint32 v);
 static uint32* write_output_64(uint64 v);
 static void write_completed(uint32 completed);
 static uint32 hash(uint32 a);
-static bool dedup(uint32 sig);
+static bool dedup(uint32 sig, uint32* dedup_table, uint32 dedup_table_size);
 #endif // if SYZ_EXECUTOR_USES_SHMEM
 
 uint64 start_time_ms = 0;
@@ -425,6 +425,11 @@ enum {
 	KCOV_CMP_SIZE8 = 6,
 	KCOV_CMP_SIZE_MASK = 6,
 };
+
+const uint32 dedup_table_size = 8 << 10;
+uint32 dedup_table[dedup_table_size];
+const uint32 memcov_dedup_table_size = 8 << 10;
+uint32 memcov_dedup_table[memcov_dedup_table_size];
 
 struct kcov_comparison_t {
 	// Note: comparisons are always 64-bits regardless of kernel bitness.
@@ -1395,7 +1400,7 @@ void write_code_coverage_signal(cover_t* cov, uint32* signal_count_pos, uint32* 
 			bool ignore = !filter && !prev_filter;
 			prev_pc = pc;
 			prev_filter = filter;
-			if (ignore || dedup(sig))
+			if (ignore || dedup(sig, dedup_table, dedup_table_size))
 				continue;
 			write_output(sig);
 			nsig++;
@@ -1432,7 +1437,8 @@ void write_read_from_coverage_signal(cover_t* cov, uint32* signal_count_pos, uin
 			"signal_count_pos=%p", signal_count_pos);
 
 	uint32 cover_size = cov->size;
-	struct kmemcov_access* cover_data = &((struct kmemcov_access*)cov->data)[1];
+	uint32 count = 0;
+	struct kmemcov_access *acc, *cover_data = &((struct kmemcov_access*)cov->data)[1];
 	for (uint32 i = 0; i < cover_size; i++) {
 		// Truncate all fields into uint32. This is fine for
 		// inst, size, type, and timestamp, but truncating
@@ -1440,13 +1446,17 @@ void write_read_from_coverage_signal(cover_t* cov, uint32* signal_count_pos, uin
 		// memory accesses that did not access the same memory
 		// object, our fuzzer thinks they did access the same
 		// memory object. Well, whatever, this is a fuzzer.
-		write_output(cover_data[i].inst);
-		write_output(cover_data[i].addr);
-		write_output(cover_data[i].size);
-		write_output(cover_data[i].type);
-		write_output(cover_data[i].timestamp);
+		acc = &cover_data[i];
+		if (dedup(acc->inst, memcov_dedup_table, memcov_dedup_table_size))
+			continue;
+		write_output(acc->inst);
+		write_output(acc->addr);
+		write_output(acc->size);
+		write_output(acc->type);
+		write_output(acc->timestamp);
+		count++;
 	}
-	*cover_count_pos = cover_size;
+	*cover_count_pos = count;
 }
 
 template <typename cover_data_t>
@@ -1862,13 +1872,10 @@ static uint32 hash(uint32 a)
 	return a;
 }
 
-const uint32 dedup_table_size = 8 << 10;
-uint32 dedup_table[dedup_table_size];
-
 // Poorman's best-effort hashmap-based deduplication.
 // The hashmap is global which means that we deduplicate across different calls.
 // This is OK because we are interested only in new signals.
-static bool dedup(uint32 sig)
+static bool dedup(uint32 sig, uint32* dedup_table, uint32 dedup_table_size)
 {
 	for (uint32 i = 0; i < 4; i++) {
 		uint32 pos = (sig + i) % dedup_table_size;
