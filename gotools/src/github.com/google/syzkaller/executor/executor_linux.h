@@ -127,7 +127,7 @@ static void cover_open(cover_t* cov, bool extra)
 		failmsg("failed to dup cover fd", "from=%d, to=%d", fd, cov->fd);
 	close(fd);
 	const int cov_init_trace = (cov->type == code_coverage ? (is_kernel_64_bit ? KCOV_INIT_TRACE64 : KCOV_INIT_TRACE32) : KMEMCOV_INIT_TRACE);
-	const int cover_size = (cov->type == code_coverage ? (extra ? kExtraCoverSize : kCoverSize) : kMemCoverSize);
+	const int cover_size = extra ? kExtraCoverSize : kCoverSize;
 	if (ioctl(cov->fd, cov_init_trace, cover_size))
 		failmsg("cover init trace write failed", "fd=%d", cov->fd);
 	uint64 mmap_alloc_scale = (cov->type == code_coverage ? (is_kernel_64_bit ? 8 : 4) : sizeof(struct kmemcov_access));
