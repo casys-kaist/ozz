@@ -1,0 +1,125 @@
+==================================================================
+BUG: KASAN: slab-out-of-bounds in rds_loop_xmit+0x3d3/0x440 home/daeryong/workspace/relrazzer/kernels/linux/net/rds/loop.c:86
+Read of size 4 at addr ffff8881159bf2b4 by task kworker/u8:1/1096
+
+CPU: 1 PID: 1096 Comm: kworker/u8:1 Not tainted 6.8.0-rc1-g3c16635962f2 #2
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
+Workqueue: krdsd rds_send_worker
+Call Trace:
+ <TASK>
+ __dump_stack home/daeryong/workspace/relrazzer/kernels/linux/lib/dump_stack.c:88 [inline]
+ dump_stack_lvl+0x2e6/0x470 home/daeryong/workspace/relrazzer/kernels/linux/lib/dump_stack.c:106
+ print_address_description+0x85/0x390 home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/report.c:377
+ print_report+0x107/0x220 home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/report.c:488
+ kasan_report+0x131/0x160 home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/report.c:601
+ rds_loop_xmit+0x3d3/0x440 home/daeryong/workspace/relrazzer/kernels/linux/net/rds/loop.c:86
+ rds_send_xmit+0x22e6/0x4330 home/daeryong/workspace/relrazzer/kernels/linux/net/rds/send.c:367
+ rds_send_worker+0xe2/0x620 home/daeryong/workspace/relrazzer/kernels/linux/net/rds/threads.c:200
+ process_one_work home/daeryong/workspace/relrazzer/kernels/linux/kernel/workqueue.c:2633 [inline]
+ process_scheduled_works+0x9d0/0x1b50 home/daeryong/workspace/relrazzer/kernels/linux/kernel/workqueue.c:2706
+ worker_thread+0x10e8/0x1ee0 home/daeryong/workspace/relrazzer/kernels/linux/kernel/workqueue.c:2787
+ kthread+0x599/0x7f0 home/daeryong/workspace/relrazzer/kernels/linux/kernel/kthread.c:388
+ ret_from_fork+0x44/0x70 home/daeryong/workspace/relrazzer/kernels/linux/arch/x86/kernel/process.c:147
+ ret_from_fork_asm+0x11/0x20 home/daeryong/workspace/relrazzer/kernels/linux/arch/x86/entry/entry_64.S:242
+ </TASK>
+
+Allocated by task 1096:
+ kasan_save_stack home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/common.c:47 [inline]
+ kasan_save_track+0x3b/0x70 home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/common.c:68
+ poison_kmalloc_redzone home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/common.c:372 [inline]
+ __kasan_kmalloc+0x79/0x90 home/daeryong/workspace/relrazzer/kernels/linux/mm/kasan/common.c:389
+ kasan_kmalloc home/daeryong/workspace/relrazzer/kernels/linux/include/linux/kasan.h:211 [inline]
+ __do_kmalloc_node home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:3981 [inline]
+ __kmalloc+0x21b/0x410 home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:3994
+ kmalloc home/daeryong/workspace/relrazzer/kernels/linux/include/linux/slab.h:594 [inline]
+ kzalloc home/daeryong/workspace/relrazzer/kernels/linux/include/linux/slab.h:711 [inline]
+ rds_message_alloc+0x7e/0x390 home/daeryong/workspace/relrazzer/kernels/linux/net/rds/message.c:291
+ rds_message_map_pages+0x48/0x900 home/daeryong/workspace/relrazzer/kernels/linux/net/rds/message.c:341
+ rds_cong_update_alloc+0x62/0x100 home/daeryong/workspace/relrazzer/kernels/linux/net/rds/cong.c:423
+ rds_send_xmit+0x752/0x4330 home/daeryong/workspace/relrazzer/kernels/linux/net/rds/send.c:220
+ rds_send_worker+0xe2/0x620 home/daeryong/workspace/relrazzer/kernels/linux/net/rds/threads.c:200
+ process_one_work home/daeryong/workspace/relrazzer/kernels/linux/kernel/workqueue.c:2633 [inline]
+ process_scheduled_works+0x9d0/0x1b50 home/daeryong/workspace/relrazzer/kernels/linux/kernel/workqueue.c:2706
+ worker_thread+0x10e8/0x1ee0 home/daeryong/workspace/relrazzer/kernels/linux/kernel/workqueue.c:2787
+ kthread+0x599/0x7f0 home/daeryong/workspace/relrazzer/kernels/linux/kernel/kthread.c:388
+ ret_from_fork+0x44/0x70 home/daeryong/workspace/relrazzer/kernels/linux/arch/x86/kernel/process.c:147
+ ret_from_fork_asm+0x11/0x20 home/daeryong/workspace/relrazzer/kernels/linux/arch/x86/entry/entry_64.S:242
+
+The buggy address belongs to the object at ffff8881159bf000
+ which belongs to the cache kmalloc-1k of size 1024
+The buggy address is located 12 bytes to the right of
+ allocated 680-byte region [ffff8881159bf000, ffff8881159bf2a8)
+
+The buggy address belongs to the physical page:
+page:ffffea0004566e00 refcount:1 mapcount:0 mapping:0000000000000000 index:0x0 pfn:0x1159b8
+head:ffffea0004566e00 order:3 entire_mapcount:0 nr_pages_mapped:0 pincount:0
+flags: 0x57ff00000000840(slab|head|node=1|zone=2|lastcpupid=0x7ff)
+page_type: 0xffffffff()
+raw: 057ff00000000840 ffff88801f842dc0 dead000000000100 dead000000000122
+raw: 0000000000000000 0000000000100010 00000001ffffffff 0000000000000000
+page dumped because: kasan: bad access detected
+page_owner tracks the page as allocated
+page last allocated via order 3, migratetype Unmovable, gfp_mask 0xd2820(GFP_ATOMIC|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_NOMEMALLOC), pid 8151, tgid 8151 (sshd), ts 160408981904, free_ts 160208013509
+ set_page_owner home/daeryong/workspace/relrazzer/kernels/linux/include/linux/page_owner.h:31 [inline]
+ post_alloc_hook+0x2f5/0x320 home/daeryong/workspace/relrazzer/kernels/linux/mm/page_alloc.c:1533
+ prep_new_page home/daeryong/workspace/relrazzer/kernels/linux/mm/page_alloc.c:1540 [inline]
+ get_page_from_freelist+0xd69/0x1360 home/daeryong/workspace/relrazzer/kernels/linux/mm/page_alloc.c:3311
+ __alloc_pages+0x2b6/0x6a0 home/daeryong/workspace/relrazzer/kernels/linux/mm/page_alloc.c:4567
+ __alloc_pages_node home/daeryong/workspace/relrazzer/kernels/linux/include/linux/gfp.h:238 [inline]
+ alloc_pages_node+0x65/0x90 home/daeryong/workspace/relrazzer/kernels/linux/include/linux/gfp.h:261
+ alloc_slab_page home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:2190 [inline]
+ allocate_slab+0x62/0x540 home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:2354
+ new_slab home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:2407 [inline]
+ ___slab_alloc+0x1112/0x1700 home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:3540
+ __slab_alloc home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:3625 [inline]
+ __slab_alloc_node home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:3678 [inline]
+ slab_alloc_node home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:3850 [inline]
+ __do_kmalloc_node home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:3980 [inline]
+ __kmalloc_node_track_caller+0x2a9/0x440 home/daeryong/workspace/relrazzer/kernels/linux/mm/slub.c:4001
+ kmalloc_reserve+0x17e/0x3d0 home/daeryong/workspace/relrazzer/kernels/linux/net/core/skbuff.c:582
+ pskb_expand_head+0x1ed/0x2320 home/daeryong/workspace/relrazzer/kernels/linux/net/core/skbuff.c:2136
+ __skb_pad+0x3ea/0x7d0 home/daeryong/workspace/relrazzer/kernels/linux/net/core/skbuff.c:2409
+ __skb_put_padto home/daeryong/workspace/relrazzer/kernels/linux/include/linux/skbuff.h:3670 [inline]
+ skb_put_padto home/daeryong/workspace/relrazzer/kernels/linux/include/linux/skbuff.h:3689 [inline]
+ eth_skb_pad home/daeryong/workspace/relrazzer/kernels/linux/include/linux/etherdevice.h:619 [inline]
+ e1000_xmit_frame+0x5b92/0x7930 home/daeryong/workspace/relrazzer/kernels/linux/drivers/net/ethernet/intel/e1000/e1000_main.c:3126
+ __netdev_start_xmit home/daeryong/workspace/relrazzer/kernels/linux/include/linux/netdevice.h:4989 [inline]
+ netdev_start_xmit home/daeryong/workspace/relrazzer/kernels/linux/include/linux/netdevice.h:5003 [inline]
+ xmit_one home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:3547 [inline]
+ dev_hard_start_xmit+0x23d/0x690 home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:3563
+ sch_direct_xmit+0x2db/0x780 home/daeryong/workspace/relrazzer/kernels/linux/net/sched/sch_generic.c:342
+ __dev_xmit_skb home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:3776 [inline]
+ __dev_queue_xmit+0x27aa/0x52a0 home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:4317
+ dev_queue_xmit home/daeryong/workspace/relrazzer/kernels/linux/include/linux/netdevice.h:3171 [inline]
+ neigh_hh_output home/daeryong/workspace/relrazzer/kernels/linux/include/net/neighbour.h:526 [inline]
+ neigh_output home/daeryong/workspace/relrazzer/kernels/linux/include/net/neighbour.h:540 [inline]
+ ip_finish_output2+0x144a/0x2e10 home/daeryong/workspace/relrazzer/kernels/linux/net/ipv4/ip_output.c:235
+ __ip_finish_output+0x3fd/0x800
+page last free pid 8151 tgid 8151 stack trace:
+ reset_page_owner home/daeryong/workspace/relrazzer/kernels/linux/include/linux/page_owner.h:24 [inline]
+ free_pages_prepare home/daeryong/workspace/relrazzer/kernels/linux/mm/page_alloc.c:1140 [inline]
+ free_unref_page_prepare+0xaaf/0xb60 home/daeryong/workspace/relrazzer/kernels/linux/mm/page_alloc.c:2346
+ free_unref_page+0x45/0x9b0 home/daeryong/workspace/relrazzer/kernels/linux/mm/page_alloc.c:2486
+ free_the_page home/daeryong/workspace/relrazzer/kernels/linux/mm/page_alloc.c:563 [inline]
+ destroy_large_folio+0x1e7/0x2d0 home/daeryong/workspace/relrazzer/kernels/linux/mm/page_alloc.c:603
+ __folio_put_large+0x12b/0x1a0 home/daeryong/workspace/relrazzer/kernels/linux/mm/swap.c:119
+ __folio_put+0x189/0x190 home/daeryong/workspace/relrazzer/kernels/linux/mm/swap.c:127
+ folio_put home/daeryong/workspace/relrazzer/kernels/linux/include/linux/mm.h:1494 [inline]
+ put_page+0x150/0x3d0 home/daeryong/workspace/relrazzer/kernels/linux/include/linux/mm.h:1563
+ napi_frag_unref home/daeryong/workspace/relrazzer/kernels/linux/include/linux/skbuff.h:3460 [inline]
+ skb_release_data+0x78f/0xd60 home/daeryong/workspace/relrazzer/kernels/linux/net/core/skbuff.c:1022
+ skb_release_all home/daeryong/workspace/relrazzer/kernels/linux/net/core/skbuff.c:1094 [inline]
+ __kfree_skb+0x7c/0x390 home/daeryong/workspace/relrazzer/kernels/linux/net/core/skbuff.c:1108
+ napi_consume_skb+0x15f/0x430 home/daeryong/workspace/relrazzer/kernels/linux/net/core/skbuff.c:1400
+ skb_defer_free_flush home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:6699 [inline]
+ net_rx_action+0x687/0x1d60 home/daeryong/workspace/relrazzer/kernels/linux/net/core/dev.c:6759
+ __do_softirq+0x231/0x6ec home/daeryong/workspace/relrazzer/kernels/linux/kernel/softirq.c:553
+
+Memory state around the buggy address:
+ ffff8881159bf180: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+ ffff8881159bf200: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+>ffff8881159bf280: 00 00 00 00 00 fc fc fc fc fc fc fc fc fc fc fc
+                                     ^
+ ffff8881159bf300: fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc
+ ffff8881159bf380: fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc fc
+==================================================================
