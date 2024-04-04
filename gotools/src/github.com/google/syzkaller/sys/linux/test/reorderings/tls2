@@ -1,0 +1,7 @@
+# BUG: unable to handle kernel NULL pointer dereference in tls_setsockopt
+# threaded [3 4]
+r0 = socket$inet6_tcp(0xa, 0x1, 0x0) 
+setsockopt$inet6_tcp_TCP_REPAIR(r0, 0x6, 0x13, &(0x7f0000000000)=0x1, 0x4) 
+connect$inet6(r0, &(0x7f0000000040)={0xa, 0x0, 0x0, @loopback}, 0x1c) 
+setsockopt$inet6_tcp_TCP_ULP(r0, 0x6, 0x1f, &(0x7f0000000080)='tls\x00', 0x4) 
+setsockopt$inet6_tcp_TCP_MD5SIG(r0, 0x6, 0xe, &(0x7f00000000c0)={@in6={{0xa, 0x0, 0x0, @private1}}, 0x0, 0x0, 0x2e, 0x0, "a792258e7d3fdd3dc387338017688a7d677d49f34bd9fb0cb16397fb238d2389cda899a504c2276e07422848fa8e78e681c6e43b599d86473b33fdf8c5102633d8af0483a06fc28843f129cc79c61782"}, 0xd8)

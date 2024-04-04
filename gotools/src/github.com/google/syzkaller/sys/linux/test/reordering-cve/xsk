@@ -1,0 +1,7 @@
+# commit 37b076933a8e38e72ffd3c40d3eeb5949f38baf3
+# xsk_init_queue <> xsk_mmap
+# threaded [1 2]
+r0 = socket$xdp(0x2c, 0x3, 0x0)
+setsockopt$XDP_UMEM_FILL_RING(r0, 0x11b, 0x5, &(0x7f00000001c0)=0x4000, 0x4)
+mmap$xdp(&(0x7f0000ffc000/0x4000)=nil, 0x4000, 0x0, 0x11, r0, 0x100000000)
+close(r0)

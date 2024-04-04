@@ -1,0 +1,7 @@
+# commit 7ee47dcfff1835ff75a794d1075b6b5f5462cfed
+# threaded [3 4]
+r0 = socket(0x1d, 0x2, 0x6)
+r1 = socket(0x1d, 0x2, 0x6)
+r2 = socket(0x1d, 0x2, 0x6)
+syz_close_range(r1, r0, r2, 0x2)
+fcntl$getflags(r0, 0x1)

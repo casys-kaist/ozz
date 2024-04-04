@@ -1,0 +1,12 @@
+# commit 8a0d57df8938e9fd2e99d47a85b7f37d86f91097
+# tcp_strp.c:23
+# threaded [7 8]
+r0 = socket$inet6_tcp(0xa, 0x1, 0x0)
+r1 = epoll_create(0x20)
+setsockopt$inet6_tcp_int(r0, 0x6, 0x13, &(0x7f0000000040)=0x100000001, 0x76dc)
+connect$inet6(r0, &(0x7f0000000100)={0xa, 0x0, 0x0, @empty}, 0x1c)
+setsockopt$inet6_tcp_TCP_ULP(r0, 0x6, 0x1f, &(0x7f00000002c0)='tls\x00', 0x4)
+setsockopt$inet6_tcp_TCP_REPAIR_QUEUE(r0, 0x6, 0x14, &(0x7f0000000400)=0x1, 0x4)
+write$binfmt_script(r0, &(0x7f0000000000)=ANY=[], 0x61)
+setsockopt$inet6_tcp_TLS_TX(r0, 0x11a, 0x2, &(0x7f00000000c0)=@gcm_256={{0x303, 0x36}, "b1d65ab71f5ef2fe", "9e8ecc7bb5352776725e1047711330ff2bb17b550800", "dc5d3f00", "46b0dc72b7b1d30e"}, 0x38)
+epoll_ctl$EPOLL_CTL_ADD(r1, 0x1, r0, &(0x7f0000000100)={0x10000000})

@@ -631,6 +631,7 @@ func (mgr *Manager) seedDir(typ string) (dir string) {
 		{"test", "test", "loading seeds for testing..."},
 		{"threaded-cve", "threaded-cve", "loading threaded seeds for CVEs..."},
 		{"reorderings", "reorderings", "loading seeds for reordering bugs..."},
+		{"reordering-cve", "reordering-cve", "loading reproducers for prior reordering bugs..."},
 	}
 	for _, o := range options {
 		if o.typ == typ {
