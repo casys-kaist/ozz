@@ -5564,3 +5564,11 @@ static long syz_clone3(volatile long a0, volatile long a1)
 }
 
 #endif
+
+#if SYZ_EXECUTOR || __NR_syz_close_range
+static void syz_close_range(volatile int fd, volatile int start, volatile int end, volatile int flags)
+{
+	close(fd);
+	close_range(start, end, flags);
+}
+#endif
