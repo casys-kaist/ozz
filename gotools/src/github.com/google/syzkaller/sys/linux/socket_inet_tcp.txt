@@ -102,7 +102,7 @@ setsockopt$inet6_tcp_TLS_RX(fd sock_tcp6, level const[IPPROTO_TCP], optname cons
 
 tcp_congestion_control_alg_names = "cubic", "reno", "bic", "cdg", "dctcp", "westwood", "highspeed", "hybla", "htcp", "vegas", "nv", "veno", "scalable", "lp", "yeah", "illinois", "dctcp-reno", "bbr"
 
-tcp_ulp_names = "tls"
+tcp_ulp_names = "tls", "smc", "espintcp", "mptcp"
 
 tcp_repair_window {
 	snd_wl1		int32
