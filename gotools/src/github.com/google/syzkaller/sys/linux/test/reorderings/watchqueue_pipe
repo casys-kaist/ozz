@@ -1,3 +1,5 @@
+# BUG: unable to handle kernel NULL pointer dereference in _find_first_bit
+# threaded [2 4]
 r0 = add_key(&(0x7f0000000200)='cifs.spnego\x00', &(0x7f00000001c0)={'syz', 0x2}, 0x0, 0x0, 0xfffffffffffffffc)
 pipe2$watch_queue(&(0x7f0000001b80)={<r1=>0xffffffffffffffff, <r2=>0xffffffffffffffff}, 0x80)
 ioctl$IOC_WATCH_QUEUE_SET_SIZE(r1, 0x5760, 0x10)
