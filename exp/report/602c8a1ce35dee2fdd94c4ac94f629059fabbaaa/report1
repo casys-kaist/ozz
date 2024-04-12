@@ -1,0 +1,76 @@
+BUG: kernel NULL pointer dereference, address: 00000000000001b0
+kssb_pso: Store buffer entries:
+kssb_pso: 0 entries
+#PF: supervisor read access in kernel mode
+#PF: error_code(0x0000) - not-present page
+PGD 26439067 P4D 26439067 PUD 2c976067 PMD 0 
+Oops: 0000 [#1] PREEMPT SMP KASAN
+CPU: 2 PID: 9592 Comm: syz-executor.0 Not tainted 6.8.0-gbdb6fbd9fba8-dirty #25
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.14.0-0-g155821a1990b-prebuilt.qemu.org 04/01/2014
+RIP: 0010:gsm_dlci_config+0x515/0x17d0 home/won26/relrazzer/kernels/linux/drivers/tty/n_gsm.c:2546
+Code: 48 8b 44 24 18 44 0f b6 30 80 3d dc dd ad 16 00 0f 85 26 01 00 00 e9 3f fe ff ff 48 83 f8 04 0f 85 94 00 00 00 48 8b 44 24 18 <44> 8b 30 80 3d b8 dd ad 16 00 0f 85 02 01 00 00 e9 1b fe ff ff 48
+RSP: 0018:ffffc90007b8fb00 EFLAGS: 00010046
+RAX: 00000000000001b0 RBX: 000000000000140a RCX: 00000000000001b0
+RDX: 0000000000000009 RSI: 0000000000000000 RDI: 0000000000000000
+RBP: 000000000000140a R08: 0000000000000000 R09: 0000000000000000
+R10: 0000000000000000 R11: ffffffff9312a500 R12: 0000000000000000
+R13: ffffffff98749a50 R14: 00000000000001b0 R15: 0000000000000286
+FS:  00007f8eb6296640(0000) GS:ffff888062100000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00000000000001b0 CR3: 000000003fbdd000 CR4: 0000000000750ef0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+PKRU: 55555554
+Call Trace:
+ <TASK>
+ gsm_dlci_config+0x515/0x17d0 home/won26/relrazzer/kernels/linux/drivers/tty/n_gsm.c:2546
+ gsmld_ioctl+0xf2e/0x2920 home/won26/relrazzer/kernels/linux/drivers/tty/n_gsm.c:3826
+ tty_ioctl+0x1622/0x24f0 home/won26/relrazzer/kernels/linux/drivers/tty/tty_io.c:2812
+ vfs_ioctl home/won26/relrazzer/kernels/linux/fs/ioctl.c:51 [inline]
+ __do_sys_ioctl home/won26/relrazzer/kernels/linux/fs/ioctl.c:904 [inline]
+ __se_sys_ioctl+0x174/0x240 home/won26/relrazzer/kernels/linux/fs/ioctl.c:890
+ __x64_sys_ioctl+0xa9/0x110 home/won26/relrazzer/kernels/linux/fs/ioctl.c:890
+ do_syscall_x64 home/won26/relrazzer/kernels/linux/arch/x86/entry/common.c:53 [inline]
+ do_syscall_64+0xfd/0x230 home/won26/relrazzer/kernels/linux/arch/x86/entry/common.c:85
+ entry_SYSCALL_64_after_hwframe+0x62/0x6a
+RIP: 0033:0x472fdd
+Code: c3 e8 17 28 00 00 0f 1f 80 00 00 00 00 f3 0f 1e fa 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 b0 ff ff ff f7 d8 64 89 01 48
+RSP: 002b:00007f8eb6296028 EFLAGS: 00000246 ORIG_RAX: 0000000000000010
+RAX: ffffffffffffffda RBX: 00000000005a1428 RCX: 0000000000472fdd
+RDX: 0000000020000180 RSI: 0000000040384708 RDI: 0000000000000003
+RBP: 00000000f477909a R08: 0000000000000000 R09: 0000000000000000
+R10: 0000000000000000 R11: 0000000000000246 R12: 00000000005a14e0
+R13: 00000000005a1434 R14: 00000000004314d0 R15: 00007f8eb6276000
+ </TASK>
+Modules linked in:
+CR2: 00000000000001b0
+---[ end trace 0000000000000000 ]---
+RIP: 0010:gsm_dlci_config+0x515/0x17d0 home/won26/relrazzer/kernels/linux/drivers/tty/n_gsm.c:2546
+Code: 48 8b 44 24 18 44 0f b6 30 80 3d dc dd ad 16 00 0f 85 26 01 00 00 e9 3f fe ff ff 48 83 f8 04 0f 85 94 00 00 00 48 8b 44 24 18 <44> 8b 30 80 3d b8 dd ad 16 00 0f 85 02 01 00 00 e9 1b fe ff ff 48
+RSP: 0018:ffffc90007b8fb00 EFLAGS: 00010046
+RAX: 00000000000001b0 RBX: 000000000000140a RCX: 00000000000001b0
+RDX: 0000000000000009 RSI: 0000000000000000 RDI: 0000000000000000
+RBP: 000000000000140a R08: 0000000000000000 R09: 0000000000000000
+R10: 0000000000000000 R11: ffffffff9312a500 R12: 0000000000000000
+R13: ffffffff98749a50 R14: 00000000000001b0 R15: 0000000000000286
+FS:  00007f8eb6296640(0000) GS:ffff888062100000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00000000000001b0 CR3: 000000003fbdd000 CR4: 0000000000750ef0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+PKRU: 55555554
+----------------
+Code disassembly (best guess):
+   0:	48 8b 44 24 18       	mov    0x18(%rsp),%rax
+   5:	44 0f b6 30          	movzbl (%rax),%r14d
+   9:	80 3d dc dd ad 16 00 	cmpb   $0x0,0x16addddc(%rip)        # 0x16adddec
+  10:	0f 85 26 01 00 00    	jne    0x13c
+  16:	e9 3f fe ff ff       	jmp    0xfffffe5a
+  1b:	48 83 f8 04          	cmp    $0x4,%rax
+  1f:	0f 85 94 00 00 00    	jne    0xb9
+  25:	48 8b 44 24 18       	mov    0x18(%rsp),%rax
+* 2a:	44 8b 30             	mov    (%rax),%r14d <-- trapping instruction
+  2d:	80 3d b8 dd ad 16 00 	cmpb   $0x0,0x16adddb8(%rip)        # 0x16adddec
+  34:	0f 85 02 01 00 00    	jne    0x13c
+  3a:	e9 1b fe ff ff       	jmp    0xfffffe5a
+  3f:	48                   	rex.W
