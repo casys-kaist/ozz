@@ -227,7 +227,10 @@ func (knotter *Knotter) formCommunicationAddr(accesses []interleaving.Access) {
 			// in fact reads a value from another atomic. To handle
 			// the cases, we discasd cases only when both accesses
 			// have the load type.
-			if (acc0.Typ == interleaving.TypeLoad) && (acc1.Typ == interleaving.TypeLoad) {
+			// XXX: It may create many unlikely candidates for
+			// critical communication, slowing fuzzing. Temporarily
+			// discard cases when both are store type.
+			if acc0.Typ == acc1.Typ {
 				continue
 			}
 
@@ -297,12 +300,19 @@ func (knotter *Knotter) formKnots() {
 	}
 }
 
+const (
+	// Const for debugging. If you want to test missing load barriers
+	// only, set testMissingStoreBarrier to false.
+	testMissingStoreBarrier = true
+	testMissingLoadBarrier  = true
+)
+
 func (knotter *Knotter) canTestMissingStoreBarrier(comm0, comm1 interleaving.Communication) bool {
-	return knotter.inSameChunk(comm0.Former(), comm1.Former(), true)
+	return knotter.inSameChunk(comm0.Former(), comm1.Former(), true) && testMissingStoreBarrier
 }
 
 func (knotter *Knotter) canTestMissingLoadBarrier(comm0, comm1 interleaving.Communication) bool {
-	return knotter.inSameChunk(comm0.Latter(), comm1.Latter(), false)
+	return knotter.inSameChunk(comm0.Latter(), comm1.Latter(), false) && testMissingLoadBarrier
 }
 
 func (knotter *Knotter) inSameChunk(acc0, acc1 interleaving.Access, storeChunk bool) bool {

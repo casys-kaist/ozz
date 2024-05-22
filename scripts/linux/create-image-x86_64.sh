@@ -7,8 +7,8 @@
 set -eux
 
 # Create a minimal Debian distribution in a directory.
-DIR=chroot
-PREINSTALL_PKGS=openssh-server,curl,tar,gcc,libc6-dev,time,strace,sudo,less,psmisc,selinux-utils,policycoreutils,checkpolicy,selinux-policy-default,firmware-atheros,debian-ports-archive-keyring
+DIR=$TMP_DIR/chroot
+PREINSTALL_PKGS=openssh-server,curl,tar,gcc,libc6-dev,time,strace,sudo,less,psmisc,selinux-utils,policycoreutils,checkpolicy,selinux-policy-default,debian-ports-archive-keyring
 
 # If ADD_PACKAGE is not defined as an external environment variable, use our default packages
 if [ -z ${ADD_PACKAGE+x} ]; then
@@ -17,7 +17,7 @@ fi
 
 # Variables affected by options
 ARCH=$(uname -m)
-RELEASE=bullseye
+RELEASE=bookworm
 FEATURE=minimal
 SEEK=2047
 PERF=false

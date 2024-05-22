@@ -152,6 +152,12 @@ retry:
 	if hint.Invalid() {
 		goto retry
 	}
+	switch hint.Typ {
+	case interleaving.TestingStoreBarrier:
+		atomic.AddUint64(&proc.fuzzer.stats[StatTestStoreReordering], 1)
+	case interleaving.TestingLoadBarrier:
+		atomic.AddUint64(&proc.fuzzer.stats[StatTestLoadReordering], 1)
+	}
 	if len(tp.Hint) != 0 {
 		proc.fuzzer.__bookScheduleGuide(tp)
 	} else {
@@ -387,7 +393,7 @@ func (proc *Proc) pickupThreadingWorks(p *prog.Prog, info *ipc.ProgInfo) {
 		proc.fuzzer.m.end()
 		proc.fuzzer.m.start(prev)
 	}()
-	const maxDist = 5
+	const maxDist = 10
 	start := time.Now()
 	log.Logf(0, "pick up threading works at %v", start)
 	for dist := 1; dist < maxDist; dist++ {
