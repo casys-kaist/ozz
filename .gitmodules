@@ -1,6 +1,6 @@
 [submodule "kernels/guest/linux"]
 	path = kernels/linux
-	url = git@dragon.kaist.ac.kr:linux
+	url = git@github.com:casys-kaist/ozz_kernel.git
 [submodule "tools/qemu/roms/seabios"]
 	path = tools/qemu/roms/seabios
 	url = https://gitlab.com/qemu-project/seabios.git/
