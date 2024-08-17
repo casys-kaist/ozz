@@ -21,6 +21,7 @@ RELEASE=bookworm
 FEATURE=minimal
 SEEK=2047
 PERF=false
+KEYRING=
 
 # Display help function
 display_help() {
@@ -32,6 +33,7 @@ display_help() {
     echo "   -s, --seek                 Image size (MB), default 2048 (2G)"
     echo "   -h, --help                 Display help message"
     echo "   -p, --add-perf             Add perf support with this option enabled. Please set envrionment variable \$KERNEL at first"
+    echo "   -k, --keyring              Keyring"
     echo
 }
 
@@ -64,6 +66,10 @@ while true; do
         -p | --add-perf)
 	    PERF=true
             shift 1
+            ;;
+        -k | --keyring)
+	    KEYRING=$2
+            shift 2
             ;;
         -*)
             echo "Error: Unknown option: $1" >&2
@@ -139,7 +145,7 @@ if [ $FOREIGN = "true" ]; then
     DEBOOTSTRAP_PARAMS="--foreign $DEBOOTSTRAP_PARAMS"
 fi
 
-if [ -n $KEYRING ]; then
+if [ -n "$KEYRING" ]; then
 	DEBOOTSTRAP_PARAMS="--keyring $KEYRING $DEBOOTSTRAP_PARAMS"
 fi
 
