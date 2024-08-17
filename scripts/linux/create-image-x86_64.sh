@@ -139,6 +139,10 @@ if [ $FOREIGN = "true" ]; then
     DEBOOTSTRAP_PARAMS="--foreign $DEBOOTSTRAP_PARAMS"
 fi
 
+if [ -n $KEYRING ]; then
+	DEBOOTSTRAP_PARAMS="--keyring $KEYRING $DEBOOTSTRAP_PARAMS"
+fi
+
 # riscv64 is hosted in the debian-ports repository
 # debian-ports doesn't include non-free, so we exclude firmware-atheros
 if [ $DEBARCH == "riscv64" ]; then
