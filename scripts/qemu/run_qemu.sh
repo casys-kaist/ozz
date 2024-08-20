@@ -5,7 +5,7 @@ $SCRIPTS_DIR/linux/__check_suffix.sh "linux"
 
 _UID=$(id -u)
 
-MEMORY=2048
+MEMORY=8192
 PORT=$(echo "5555 + $_UID" | bc -l)
 GDBPORT=$(echo "1234 + $_UID" | bc -l)
 
