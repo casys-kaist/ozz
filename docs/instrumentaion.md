@@ -34,8 +34,3 @@ For atomic operations, we modify the kernel, as KASAN does, such that
 atomic* call the flush callback before performing atomic operations
 (see `f355631dea20e0b50f94091aeaa906e079d33e5f` of the Linux).
 
-## TODO
-
-- Instrumentation before RCU APIs
-- Volatile instructions -- should not be instrumentaion
-- Unaligned instructions
