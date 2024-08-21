@@ -31,7 +31,9 @@ fi
 if [ $ARCH = "x86_64" ]; then
 	QEMU=$QEMU_X86
 	IMAGE="$KERNELS_DIR/guest/images/x86_64/bookworm.img"
-	KERNEL="$KERNELS_DIR/guest/builds/x86_64/arch/x86_64/boot/bzImage"
+	if [ -z $KERNEL ]; then
+		KERNEL="$KERNELS_DIR/guest/builds/x86_64/arch/x86_64/boot/bzImage"
+	fi
 	NETWORK="-netdev user,id=vnet0,hostfwd=tcp::$PORT-:22 \
 		-device virtio-net-pci,netdev=vnet0"
 	KERNELCMD='console=ttyS0 root=/dev/sda crashkernel=512M selinux=0 null_blk.submit_queues=2'
