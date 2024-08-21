@@ -50,8 +50,7 @@ To install toolchains needed by Ozz, we provide scripts to install the
 toolchains.
 
 First, `cd` into the project directory. In the directory, run the
-following command to setup environment variables that are used in the
-artifact evaluation process.
+following command to setup environment variables that are used by Ozz.
 
 ```sh
 source ./scripts/envsetup.sh
