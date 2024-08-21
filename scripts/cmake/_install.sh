@@ -5,7 +5,7 @@
 . $SCRIPTS_DIR/cmake/_envsetup.sh
 
 _download() {
-	REPO="git@github.com:Kitware/CMake.git"
+	REPO="https://github.com/Kitware/CMake.git"
 	__git_clone $REPO $CMAKE_PATH $CMAKE_VERSION
 }
 

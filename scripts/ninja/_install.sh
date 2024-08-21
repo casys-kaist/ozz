@@ -5,7 +5,7 @@
 . "$SCRIPTS_DIR/ninja/_envsetup.sh"
 
 _download() {
-	REPO="git@github.com:ninja-build/ninja.git"
+	REPO="https://github.com/ninja-build/ninja.git"
 	__git_clone "$REPO" "$NINJA_PATH" "$NINJA_VERSION"
 }
 

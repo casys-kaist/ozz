@@ -5,7 +5,7 @@
 . $SCRIPTS_DIR/capstone/_envsetup.sh
 
 _download() {
-	REPO="git@github.com:capstone-engine/capstone.git"
+	REPO="https://github.com/capstone-engine/capstone.git"
 	__git_clone "$REPO" "$CAPSTONE_PATH" "$CAPSTONE_VERSION"
 }
 

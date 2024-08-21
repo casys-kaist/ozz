@@ -5,7 +5,7 @@
 . $SCRIPTS_DIR/dwarves/_envsetup.sh
 
 _download() {
-	REPO="git@github.com:acmel/dwarves.git"
+	REPO="https://github.com/acmel/dwarves.git"
 	__git_clone "$REPO" "$DWARVES_PATH" "$DWARVES_VERSION"
 }
 

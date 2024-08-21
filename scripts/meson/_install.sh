@@ -5,7 +5,7 @@
 . "$SCRIPTS_DIR/meson/_envsetup.sh"
 
 _download() {
-	REPO="git@github.com:mesonbuild/meson.git"
+	REPO="https://github.com/mesonbuild/meson.git"
 	__git_clone "$REPO" "$MESON_PATH" "$MESON_VERSION"
 }
 
