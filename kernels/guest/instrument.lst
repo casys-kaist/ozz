@@ -101309,3 +101309,7 @@ zstd_put_workspace
 zstd_reclaim_timer_fn
 zte_rndis_bind
 zytronic_read_data
+tls_init
+tls_create_ctx
+update_sk_prot
+refcount_set

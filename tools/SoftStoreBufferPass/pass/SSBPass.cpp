@@ -898,6 +898,11 @@ static bool isKmemcovTraceCallback(CallBase *CB) {
          calleeFunctionStartsWith(CB, KMEMCOV_TRACE_STORE);
 }
 
+static bool isKssbHistoryCallback(CallBase *CB) {
+#define KSSB_RECORD_HISTORY "kssb_record_history"
+  return calleeFunctionStartsWith(CB, KSSB_RECORD_HISTORY);
+}
+
 static bool isAnnotatedInlineAsm(CallBase *CB) {
 #define NO_BARRIER_SEMANTIC "no kssb"
   if (CB->isInlineAsm()) {
@@ -960,6 +965,11 @@ bool SoftStoreBuffer::isOutofScopeCall(Instruction *I,
 
   if (isKmemcovTraceCallback(CB)) {
     // Do not call flush callbacks in front of kmemcov callbacks.
+    return false;
+  }
+
+  if (isKssbHistoryCallback(CB)) {
+    // Do not call flush callbacks in front of kssb callbacks.
     return false;
   }
 
