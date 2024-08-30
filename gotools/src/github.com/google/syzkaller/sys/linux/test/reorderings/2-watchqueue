@@ -5,4 +5,3 @@ pipe2$watch_queue(&(0x7f0000001b80)={<r1=>0xffffffffffffffff, <r2=>0xfffffffffff
 ioctl$IOC_WATCH_QUEUE_SET_SIZE(r1, 0x5760, 0x10)
 keyctl$KEYCTL_WATCH_KEY(0x20, r0, r1, 0x0)
 keyctl$set_timeout(0xf, r0, 0xffffffffffffffff)
-read$FUSE(r1, &(0x7f0000001bc0)={0x2020}, 0x2020)

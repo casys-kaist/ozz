@@ -476,7 +476,7 @@ func (p *parser) parseSchedule(prog *Prog) error {
 }
 
 func (p *parser) parseFlushVector(prog *Prog) error {
-	re := regexp.MustCompile(`\[[0-9x{}\s]*\]`)
+	re := regexp.MustCompile(`\[[0-9a-fx{}\s]*\]`)
 	for _, comment := range prog.Comments {
 		const str = "flush vector:"
 		if strings.HasPrefix(comment, str) {
@@ -501,7 +501,7 @@ func (p *parser) parseFlushVector(prog *Prog) error {
 }
 
 func (p *parser) parseFlushTable(prog *Prog, rawTable []byte) error {
-	re := regexp.MustCompile(`{[0-9x\s]*}`)
+	re := regexp.MustCompile(`{[0-9a-fx\s]*}`)
 	entries := re.FindAll(rawTable, -1)
 	for _, entry := range entries {
 		// trim {,}
@@ -518,7 +518,7 @@ func (p *parser) parseFlushTable(prog *Prog, rawTable []byte) error {
 		if err != nil {
 			return fmt.Errorf("failed to parse a number: %v", entry)
 		}
-		prog.AddTableEntry(addr, int(val))
+		prog.FlushVector.AddTableEntry(addr, int(val))
 	}
 	return nil
 }
@@ -531,7 +531,7 @@ func (p *parser) parseFlushVectorVector(prog *Prog, rawVector []byte) error {
 		if err != nil {
 			return fmt.Errorf("failed to parse a number: %v", rawVector)
 		}
-		prog.AddVectorEntry(uint32(v))
+		prog.FlushVector.AddVectorEntry(uint32(v))
 	}
 	return nil
 }

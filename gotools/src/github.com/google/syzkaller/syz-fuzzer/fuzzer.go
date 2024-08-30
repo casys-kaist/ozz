@@ -704,10 +704,16 @@ func (fuzzer *Fuzzer) addCandidateInput(candidate rpctype.Candidate) {
 	if candidate.Smashed {
 		flags |= ProgSmashed
 	}
-	fuzzer.workQueue.enqueue(&WorkCandidate{
-		p:     p,
-		flags: flags,
+	if p.Threaded {
+		fuzzer.workQueue.enqueue(&WorkThreading{
+			p:     p,
 	})
+	} else {
+		fuzzer.workQueue.enqueue(&WorkCandidate{
+			p:     p,
+			flags: flags,
+		})
+	}
 	fuzzer.collectionWorkqueue(fuzzer.workQueue.stats())
 }
 
