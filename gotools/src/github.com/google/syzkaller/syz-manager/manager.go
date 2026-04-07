@@ -296,12 +296,14 @@ func RunManager(cfg *mgrconfig.Config) {
 			maxInterleaving := mgr.stats.maxInterleaving.get()
 			blacklist := mgr.stats.instBlacklist.get()
 			maxSignal := mgr.stats.maxSignal.get()
+			addedHints := mgr.stats.addedHints.get()
+			skippedHints := mgr.stats.skippedHints.get()
 			mgr.mu.Unlock()
 			numReproducing := atomic.LoadUint32(&mgr.numReproducing)
 			numFuzzing := atomic.LoadUint32(&mgr.numFuzzing)
 
-			log.Logf(0, "VMs %v, executed %v, cover %v, signal %v/%v, interleaving %v/%v, blacklist %v, crashes %v, repro %v",
-				numFuzzing, executed, corpusCover, corpusSignal, maxSignal, corpusInterleaving, maxInterleaving, blacklist, crashes, numReproducing)
+			log.Logf(0, "VMs %v, executed %v, cover %v, signal %v/%v, interleaving %v/%v, hint %v/%v, blacklist %v, crashes %v, repro %v",
+				numFuzzing, executed, corpusCover, corpusSignal, maxSignal, corpusInterleaving, maxInterleaving, addedHints - skippedHints, addedHints, blacklist, crashes, numReproducing)
 		}
 	}()
 

@@ -166,6 +166,7 @@ const (
 	StatDurationTotal
 	StatTestStoreReordering
 	StatTestLoadReordering
+	StatHintSkipped
 	StatCount
 )
 
@@ -195,6 +196,7 @@ var statNames = [StatCount]string{
 	StatDurationTotal:       "duration total",
 	StatTestStoreReordering: "store reordering",
 	StatTestLoadReordering:  "load reordering",
+	StatHintSkipped:         "skipped hints",
 }
 
 type OutputType int
@@ -944,10 +946,18 @@ func (fuzzer *Fuzzer) getNewHints(hints []interleaving.Hint) []interleaving.Hint
 	for i, total = 0, len(hints); i < total; i++ {
 		hint := hints[i]
 		sign := hint.Coverage()
-		if (!fuzzer.testLoadReordering && hint.Typ == interleaving.TestingLoadBarrier) || !fuzzer.checkNewInterleavingSignal(sign) {
+		if (!fuzzer.testLoadReordering && hint.Typ == interleaving.TestingLoadBarrier) {
 			total--
 			hints[i] = hints[total]
 			i--
+		} else {
+			atomic.AddUint64(&fuzzer.stats[StatHint], 1)
+			if !fuzzer.checkNewInterleavingSignal(sign) {
+				atomic.AddUint64(&fuzzer.stats[StatHintSkipped], 1)
+				total--
+				hints[i] = hints[total]
+				i--
+			}
 		}
 	}
 	hints = hints[:total]

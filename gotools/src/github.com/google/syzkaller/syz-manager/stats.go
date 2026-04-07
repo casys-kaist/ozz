@@ -36,6 +36,8 @@ type Stats struct {
 	maxSignal           Stat
 	maxInterleaving     Stat
 	instBlacklist       Stat
+	addedHints		    Stat
+	skippedHints		Stat
 
 	mu         sync.Mutex
 	namedStats map[string]uint64
@@ -81,6 +83,8 @@ func (stats *Stats) all() map[string]uint64 {
 		"max signal":            stats.maxSignal.get(),
 		"max interleaving":      stats.maxInterleaving.get(),
 		"instruction blacklist": stats.instBlacklist.get(),
+		"exec hints":			 stats.addedHints.get(),
+		"skipped hints":		 stats.skippedHints.get(),
 	}
 	if stats.haveHub {
 		m["hub: send prog add"] = stats.hubSendProgAdd.get()
@@ -109,6 +113,10 @@ func (stats *Stats) mergeNamed(named map[string]uint64) {
 		switch k {
 		case "exec total":
 			stats.execTotal.add(int(v))
+		case "exec hints":
+			stats.addedHints.add(int(v))
+		case "skipped hints":
+			stats.skippedHints.add(int(v))
 		default:
 			stats.namedStats[k] += v
 		}
